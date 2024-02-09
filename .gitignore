@@ -1,3 +1,16 @@
+# Mac OS-specific storage files
+.DS_Store
+
+# vim
+*.swp
+*.swo
+
+# VS Code
+.vscode/
+
+# exclude data from source control by default
+/data/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
