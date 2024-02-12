@@ -31,6 +31,7 @@ FILE_SORRMv21 = 'Regridded_SORRMv2.1.ISMF.FULL.nc'
 FILE_iceShelvesShape = 'iceShelves.geojson'
 
 # Ocean model output
+# Should this be hard-coded here? Or should it be passed as an argument? (default values being as below)
 yr1 = 300
 yr2 = 900
 SORRMv21 = xr.open_dataset(main_dir.parent / 'aislens_emulation/' / DIR_external / 'SORRMv2.1.ISMF/regridded_output/' / FILE_SORRMv21, chunks={"Time":36})
