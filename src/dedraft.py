@@ -61,7 +61,7 @@ iceShelfRegions = range(33,133)
 
 for i in iceShelfRegions:
     print('extracting data for catchment {}'.format(icems.name.values[i]))
-    mlt = SORRMv21_DETREND_DESEASONALIZE_FLUX.__xarray_dataarray_variable__.rio.clip(icems.loc[[i],'geometry'].apply(mapping),icems.crs,drop=False)
+    mlt = SORRMv21_DETREND_DESEASONALIZE_FLUX.rio.clip(icems.loc[[i],'geometry'].apply(mapping),icems.crs,drop=False)
     # mlt = MELTDRAFT_OBS.melt.rio.clip(icems.loc[[i],'geometry'].apply(mapping),icems.crs,drop=False)
     mlt_mean = mlt.mean(tdim)
     # Dedraft: Linear Regression with SSH over chosen basin
