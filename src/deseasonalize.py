@@ -8,10 +8,6 @@ from pathlib import Path
 import cartopy.crs as ccrs
 import cartopy
 import matplotlib.pyplot as plt
-import seaborn as sns
-from matplotlib import rcParams, cycler
-from matplotlib.gridspec import GridSpec
-from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 import geopandas as gpd
 
 import numpy as np
@@ -49,4 +45,3 @@ SORRMv21_DETREND_FLUX_CLM = SORRMv21_DETREND_FLUX_MONTH.mean("Time") # Climatolo
 SORRMv21_DETREND_FLUX_ANM = SORRMv21_DETREND_FLUX_MONTH - SORRMv21_DETREND_FLUX_CLM # Deseasonalized anomalies
 
 SORRMv21_DETREND_FLUX_ANM.to_netcdf(main_dir / DIR_interim / 'SORRMv21_{}-{}_DETREND_DESEASONALIZE.nc'.format(yr1,yr2))
-
