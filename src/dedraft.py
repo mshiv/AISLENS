@@ -33,7 +33,7 @@ FILE_SORRMv21 = 'Regridded_SORRMv2.1.ISMF.FULL.nc'
 yr1 = 300
 yr2 = 900
 
-FILE_SORRMv21_DETREND_DESEASONALIZE =  'SORRMv21_yr1-yr2_DETREND_DESEASONALIZE.nc'.format(yr1,yr2)
+FILE_SORRMv21_DETREND_DESEASONALIZE =  'SORRMv21_{}-{}_DETREND_DESEASONALIZE.nc'.format(yr1,yr2)
 FILE_iceShelvesShape = 'iceShelves.geojson'
 
 SORRMv21 = xr.open_dataset(main_dir.parent / 'aislens_emulation/' / DIR_external / 'SORRMv2.1.ISMF/regridded_output/' / FILE_SORRMv21, chunks={"Time":36})
