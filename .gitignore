@@ -11,6 +11,10 @@
 # exclude data from source control by default
 /data/
 
+# exclude interim and exploratory figures from source control by default
+/reports/figures/interim/
+/reports/figures/raw/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
