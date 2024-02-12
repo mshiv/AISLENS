@@ -16,7 +16,6 @@ import geopandas as gpd
 
 import numpy as np
 import xarray as xr
-from xeofs.xarray import EOF
 import rioxarray
 
 import dask
@@ -28,23 +27,26 @@ import cftime
 from shapely.geometry import mapping
 from xarrayutils.utils import linear_trend, xr_linregress
 import pandas as pd
-import cmocean
 
+# Main directory path of project repository - all filepaths are relative to this
 main_dir = Path.cwd().parent
-DIR_basalMeltObs = 'data/external/Paolo2023/'
-FILE_MeltDraftObs = 'ANT_G1920V01_IceShelfMeltDraft.nc'
+DIR_external = 'data/external/'
+DIR_interim = 'data/interim/'
 
-MELTDRAFT_OBS = xr.open_dataset(main_dir / DIR_basalMeltObs / FILE_MeltDraftObs, chunks={"x":729, "y":729})
-obs23_melt = MELTDRAFT_OBS.melt
-obs23_draft = MELTDRAFT_OBS.draft
+FILE_SORRMv21 = 'Regridded_SORRMv2.1.ISMF.FULL.nc'
 
-# Time series of spatial mean melt
-obs23_melt_ts = obs23_melt.mean(dim=['x', 'y'])
+yr1 = 300
+yr2 = 900
+
+FILE_SORRMv21_DETREND = 'SORRMv21_{}-{}_DETREND.nc'.format(yr1,yr2)
+
+SORRMv21_DETREND = xr.open_dataset(main_dir / DIR_interim / FILE_SORRMv21_DETREND, chunks={"Time":36})
+SORRMv21_DETREND_FLUX = SORRMv21_DETREND.__xarray_dataarray_variable__
 
 # Deseasonalize: Remove climatologies to isolate anomalies / deseasonalize
-obs23_melt_month = obs23_melt.groupby("time.month")
-obs23_melt_clm = obs23_melt_month.mean("time") # Climatologies
-obs23_melt_anm = obs23_melt_month - obs23_melt_clm # Deseasonalized anomalies
+SORRMv21_DETREND_FLUX_MONTH = SORRMv21_DETREND_FLUX.groupby("Time.month")
+SORRMv21_DETREND_FLUX_CLM = SORRMv21_DETREND_FLUX_MONTH.mean("Time") # Climatologies
+SORRMv21_DETREND_FLUX_ANM = SORRMv21_DETREND_FLUX_MONTH - SORRMv21_DETREND_FLUX_CLM # Deseasonalized anomalies
 
-obs23_melt_anm.to_netcdf(main_dir / 'data/processed/obs23_melt_anm.nc')
+SORRMv21_DETREND_FLUX_ANM.to_netcdf(main_dir / DIR_interim / 'SORRMv21_{}-{}_DETREND_DESEASONALIZE.nc'.format(yr1,yr2))
 
