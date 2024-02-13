@@ -67,9 +67,12 @@ for i in iceShelfRegions:
     # Dedraft: Linear Regression with SSH over chosen basin
     print('calculating linear regression for catchment {}'.format(icems.name.values[i]))
     mlt_rgrs = xr_linregress(SORRMv21_DRAFT, mlt_mean, dim=tdim) # h = independent variable
+    # Save the parameters/co-efficients of the linear regression function for each ice shelf as a NETCDF file
     mlt_rgrs.to_netcdf(main_dir / DIR_interim / 'dedraft/iceShelfRegions/{}_DEDRAFT_PARAMS.nc'.format(icems.name.values[i]))
     mlt_prd = mlt_rgrs.slope*SORRMv21_DRAFT_TMEAN + mlt_rgrs.intercept
     # flx_ddrft = flx - flx_prd
+    # Save the linear regression function fit of the melt flux over each ice shelf as a NETCDF file
+    # The dedrafted melt flux is calculated as the difference between the actual melt flux and the predicted melt flux, done in the next merge_dedraft_data.py step.
     mlt_prd.to_netcdf(main_dir / DIR_interim / 'dedraft/iceShelfRegions/{}_DEDRAFT_REGRESS.nc'.format(icems.name.values[i]))
     print('{} file saved'.format(icems.name.values[i]))
     del mlt, mlt_mean, mlt_rgrs, mlt_prd
