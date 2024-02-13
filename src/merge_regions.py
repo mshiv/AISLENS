@@ -73,4 +73,4 @@ for i in iceShelfRegions:
     iceshelves_rgrs = xr.merge([iceshelves_rgrs, iceshelves_rgrs_catchment], compat='no_conflicts')
 
 
-iceshelves_rgrs.to_netcdf(main_dir / DIR_interim / "dedraft/SORRMv21_DRAFT_DEPENDENCE_FIT.nc")
+iceshelves_rgrs.to_netcdf(main_dir / DIR_interim / "dedraft/SORRMv21_DRAFT_DEPENDENCE_FIT_iceShelfRegions.nc")
