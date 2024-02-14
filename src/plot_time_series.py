@@ -19,6 +19,7 @@ os.environ['USE_PYGEOS'] = '0'
 import gc
 import collections
 from pathlib import Path
+from optparse import OptionParser
 
 import cartopy.crs as ccrs
 import cartopy
@@ -29,6 +30,11 @@ import xarray as xr
 import pandas as pd
 import geopandas as gpd
 import rioxarray
+import scipy
+from scipy import signal
+import cftime
+from shapely.geometry import mapping
+from xarrayutils.utils import linear_trend, xr_linregress
 
 import dask
 import distributed
@@ -69,9 +75,9 @@ def time_series(data, domain):
 
 def plot_data(fname, region):
     print("Reading and plotting file: {}".format(fname))
-    ds = xr.open_dataset(fname) # Dataset
-    # da = ds.__xarray_dataarray_variable__ # Data Array
-    da = ds.timeMonthly_avg_landIceFreshwaterFlux
+    ds = xr.open_dataset(fname, chunks={"Time":36}) # Dataset
+    da = ds.__xarray_dataarray_variable__ # Data Array
+    #da = ds.timeMonthly_avg_landIceFreshwaterFlux
     da_ts = time_series(da, region) 
 
     fig, axs = plt.subplots(1, 2, figsize=(25, 8), gridspec_kw={'width_ratios': [1, 3]})
@@ -80,24 +86,27 @@ def plot_data(fname, region):
     axs[0].set_xscale('log')
     axs[0].set_title('PSD of Spatially Averaged Basal Freshwater Flux')
 
-    da_ts.plot(ax=axs[1], label='fname')
+    da_ts.plot(ax=axs[1], label=fname)
     axs[1].set_xlabel('Time (years)')
     axs[1].set_title('Spatially Averaged Basal Freshwater Flux')
 
-    plt.legend()
-    fig.suptitle('Time Series and Power Spectral Density of Basal Freshwater Flux for {}'.format(region))
+    plt.legend(loc='lower center', bbox_to_anchor=(0.5, 0.1)) 
+    #TODO: Update legend placement to outside axes, remove filepath from legend
+    fig.suptitle('Time Series and Power Spectral Density of Basal Freshwater Flux for {}'.format(icems.name.values[region]))
 
-plot_data(options.file1inName, regionName)
+region = int(options.regionName)
+
+plot_data(options.file1inName, region)
 
 if(options.file2inName):
-   plotStat(options.file2inName, regionName)
+   plot_data(options.file2inName, region)
 
 if(options.file3inName):
-   plotStat(options.file3inName, regionName)
+   plot_data(options.file3inName, region)
 
 if(options.file4inName):
-   plotStat(options.file4inName, regionName)
+   plot_data(options.file4inName, region)
 
 print("Generating plot.")
-fig.tight_layout()
+# fig.tight_layout()
 plt.show()
