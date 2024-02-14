@@ -24,7 +24,7 @@ from optparse import OptionParser
 import cartopy.crs as ccrs
 import cartopy
 import matplotlib.pyplot as plt
-import seaborn as sns
+# import seaborn as sns
 
 import xarray as xr
 import pandas as pd
