@@ -35,6 +35,12 @@ from xarrayutils.utils import linear_trend, xr_linregress
 import dask
 import distributed
 
+
+# Main directory path of project repository - all filepaths are relative to this
+main_dir = Path.cwd().parent
+DIR_external = 'data/external/'
+DIR_interim = 'data/interim/'
+
 parser = OptionParser(description=__doc__)
 parser.add_option("-f", dest="fileInName", help="input filename", default="SORRMv21.ISMF.FULL.nc", metavar="FILENAME")
 options, args = parser.parse_args()
@@ -46,4 +52,4 @@ da = ds.__xarray_dataarray_variable__ # Data Array
 
 da_resample = da.coarsen(Time=12).mean()
 
-da_resample.to_netcdf('{}_RESAMPLE.nc'.format(p.stem))
+da_resample.to_netcdf(main_dir / DIR_interim / '{}_RESAMPLE.nc'.format(p.stem))
