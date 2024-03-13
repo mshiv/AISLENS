@@ -11,6 +11,9 @@
 # exclude data from source control by default
 /data/
 
+# exclude scratch space notebooks
+/notebooks/SCRATCH.ipynb
+
 # exclude interim and exploratory figures from source control by default
 /reports/figures/interim/
 /reports/figures/raw/
