@@ -65,7 +65,7 @@ IMBIEregions = range(6,33)
 iceShelfRegions = range(33,133)
 
 for i in iceShelfRegions:
-    iceshelves_rgrs_catchment = xr.open_dataset(main_dir / DIR_interim /'dedraft/iceShelfRegions/{}_DEDRAFT_REGRESS.nc'.format(icems.name.values[i]))
+    iceshelves_rgrs_catchment = xr.open_dataset(main_dir / DIR_interim /'dedraft/iceShelfRegions/{}_DEDRAFT_PARAMS.nc'.format(icems.name.values[i]))
     # Commented out the below to remain consistent with prior interim data generation steps. 
     # Use default xarray variable name throughout for now.
     #iceshelves_rgrs_catchment['melt'] = iceshelves_rgrs_catchment['__xarray_dataarray_variable__']
@@ -73,4 +73,4 @@ for i in iceShelfRegions:
     iceshelves_rgrs = xr.merge([iceshelves_rgrs, iceshelves_rgrs_catchment], compat='no_conflicts')
 
 
-iceshelves_rgrs.to_netcdf(main_dir / DIR_interim / "dedraft/SORRMv21_DRAFT_DEPENDENCE_FIT_iceShelfRegions.nc")
+iceshelves_rgrs.to_netcdf(main_dir / DIR_interim / "dedraft/SORRMv21_DRAFT_DEPENDENCE_COEFFICIENTS_iceShelfRegions.nc")
