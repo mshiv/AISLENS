@@ -41,10 +41,12 @@ def plotStat(fname, variable):
 
     f = xr.open_dataset(fname)
     var = f[variable]
-    time = f.Time.values
 
-    plt.plot(time, var, label=name)
-    plt.xlabel('Time')
+    yr = f['daysSinceStart'][:]/365.0
+    yr = yr-yr[0]
+
+    plt.plot(yr, var, label=name)
+    plt.xlabel('Model Simulation Time (Years)')
     plt.ylabel(variable)
 
 plotStat(options.file1inName, options.variable)
