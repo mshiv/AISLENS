@@ -42,7 +42,7 @@ def plotStat(fname, variable):
     f = xr.open_dataset(fname)
     var = f[variable]
 
-    yr = f['daysSinceStart'][:]/365.0
+    yr = f['daysSinceStart']/365.0
     yr = yr-yr[0]
 
     plt.plot(yr, var, label=name)
