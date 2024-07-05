@@ -40,7 +40,7 @@ def plotStat(fname, variable):
     name = fname
 
     f = xr.open_dataset(fname)
-    var = f.variable()
+    var = f[variable]
     time = f.Time.values
 
     plt.plot(time, var, label=name)
