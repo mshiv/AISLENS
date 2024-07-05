@@ -18,7 +18,7 @@ from optparse import OptionParser
 import matplotlib.pyplot as plt
 # import seaborn as sns
 
-import xarray as xr
+from netCDF4 import Dataset
 import pandas as pd
 import scipy
 from scipy import signal
@@ -39,10 +39,10 @@ def plotStat(fname, variable):
 
     name = fname
 
-    f = xr.open_dataset(fname)
-    var = f[variable]
+    f = Dataset(fname, 'r')
+    var = f.variables[variable]
 
-    yr = f['daysSinceStart']/365.0
+    yr = f.variables['daysSinceStart'][:]/365.0
     yr = yr-yr[0]
 
     plt.plot(yr, var, label=name)
