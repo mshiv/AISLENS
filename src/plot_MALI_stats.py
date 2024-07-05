@@ -60,5 +60,5 @@ if options.file4inName:
 
 plt.legend()
 print("Generating plot")
-fig.tight_layout()
+plt.tight_layout()
 plt.show()
