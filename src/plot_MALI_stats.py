@@ -27,6 +27,8 @@ import cftime
 
 parser = OptionParser(description=__doc__)
 parser.add_option("-v", dest="variable", help="input variable to plot", default="totalFloatingBasalMassBal")
+parser.add_option("-tStart", dest="timeLevelStart", help="first time level to plot", default=0)
+parser.add_option("-tEnd", dest="timeLevelEnd", help="last time level to plot", default=1000)
 parser.add_option("-1", dest="file1inName", help="input filename", default="globalStats.nc", metavar="FILENAME")
 parser.add_option("-2", dest="file2inName", help="input filename", metavar="FILENAME")
 parser.add_option("-3", dest="file3inName", help="input filename", metavar="FILENAME")
@@ -35,14 +37,14 @@ options, args = parser.parse_args()
 
 plt.figure(figsize=(25,8))
 
-def plotStat(fname, variable):
+def plotStat(fname, variable, timeLevelStart, timeLevelEnd):
     print("Reading and plotting file: {}".format(fname))
 
     name = fname
     f = xr.open_dataset(fname)
 
     # f = Dataset(fname, 'r')
-    var = f[variable]
+    var = f[variable][timeLevelStart:timeLevelEnd]
 
     #yr = f.variables['daysSinceStart'][:]/365.0
     #yr = yr-yr[0]
