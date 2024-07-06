@@ -18,6 +18,7 @@ from optparse import OptionParser
 import matplotlib.pyplot as plt
 # import seaborn as sns
 
+import xarray as xr
 from netCDF4 import Dataset
 import pandas as pd
 import scipy
