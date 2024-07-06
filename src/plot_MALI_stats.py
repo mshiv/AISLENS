@@ -50,7 +50,7 @@ def plotStat(fname, variable, timeLevelStart, timeLevelEnd):
     #yr = yr-yr[0]
 
     var.plot(label=name)
-    plt.xlabel('Model Simulation Time (Years)')
+    plt.xlabel('Model Simulation Time Level')
     plt.ylabel(variable)
 
 plotStat(options.file1inName, options.variable, options.timeLevelStart, options.timeLevelEnd)
