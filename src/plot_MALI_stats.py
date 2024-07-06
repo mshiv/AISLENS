@@ -53,16 +53,16 @@ def plotStat(fname, variable, timeLevelStart, timeLevelEnd):
     plt.xlabel('Model Simulation Time (Years)')
     plt.ylabel(variable)
 
-plotStat(options.file1inName, options.variable)
+plotStat(options.file1inName, options.variable, options.timeLevelStart, options.timeLevelEnd)
 
 if options.file2inName:
-    plotStat(options.file2inName, options.variable)
+    plotStat(options.file2inName, options.variable, options.timeLevelStart, options.timeLevelEnd)
 
 if options.file3inName:
-    plotStat(options.file3inName, options.variable)
+    plotStat(options.file3inName, options.variable, options.timeLevelStart, options.timeLevelEnd)
 
 if options.file4inName:
-    plotStat(options.file4inName, options.variable)
+    plotStat(options.file4inName, options.variable, options.timeLevelStart, options.timeLevelEnd)
 
 plt.legend()
 print("Generating plot")
