@@ -42,10 +42,10 @@ def plotStat(fname, variable):
     f = Dataset(fname, 'r')
     var = f.variables[variable]
 
-    yr = f.variables['daysSinceStart'][:]/365.0
-    yr = yr-yr[0]
+    #yr = f.variables['daysSinceStart'][:]/365.0
+    #yr = yr-yr[0]
 
-    plt.plot(yr, var, label=name)
+    plt.plot(var, label=name)
     plt.xlabel('Model Simulation Time (Years)')
     plt.ylabel(variable)
 
