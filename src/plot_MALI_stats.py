@@ -38,14 +38,15 @@ def plotStat(fname, variable):
     print("Reading and plotting file: {}".format(fname))
 
     name = fname
+    f = xr.open_dataset(fname)
 
-    f = Dataset(fname, 'r')
-    var = f.variables[variable]
+    # f = Dataset(fname, 'r')
+    var = f[variable]
 
     #yr = f.variables['daysSinceStart'][:]/365.0
     #yr = yr-yr[0]
 
-    plt.plot(var, label=name)
+    var.plot(label=name)
     plt.xlabel('Model Simulation Time (Years)')
     plt.ylabel(variable)
 
