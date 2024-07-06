@@ -27,8 +27,8 @@ import cftime
 
 parser = OptionParser(description=__doc__)
 parser.add_option("-v", dest="variable", help="input variable to plot", default="totalFloatingBasalMassBal")
-parser.add_option("-tStart", dest="timeLevelStart", help="first time level to plot", default=0)
-parser.add_option("-tEnd", dest="timeLevelEnd", help="last time level to plot", default=1000)
+parser.add_option("--tStart", dest="timeLevelStart", help="first time level to plot", default=0)
+parser.add_option("--tEnd", dest="timeLevelEnd", help="last time level to plot", default=1000)
 parser.add_option("-1", dest="file1inName", help="input filename", default="globalStats.nc", metavar="FILENAME")
 parser.add_option("-2", dest="file2inName", help="input filename", metavar="FILENAME")
 parser.add_option("-3", dest="file3inName", help="input filename", metavar="FILENAME")
