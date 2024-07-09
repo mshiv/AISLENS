@@ -59,7 +59,7 @@ icv_vmax = np.nanquantile(varSORRM_extrapl.timeMonthly_avg_landIceFreshwaterFlux
 
 sns.set_theme(style="whitegrid")
 
-for t in range(len(varSORRM.time)):
+for t in range(len(varSORRM_extrapl.time)):
     plt.clf()
     plt.figure(figsize=(15,15))
     ax1 = plt.subplot(111,projection=ccrs.SouthPolarStereo())
@@ -72,4 +72,5 @@ for t in range(len(varSORRM.time)):
     ax1.coastlines(lw=0.2)
     varSORRM_extrapl.timeMonthly_avg_landIceFreshwaterFlux[t].plot(ax=ax1, cmap="RdBu_r", vmin=icv_vmin, vmax=icv_vmax, add_colorbar=True)
     plt.savefig(main_dir / DIR_processed / 'figures/SORRMv21_variability_extrapl/SORRMv21_variability_extrapl_{:04d}.png'.format(t), dpi=300)
+    print("saved fig {}".format(t))
     plt.close()
