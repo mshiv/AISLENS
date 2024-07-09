@@ -71,5 +71,5 @@ for t in range(len(varSORRM.time)):
     ax1.add_feature(cartopy.feature.LAND, color='ghostwhite', zorder=1)
     ax1.coastlines(lw=0.2)
     varSORRM_extrapl.timeMonthly_avg_landIceFreshwaterFlux[t].plot(ax=ax1, cmap="RdBu_r", vmin=icv_vmin, vmax=icv_vmax, add_colorbar=True)
-    plt.savefig('ICV_300y_NNextrapl_t-{:04d}.png'.format(t), dpi=300)
+    plt.savefig(main_dir / DIR_processed / 'figures/SORRMv21_variability_extrapl/SORRMv21_variability_extrapl_{:04d}.png'.format(t), dpi=300)
     plt.close()
