@@ -1,2 +1,1 @@
-# AISLENS
-Antarctic Ice Sheet Large Ensemble
+# The Antarctic Ice Sheet Large Ensemble (AISLENS)
