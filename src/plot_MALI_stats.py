@@ -51,7 +51,8 @@ def plotStat(fname, variable, timeLevelStart, timeLevelEnd):
     # f = Dataset(fname, 'r')
     var = f[variable][timeLevelStart:timeLevelEnd]/scaleVol
 
-    yr = f.variables['daysSinceStart'][:]/365.0
+    #yr = f.variables['daysSinceStart'][:]/365.0
+    yr = f['daysSinceStart'][timeLevelStart:timeLevelEnd]/365.0
     yr = yr-yr[0]
 
     #var.plot(label=name)
