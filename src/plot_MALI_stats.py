@@ -25,6 +25,9 @@ import scipy
 from scipy import signal
 import cftime
 
+rhoi = 910.0
+rhosw = 1028.
+
 parser = OptionParser(description=__doc__)
 parser.add_option("-v", dest="variable", help="input variable to plot", default="totalFloatingBasalMassBal")
 parser.add_option("--tStart", dest="timeLevelStart", help="first time level to plot", default=0, type=int)
@@ -37,6 +40,8 @@ options, args = parser.parse_args()
 
 plt.figure(figsize=(25,8))
 
+scaleVol = 1.0e12 / rhoi
+
 def plotStat(fname, variable, timeLevelStart, timeLevelEnd):
     print("Reading and plotting file: {}".format(fname))
 
@@ -44,12 +49,13 @@ def plotStat(fname, variable, timeLevelStart, timeLevelEnd):
     f = xr.open_dataset(fname)
 
     # f = Dataset(fname, 'r')
-    var = f[variable][timeLevelStart:timeLevelEnd]
+    var = f[variable][timeLevelStart:timeLevelEnd]/scaleVol
 
-    #yr = f.variables['daysSinceStart'][:]/365.0
-    #yr = yr-yr[0]
+    yr = f.variables['daysSinceStart'][:]/365.0
+    yr = yr-yr[0]
 
-    var.plot(label=name)
+    #var.plot(label=name)
+    plt.plot(yr, var, label=name)
     plt.xlabel('Model Simulation Time Level')
     plt.ylabel(variable)
 
