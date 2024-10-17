@@ -11,37 +11,19 @@ import sys
 import os
 os.environ['USE_PYGEOS'] = '0'
 import gc
-import collections
 from pathlib import Path
 
 import cartopy.crs as ccrs
 import cartopy
 import matplotlib.pyplot as plt
-import seaborn as sns
-from matplotlib import rcParams, cycler
-from matplotlib.gridspec import GridSpec
-from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 import geopandas as gpd
-from statsmodels.tsa.seasonal import seasonal_decompose
 
 import numpy as np
 import xarray as xr
 from xeofs.xarray import EOF
 import rioxarray
-import random
 
-import dask
-import distributed
-
-import scipy
-from scipy import signal
-import cftime
 from shapely.geometry import mapping
-from xarrayutils.utils import linear_trend, xr_linregress
-import pandas as pd
-import cmocean
-
-import statsmodels.api as sm
 from sklearn.linear_model import LinearRegression
 
 # File path directories
