@@ -178,6 +178,6 @@ SORRMv21_flux_detrend_perpixel_deseasonalize_dedraft = SORRMv21_flux_detrend_per
 SORRMv21_variability = SORRMv21_flux_detrend_perpixel_deseasonalize_dedraft
 
 # Rename name attribute for the variable
-SORRMv21_variability.name = 'landIceFreshwaterFluxVariability'
+#SORRMv21_variability.attrs['name'] = 'landIceFreshwaterFluxVariability'
 SORRMv21_variability.to_netcdf(main_dir / DIR_processed / 'draft_dependence/sorrm/SORRMv21_variability.nc')
 print('Preprocessed data saved')
