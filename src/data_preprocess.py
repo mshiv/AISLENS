@@ -112,6 +112,10 @@ def dedraft(data, draft):
     #data_dedraft = data - data_pred
     return data_pred #reg.coef_, reg.intercept_, data_pred, data_dedraft
 
+# Define a function to write_crs for the xarray dataset, with the crs input parameter defaulting to a string "epsg:3031"
+def write_crs(ds, crs='epsg:3031'):
+    ds.rio.write_crs(crs, inplace=True)
+    return ds
 
 # Detrend the data
 
@@ -130,6 +134,10 @@ print("Data deseasonalized")
 
 print('Removing draft dependence...')
 iceShelfRegions = range(33,133)
+
+# write_crs for the data to be clipped
+SORRMv21_flux_detrend_perpixel_deseasonalize = write_crs(SORRMv21_flux_detrend_perpixel_deseasonalize)
+SORRMv21_draft = write_crs(SORRMv21_draft)
 
 for i in iceShelfRegions:
     print('extracting data for catchment {}'.format(icems.name.values[i]))
