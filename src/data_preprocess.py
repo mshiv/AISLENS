@@ -121,17 +121,17 @@ def write_crs(ds, crs='epsg:3031'):
 
 # Method 1: Detrend the time series of spatial mean melt rate using a linear trend that is unique at each spatial point
 SORRMv21_flux_detrend_perpixel = detrend_dim(SORRMv21_flux, 'Time', 1).compute()
-SORRMv21_flux_detrend_perpixel_ts = SORRMv21_flux_detrend_perpixel.mean(dim=['x', 'y']).compute()
+#SORRMv21_flux_detrend_perpixel_ts = SORRMv21_flux_detrend_perpixel.mean(dim=['x', 'y']).compute()
 print("Data detrended")
 
 # Remove the seasonal cycle
 # Deseasonalize
 SORRMv21_flux_detrend_perpixel_deseasonalize = deseasonalize(SORRMv21_flux_detrend_perpixel).compute()
-SORRMv21_flux_detrend_perpixel_deseasonalize_ts = SORRMv21_flux_detrend_perpixel_deseasonalize.mean(dim=['x', 'y']).compute()
+#SORRMv21_flux_detrend_perpixel_deseasonalize_ts = SORRMv21_flux_detrend_perpixel_deseasonalize.mean(dim=['x', 'y']).compute()
 print("Data deseasonalized")
 
 # Remove the draft dependence
-
+"""
 print('Removing draft dependence...')
 iceShelfRegions = range(33,133)
 
@@ -169,6 +169,11 @@ for i in iceShelfRegions:
 ds.to_netcdf(main_dir / DIR_interim / 'draft_dependence/sorrm/SORRMv21_draftDependencePred.nc')
 
 print('merged draft dependence parameters for all ice shelves into a single xarray dataset')
+"""
+
+# Load the draft dependence prediction
+ds = xr.open_dataset(main_dir / DIR_interim / 'draft_dependence/sorrm/SORRMv21_draftDependencePred.nc')
+ds = ds.draftDepenBasalMeltPred
 
 # Remove draft dependence from the data
 SORRMv21_flux_detrend_perpixel_deseasonalize_dedraft = SORRMv21_flux_detrend_perpixel_deseasonalize - ds#['draftDepenBasalMeltPred']
