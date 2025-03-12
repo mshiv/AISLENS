@@ -22,6 +22,7 @@ import matplotlib.pyplot as plt
 # import seaborn as sns
 
 import xarray as xr
+import numpy as np
 import pandas as pd
 import geopandas as gpd
 import rioxarray
@@ -73,7 +74,7 @@ def phase_randomization(pcs, n_realizations):
         for m in range(nmodes):
             fl = pcs[:,m]
             fl_fourier = np.fft.rfft(fl)
-            random_phases = np.exp(np.random.vonmises(0,2*np.pi,int(len(fl)/2+1))*1.0j)
+            random_phases = np.exp(np.random.uniform(0,2*np.pi,int(len(fl)/2+1))*1.0j)
             fl_fourier_new = fl_fourier*random_phases
             new_pcs[i,:,m] = np.fft.irfft(fl_fourier_new)
         print('calculated ifft for realization {}, all modes'.format(i))
@@ -91,13 +92,22 @@ def generate_data(model,n_realization,mode,mode_skip):
 
 
 data = xr.open_dataset(options.fileInName)
-data = data.__xarray_dataarray_variable__
+data = data.__xarray_dataarray_variable__[:3600]
 
 #TODO: change tdim from 'time' to 'Time', as the EOF method requires.
 data = data.rename({"Time":"time"})
 
-model, eofs, pcs, nmodes, varexpl = eof_decomposition(data)
 
+# Normalize 
+data_tmean = data.mean('time')
+data_tstd = data.std('time')
+data_demeaned = data - data_tmean
+data_norm = data_demeaned/data_tstd
+
+# Perform EOF decomposition on normalized data
+model, eofs, pcs, nmodes, varexpl = eof_decomposition(data_norm)
+
+"""
 # Save model pickle file
 with open('model.pkl', 'wb') as f:
     pickle.dump(model, f)
@@ -105,7 +115,7 @@ with open('model.pkl', 'wb') as f:
 file_pi = open(str(main_dir / "data/interim/" / "norm_model.obj"), 'wb') 
 pickle.dump(model, file_pi)
 file_pi.close()
-
+"""
 
 n_realizations = options.nRealizations
 new_pcs = phase_randomization(pcs, n_realizations)
@@ -115,17 +125,12 @@ new_pcs = phase_randomization(pcs, n_realizations)
 ## Standard EOF/PCA implementation
 # Can use the xeofs-rand package, or directly generate using sklearn PCA.
 
-da_tmean = xr.open_dataset(main_dir / DIR_interim / 'normalize/SORRMv21_300-900_DETREND_DESEASONALIZE_DEDRAFT_RESAMPLE_TMEAN.nc')
-da_tstd = xr.open_dataset(main_dir / DIR_interim / 'normalize/SORRMv21_300-900_DETREND_DESEASONALIZE_DEDRAFT_RESAMPLE_TSTD.nc')
-
-da_tmean = da_tmean.__xarray_dataarray_variable__
-da_tstd = da_tstd.__xarray_dataarray_variable__
 
 for i in range(n_realizations):
-    data_reconstr = generate_data(model, i, 1500, 1)
-    data_reconstr = (data_reconstr*da_tstd)+da_tmean
+    data_reconstr = generate_data(model, i, 3600, 1)
+    data_reconstr = (data_reconstr*data_tstd)+data_tmean
     #melt_reconstr = flux_reconstr*sec_per_year/rho_fw
     #melt_reconstr = melt_reconstr.rename('rec{}'.format(n_realizations))
-    data_reconstr = data_reconstr.rename('rec{}'.format(n_realizations))
-    data_reconstr.to_netcdf(main_dir / DIR_processed / '{}_REC{}.nc'.format(p.stem, i))
+    data_reconstr = data_reconstr.rename('sorrmvar_rec-{}'.format(n_realizations))
+    data_reconstr.to_netcdf(main_dir / DIR_processed / '{}_sorrm-var-rec_{}.nc'.format(p.stem, i))
     print('reconstructed realization # {}'.format(i))
