@@ -2,6 +2,40 @@ import xarray as xr
 import numpy as np
 from shapely.geometry import mapping
 from scipy import spatial
+from pathlib import Path
+
+def subset_dataset(file_path, dim, start, end, output_path=None, chunk_size=10):
+    """
+    Extract a subset of a NetCDF dataset based on a specified dimension and range.
+
+    Args:
+        file_path (str or Path): Path to the input NetCDF file.
+        dim (str): Dimension to subset (e.g., "Time", "x", "y").
+        start (int, float, or str): Start value for the subset range.
+        end (int, float, or str): End value for the subset range.
+        output_path (str or Path, optional): Path to save the subsetted dataset. If None, the dataset is not saved.
+        chunk_size (int, optional): Chunk size for reading the dataset. Default is 10.
+
+    Returns:
+        xarray.Dataset: Subsetted dataset.
+    """
+    # Load the dataset with chunking
+    dataset = xr.open_dataset(file_path, chunks={dim: chunk_size})
+
+    # Ensure the dimension exists in the dataset
+    if dim not in dataset.dims:
+        raise ValueError(f"Dimension '{dim}' not found in the dataset.")
+
+    # Subset the dataset
+    subset = dataset.sel({dim: slice(start, end)})
+
+    # Save the subsetted dataset if an output path is provided
+    if output_path:
+        subset.to_netcdf(output_path)
+        print(f"Subsetted dataset saved to {output_path}")
+
+    return subset
+
 
 def detrend_dim(data, dim, deg):
     """
