@@ -3,6 +3,7 @@ import numpy as np
 from shapely.geometry import mapping
 from scipy import spatial
 from pathlib import Path
+from modules.extrapolation import fill_nan_with_nearest_neighbor_vectorized
 
 def subset_dataset(file_path, dim, start, end, output_path=None, chunk_size=10):
     """
@@ -87,33 +88,6 @@ def clip_data(total_data, basin, icems):
     clipped_data = clipped_data.drop("month", errors="ignore")
     return clipped_data
 
-def fill_nan_with_nearest_neighbor_vectorized(da):
-    """
-    Fill NaN values in a DataArray using nearest neighbors.
-
-    Args:
-        da (xarray.DataArray): Input data with NaNs.
-
-    Returns:
-        xarray.DataArray: Data with NaNs filled.
-    """
-    data = da.values
-    mask = np.isnan(data)
-    
-    # Get coordinates of all points and non-NaN points
-    coords = np.array(np.nonzero(np.ones_like(data))).T
-    valid_coords = coords[~mask.ravel()]
-    valid_values = data[~mask]
-    
-    # Use KDTree for efficient nearest neighbor search
-    tree = spatial.cKDTree(valid_coords)
-    _, indices = tree.query(coords[mask.ravel()])
-    
-    # Fill NaN values
-    data_filled = data.copy()
-    data_filled[mask] = valid_values[indices]
-    
-    return xr.DataArray(data_filled, dims=da.dims, coords=da.coords, attrs=da.attrs)
 
 def process_ice_shelf(ds_data, iceShelfNum, icems):
     """
@@ -174,3 +148,67 @@ def copy_subset_data(ds_data, merged_ds):
             ds_result[var] = xr.where(np.isnan(full_sized_data), ds_result[var], full_sized_data)
 
     return ds_result
+
+def normalize(data):
+    """
+    Normalize the input data.
+
+    Args:
+        data (xarray.DataArray): Input data.
+
+    Returns:
+        tuple: (normalized data, mean, std)
+    """
+    data_mean = data.mean("time")
+    data_std = data.std("time")
+    data_demeaned = data - data_mean
+    data_normalized = data_demeaned / data_std
+    return data_normalized, data_mean, data_std
+
+def unnormalize(data, mean, std):
+    """
+    Unnormalize the data.
+
+    Args:
+        data (xarray.DataArray): Normalized data.
+        mean (xarray.DataArray): Mean used for normalization.
+        std (xarray.DataArray): Standard deviation used for normalization.
+
+    Returns:
+        xarray.DataArray: Unnormalized data.
+    """
+    return (data * std) + mean
+
+
+def subset_dataset(file_path, dim, start, end, output_path=None, chunk_size=10):
+    """
+    Extract a subset of a NetCDF dataset based on a specified dimension and range.
+
+    Args:
+        file_path (str or Path): Path to the input NetCDF file.
+        dim (str): Dimension to subset (e.g., "Time", "x", "y").
+        start (int, float, or str): Start value for the subset range.
+        end (int, float, or str): End value for the subset range.
+        output_path (str or Path, optional): Path to save the subsetted dataset. If None, the dataset is not saved.
+        chunk_size (int, optional): Chunk size for reading the dataset. Default is 10.
+
+    Returns:
+        xarray.Dataset: Subsetted dataset.
+    """
+    # Load the dataset with chunking
+    dataset = xr.open_dataset(file_path, chunks={dim: chunk_size})
+
+    # Ensure the dimension exists in the dataset
+    if dim not in dataset.dims:
+        raise ValueError(f"Dimension '{dim}' not found in the dataset.")
+
+    # Subset the dataset
+    subset = dataset.sel({dim: slice(start, end)})
+
+    # Save the subsetted dataset if an output path is provided
+    if output_path:
+        subset.to_netcdf(output_path)
+        print(f"Subsetted dataset saved to {output_path}")
+
+    return subset
+
