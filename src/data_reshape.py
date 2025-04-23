@@ -65,7 +65,9 @@ def write_crs(ds, crs='epsg:3031'):
     return ds
 
 mlt_orig = SORRMv21_flux.mean(dim='Time')
-#mlt_var = np.full((mlt_orig.shape[0], mlt_orig.shape[1]), sorrmv21_variability)
-mlt_var = xr.DataArray(sorrmv21_variability, dims=['y', 'x'], coords={'x': mlt_orig.x, 'y': mlt_orig.y})
+mlt_var = np.full((mlt_orig.shape[0], mlt_orig.shape[1], mlt_orig.shape[1]), 0)
+
+for i in sorrmv21_variability.Time:
+    mlt_var[i,:,:] = xr.DataArray(sorrmv21_variability[i,:,:], dims=['y', 'x'], coords={'x': mlt_orig.x, 'y': mlt_orig.y})
 
 mlt_var.to_netcdf(main_dir / DIR_processed / 'draft_dependence/sorrm/SORRMv21_variability_resized.nc')
