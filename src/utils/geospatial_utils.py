@@ -87,3 +87,17 @@ def nn_interp_weights(xy, uv, d=2):
     tree = scipy.spatial.cKDTree(xy)
     _, idx = tree.query(uv, k=1)
     return idx
+
+def write_crs(ds, crs='epsg:3031'):
+    """
+    Write CRS information to an xarray dataset.
+
+    Args:
+        ds (xarray.Dataset): Dataset to update.
+        crs (str): Coordinate reference system.
+
+    Returns:
+        xarray.Dataset: Updated dataset.
+    """
+    ds.rio.write_crs(crs, inplace=True)
+    return ds
