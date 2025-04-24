@@ -1,7 +1,7 @@
 # Prepare satellite observations and model simulation data as required for subsequent steps.
 
 from modules.io import load_dataset, save_dataset
-from modules.data_preprocess import detrend_dim
+from modules.legacy.data_preprocess import detrend_dim
 
 def prepare_satobs_data(input_path, output_path):
     """
