@@ -1,3 +1,5 @@
+# Preprocess model simulation data to obtain model variability signal
+
 from modules.data_preprocess import detrend, deseasonalize
 from modules.seasonality import extract_seasonality
 from modules.draft_dependence import dedraft
