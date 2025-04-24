@@ -1,7 +1,7 @@
 # Create and save final forcing files that include a trend (0 for control), seasonal and variability component.
-from modules.io import load_dataset, save_dataset
-from modules.generator import generate_realizations
-from modules.normalize import normalize, unnormalize
+from utils.data_utils import load_dataset, save_dataset
+from modules.vargen import generate_realizations
+from utils.math_utils import normalize, unnormalize
 
 def generate_variability_realizations(n_gen):
     # Load variability signal
