@@ -1,3 +1,5 @@
+import geopandas as gpd
+
 def find_ice_shelf_index(ice_shelf_name, icems):
     """
     Find the index of an ice shelf by name.
@@ -10,6 +12,25 @@ def find_ice_shelf_index(ice_shelf_name, icems):
         int: Index of the ice shelf.
     """
     return icems[icems['name'] == ice_shelf_name].index[0]
+
+def read_ice_shelves_mask(file_path, target_crs="EPSG:3031"):
+    """
+    Read the ice shelves mask from a GeoJSON or shapefile and reproject it to the target CRS.
+
+    Args:
+        file_path (str): Path to the GeoJSON or shapefile containing the ice shelves mask.
+        target_crs (str): Target coordinate reference system (CRS). Defaults to "EPSG:3031".
+
+    Returns:
+        geopandas.GeoDataFrame: Ice shelves mask reprojected to the target CRS.
+    """
+    # Read the mask file
+    ice_shelves_mask = gpd.read_file(file_path)
+
+    # Reproject to the target CRS
+    ice_shelves_mask = ice_shelves_mask.to_crs(target_crs)
+
+    return ice_shelves_mask
 
 def clip_data(total_data, basin, icems):
     """
