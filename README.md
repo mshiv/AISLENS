@@ -8,42 +8,6 @@ More details on the ensemble generator used in this work can be found in the [ai
 ## DIRECTORY STRUCTURE
 
 /aislens/
-├── main.py                     # Main script to execute the workflow
-├── README.md                   # Documentation of the workflow
-├── data/                       # Directory for input and output data
-│   ├── external/               # Raw input datasets (e.g., satellite observations, model outputs)
-│   ├── interim/                # Intermediate processed datasets
-│   ├── processed/              # Final processed datasets
-|   ├── tmp/                    # Temporary files, treat as a scratch dir.
-├── modules/                    # Core modules for reusable functionality
-│   ├── __init__.py             # Makes this directory a package
-│   ├── data_preprocess.py      # Preprocessing functions (detrend, deseasonalize, etc.)
-│   ├── draft_dependence.py     # Functions for draft dependence calculations
-│   ├── generator.py            # Statistical generator for variability realizations
-│   ├── regrid.py               # Functions for regridding and renaming dimensions
-│   ├── io.py                   # Input/output utility functions
-│   ├── masks.py                # Functions for clipping and masking data
-│   ├── interpolation.py        # Functions for filling NaN values
-│   ├── extrapolation.py        # Functions for extrapolating variability
-│   ├── seasonality.py          # Functions for extracting and saving seasonal signals
-│   ├── normalize.py            # Functions for normalizing and unnormalizing datasets
-│   └── utils.py                # Helper functions (e.g., directory setup, logging)
-├── tests/                      # Unit tests for all modules
-│   ├── test_data_preprocess.py
-│   ├── test_draft_dependence.py
-│   ├── test_generator.py
-│   ├── test_regrid.py
-│   ├── test_io.py
-│   └── ...
-├── MPAS-Tools/                 # Tools for regridding to MPAS-Land Ice grid
-│   └── interpolate_to_mpasli_grid.py
-└── scripts/                    # SLURM job scripts for HPC workflows
-    ├── preprocess.sbatch
-    ├── generate_forcings.sbatch
-    └── regrid_to_mpas.sbatch
-
-
-
 
 
 
@@ -83,31 +47,4 @@ We extract a mean current basal melt rate field from the satellite observations,
     * Rename the `x,y,Time` dimensions in these files to the required names (usually `x1,y1, ...` ). 
     * Make use of `MPAS-Tools/interpolate_to_mpasli_grid.py` to perform the regridding.
 
-
-
-------------
-/src:
-
-`generator.py`: Statistical generator of ocean variability. Takes MPAS-Ocean dataset as input. //
-`forcing_extrapolate.py`: Extrapolate forcing file (i.e., ocean variability dataset provided by `generator.py` to the entire ice sheet domain. //
-`data_preprocess.py`: Preprocess the input dataset to extract variability signal. //
-`data_reshape.py`: //
-`data_seasonality.py`: // 
-`interpolate_to_mpasli_grid_mod.py`: //
-`rename_dims_to_CISM.py`: //
-`rename_time_dimension.py`: //
-
-/scripts/slurm-nco: SLURM job scripts that make use of NCO commands to modify /data
-
-`aislens_preprocess_ncks_misc.sbatch`: //
-`aislens_preprocess_forcing_components.sbatch`: //
-`prep_MALI_forcings.sbatch`: //
-`prep_MALI_forcings_test.sbatch`: // 
-`rm_nan_forcings.sbatch`: //
-
-Workflow with job arrays on slurm:
-
-`interp_to_mpas_jobarray.sbatch`: //
-`add_xtime_jobarray.sbatch`: //
-`setup-aislens-ctrl-mini.sbatch`: // 
 
