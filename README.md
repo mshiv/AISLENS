@@ -6,29 +6,31 @@ More details on the ensemble generator used in this work can be found in the [ai
 
 The work makes use of the [MALI (MPAS-Albany Land Ice)](https://github.com/MALI-Dev/E3SM)[[2]](#2) model for running simulations and generating model outputs. This repository contains workflows necessary to generate the initial conditions and forcing files required for the same.
 
+## Dependencies
 
-
-## Installation
-
-Use a `conda` environment that can be created:
+Project dependencies can be installed as a `conda` environment using the `requirements.txt` file:
 ```shell
 git clone https://github.com/mshiv/AISLENS.git
 cd AISLENS
 conda create --name aislens --file requirements.txt
 ```
 
-The variability generator makes use of a forked version of the `xeofs` package, and details regarding changes made therein can be found [here](https://github.com/mshiv/xeofs-rand.git).
+> [!IMPORTANT]
+> The variability generator makes use of a forked version of the `xeofs` package, and details regarding changes made therein can be found at [mshiv/xeofs-rand](https://github.com/mshiv/xeofs-rand/).
 
 
 ## Data
 
 Create a `data/` directory in the root project repository, with the following structure:
+
+```
 /AISLENS/
-├── data/                         # Main, CLI interface
+├── data/
     ├── external/
     ├── interim/
     ├── processed/
     ├── tmp/
+```
 
 Copy the data files provided in the Zenodo object into this directory.
 
