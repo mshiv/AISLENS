@@ -1,7 +1,7 @@
 # Preprocess satellite observation data to calculate draft dependence parameterization
 
 from modules.io import load_dataset, save_dataset
-from modules.data_preprocess import detrend, deseasonalize
+from modules.data_preprocessing import detrend, deseasonalize
 from modules.draft_dependence import calculate_draft_dependence
 from modules.masks import clip_to_ice_shelves
 
