@@ -12,12 +12,18 @@ Project dependencies can be installed as a `conda` environment using the `requir
 ```shell
 git clone https://github.com/mshiv/AISLENS.git
 cd AISLENS
-conda create --name aislens --file requirements.txt
+conda create --name aislens-env --file requirements.txt
 ```
 
 > [!IMPORTANT]
 > The variability generator makes use of a forked version of the `xeofs` package, and details regarding changes made therein can be found at [mshiv/xeofs-rand](https://github.com/mshiv/xeofs-rand/).
 
+The project source code can be installed as a package if required:
+
+```shell
+conda activate aislens-env
+pip install -e .
+```
 
 ## Data
 
