@@ -1,4 +1,48 @@
+import numpy as np
+import xarray as xr
+import os
 import geopandas as gpd
+from shapely.geometry import mapping
+import scipy
+
+######################################################
+# Data utilities for xarray and geopandas
+######################################################
+
+
+def subset_dataset(data, dim, start, end):
+    """
+    Subset a dataset along a specified dimension.
+
+    Args:
+        data (xarray.Dataset or xarray.DataArray): Input dataset.
+        dim (str): Dimension to subset (e.g., "Time", "x", "y").
+        start (int, float, or str): Start value for the subset range.
+        end (int, float, or str): End value for the subset range.
+
+    Returns:
+        xarray.Dataset or xarray.DataArray: Subsetted dataset.
+    """
+    if dim not in data.dims:
+        raise ValueError(f"Dimension '{dim}' not found in the dataset.")
+    return data.sel({dim: slice(start, end)})
+
+def mask_dataset(data, mask, crs):
+    """
+    Mask a dataset using a spatial mask.
+
+    Args:
+        data (xarray.DataArray or xarray.Dataset): Input dataset.
+        mask (GeoDataFrame): Geospatial mask.
+        crs (str): Coordinate reference system of the mask.
+
+    Returns:
+        xarray.DataArray or xarray.Dataset: Masked dataset.
+    """
+    if not hasattr(data, "rio"):
+        raise AttributeError("Dataset must be a GeoDataset with rioxarray enabled.")
+    return data.rio.clip(mask.geometry.apply(mapping), crs)
+
 
 def find_ice_shelf_index(ice_shelf_name, icems):
     """
@@ -101,3 +145,58 @@ def write_crs(ds, crs='epsg:3031'):
     """
     ds.rio.write_crs(crs, inplace=True)
     return ds
+
+def normalize(data):
+    """
+    Normalize the data by subtracting the mean and dividing by the standard deviation.
+
+    Args:
+        data (xarray.DataArray or xarray.Dataset): Input data.
+
+    Returns:
+        tuple: (normalized_data, mean, std)
+    """
+    mean = data.mean(dim="Time")
+    std = data.std(dim="Time")
+    normalized_data = (data - mean) / std
+    return normalized_data, mean, std
+
+def unnormalize(data, mean, std):
+    """
+    Unnormalize the data using the provided mean and standard deviation.
+
+    Args:
+        data (xarray.DataArray or xarray.Dataset): Normalized data.
+        mean (xarray.DataArray or xarray.Dataset): Mean used for normalization.
+        std (xarray.DataArray or xarray.Dataset): Standard deviation used for normalization.
+
+    Returns:
+        xarray.DataArray or xarray.Dataset: Unnormalized data.
+    """
+    return (data * std) + mean
+
+def calculate_time_mean(data, dim="Time"):
+    """
+    Calculate the time mean of a dataset.
+
+    Args:
+        data (xarray.DataArray or xarray.Dataset): Input dataset.
+        dim (str): Time dimension. Defaults to "Time".
+
+    Returns:
+        xarray.DataArray or xarray.Dataset: Time-averaged dataset.
+    """
+    return data.mean(dim=dim)
+
+def calculate_spatial_mean(data, dims=("x", "y")):
+    """
+    Calculate the spatial mean of a dataset.
+
+    Args:
+        data (xarray.DataArray or xarray.Dataset): Input dataset.
+        dims (tuple): Spatial dimensions. Defaults to ("x", "y").
+
+    Returns:
+        xarray.DataArray or xarray.Dataset: Spatially averaged dataset.
+    """
+    return data.mean(dim=dims)
