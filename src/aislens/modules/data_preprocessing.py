@@ -3,7 +3,6 @@ import numpy as np
 from shapely.geometry import mapping
 from scipy import spatial
 from pathlib import Path
-from modules.extrapolation import fill_nan_with_nearest_neighbor_vectorized
 
 def subset_dataset(file_path, dim, start, end, output_path=None, chunk_size=10):
     """
