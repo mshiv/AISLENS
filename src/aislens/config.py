@@ -1,3 +1,5 @@
+# This file defines file paths and constants used throughout the codebase.
+
 from pyprojroot import here
 
 root = here(proj_files=[".git"])
