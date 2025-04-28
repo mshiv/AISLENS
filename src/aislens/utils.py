@@ -4,147 +4,15 @@ import os
 import geopandas as gpd
 from shapely.geometry import mapping
 import scipy
+import numpy as np
+import xarray as xr
+from scipy import spatial
 
-######################################################
-# Data utilities for xarray and geopandas
-######################################################
-
-
-def subset_dataset(data, dim, start, end):
-    """
-    Subset a dataset along a specified dimension.
-
-    Args:
-        data (xarray.Dataset or xarray.DataArray): Input dataset.
-        dim (str): Dimension to subset (e.g., "Time", "x", "y").
-        start (int, float, or str): Start value for the subset range.
-        end (int, float, or str): End value for the subset range.
-
-    Returns:
-        xarray.Dataset or xarray.DataArray: Subsetted dataset.
-    """
-    if dim not in data.dims:
-        raise ValueError(f"Dimension '{dim}' not found in the dataset.")
-    return data.sel({dim: slice(start, end)})
-
-def mask_dataset(data, mask, crs):
-    """
-    Mask a dataset using a spatial mask.
-
-    Args:
-        data (xarray.DataArray or xarray.Dataset): Input dataset.
-        mask (GeoDataFrame): Geospatial mask.
-        crs (str): Coordinate reference system of the mask.
-
-    Returns:
-        xarray.DataArray or xarray.Dataset: Masked dataset.
-    """
-    if not hasattr(data, "rio"):
-        raise AttributeError("Dataset must be a GeoDataset with rioxarray enabled.")
-    return data.rio.clip(mask.geometry.apply(mapping), crs)
-
-
-def find_ice_shelf_index(ice_shelf_name, icems):
-    """
-    Find the index of an ice shelf by name.
-
-    Args:
-        ice_shelf_name (str): Name of the ice shelf.
-        icems (GeoDataFrame): Ice shelf geometries.
-
-    Returns:
-        int: Index of the ice shelf.
-    """
-    return icems[icems['name'] == ice_shelf_name].index[0]
-
-def read_ice_shelves_mask(file_path, target_crs="EPSG:3031"):
-    """
-    Read the ice shelves mask from a GeoJSON or shapefile and reproject it to the target CRS.
-
-    Args:
-        file_path (str): Path to the GeoJSON or shapefile containing the ice shelves mask.
-        target_crs (str): Target coordinate reference system (CRS). Defaults to "EPSG:3031".
-
-    Returns:
-        geopandas.GeoDataFrame: Ice shelves mask reprojected to the target CRS.
-    """
-    # Read the mask file
-    ice_shelves_mask = gpd.read_file(file_path)
-
-    # Reproject to the target CRS
-    ice_shelves_mask = ice_shelves_mask.to_crs(target_crs)
-
-    return ice_shelves_mask
-
-def clip_data(total_data, basin, icems):
-    """
-    Clip the map to a specific domain.
-
-    Args:
-        total_data (xarray.DataArray): Input data.
-        basin (str): Basin name.
-        icems (GeoDataFrame): Ice shelf geometry.
-
-    Returns:
-        xarray.DataArray: Clipped data.
-    """
-    clipped_data = total_data.rio.clip(icems.loc[[basin], 'geometry'].apply(mapping), icems.crs)
-    clipped_data = clipped_data.drop("month", errors="ignore")
-    return clipped_data
-
-def delaunay_interp_weights(xy, uv, d=2):
-    """
-    Compute Delaunay interpolation weights.
-    Reference: https://docs.scipy.org/doc/scipy/reference/generated/scipy.spatial.Delaunay.html
-    
-    Reference: Trevor Hillebrand
-    Args:
-        xy (array): Input x, y coordinates.
-        uv (array): Output (MPAS-LI) x, y coordinates.
-        d (int): Dimensionality (default is 2).
-
-    Returns:
-        tuple: (vertices, weights, outside_indices, tree)
-    """
-    tri = scipy.spatial.Delaunay(xy)
-    simplex = tri.find_simplex(uv)
-    vertices = np.take(tri.simplices, simplex, axis=0)
-    temp = np.take(tri.transform, simplex, axis=0)
-    delta = uv - temp[:, d]
-    weights = np.einsum('njk,nk->nj', temp[:, :d, :], delta)
-    weights = np.hstack((weights, 1 - weights.sum(axis=1, keepdims=True)))
-    tree = scipy.spatial.cKDTree(xy)
-    return vertices, weights, tree
-
-def nn_interp_weights(xy, uv, d=2):
-    """
-    Compute nearest-neighbor interpolation weights.
-
-    Args:
-        xy (array): Input x, y coordinates.
-        uv (array): Output (MPAS-LI) x, y coordinates.
-        d (int): Dimensionality (default is 2).
-
-    Returns:
-        array: Indices of nearest neighbors.
-    """
-    tree = scipy.spatial.cKDTree(xy)
-    _, idx = tree.query(uv, k=1)
-    return idx
-
-def write_crs(ds, crs='epsg:3031'):
-    """
-    Write CRS information to an xarray dataset.
-
-    Args:
-        ds (xarray.Dataset): Dataset to update.
-        crs (str): Coordinate reference system.
-
-    Returns:
-        xarray.Dataset: Updated dataset.
-    """
-    ds.rio.write_crs(crs, inplace=True)
-    return ds
+##################################################################
+# Data utilities for xarray datasets
+# These modules provides helper functions for data manipulation
+# mainly for data preprocessing
+##################################################################
 
 def normalize(data):
     """
@@ -200,3 +68,262 @@ def calculate_spatial_mean(data, dims=("x", "y")):
         xarray.DataArray or xarray.Dataset: Spatially averaged dataset.
     """
     return data.mean(dim=dims)
+
+def subset_dataset(file_path, dim, start, end, output_path=None, chunk_size=10):
+    """
+    Extract a subset of a NetCDF dataset based on a specified dimension and range.
+
+    Args:
+        file_path (str or Path): Path to the input NetCDF file.
+        dim (str): Dimension to subset (e.g., "Time", "x", "y").
+        start (int, float, or str): Start value for the subset range.
+        end (int, float, or str): End value for the subset range.
+        output_path (str or Path, optional): Path to save the subsetted dataset. If None, the dataset is not saved.
+        chunk_size (int, optional): Chunk size for reading the dataset. Default is 10.
+
+    Returns:
+        xarray.Dataset: Subsetted dataset.
+    """
+    # Load the dataset with chunking
+    dataset = xr.open_dataset(file_path, chunks={dim: chunk_size})
+
+    # Ensure the dimension exists in the dataset
+    if dim not in dataset.dims:
+        raise ValueError(f"Dimension '{dim}' not found in the dataset.")
+
+    # Subset the dataset
+    subset = dataset.sel({dim: slice(start, end)})
+
+    # Save the subsetted dataset if an output path is provided
+    if output_path:
+        subset.to_netcdf(output_path)
+        print(f"Subsetted dataset saved to {output_path}")
+
+    return subset
+
+def copy_subset_data(ds_data, merged_ds):
+    """
+    Copy data from merged datasets into the original dataset.
+
+    Args:
+        ds_data (xarray.Dataset): Original dataset.
+        merged_ds (xarray.Dataset): Merged dataset.
+
+    Returns:
+        xarray.Dataset: Updated dataset with merged data.
+    """
+    x_indices = np.searchsorted(ds_data.x, merged_ds.x)
+    y_indices = np.searchsorted(ds_data.y, merged_ds.y)
+
+    mask = np.zeros((ds_data.sizes['y'], ds_data.sizes['x']), dtype=bool)
+    mask[np.ix_(y_indices, x_indices)] = True
+
+    ds_result = ds_data.copy(deep=True)
+
+    for var in merged_ds.data_vars:
+        if var in ds_result:
+            full_sized_data = np.full(ds_result[var].shape, np.nan)
+            full_sized_data[np.ix_(y_indices, x_indices)] = merged_ds[var].values
+            ds_result[var] = xr.where(np.isnan(full_sized_data), ds_result[var], full_sized_data)
+
+    return ds_result
+
+def merge_datasets(results):
+    """
+    Merge datasets from multiple ice shelves.
+
+    Args:
+        results (list): List of xarray.Dataset objects.
+
+    Returns:
+        xarray.Dataset: Merged dataset.
+    """
+    return xr.merge(results)
+
+##################################################################
+# Geospatial utilities for xarray and geopandas datasets
+# These modules provides helper functions for manipulating the
+# data using geospatial masks and projections
+# The functions are designed to work with xarray and geopandas
+##################################################################
+
+def mask_dataset(data, mask, crs):
+    """
+    Mask a dataset using a spatial mask.
+
+    Args:
+        data (xarray.DataArray or xarray.Dataset): Input dataset.
+        mask (GeoDataFrame): Geospatial mask.
+        crs (str): Coordinate reference system of the mask.
+
+    Returns:
+        xarray.DataArray or xarray.Dataset: Masked dataset.
+    """
+    if not hasattr(data, "rio"):
+        raise AttributeError("Dataset must be a GeoDataset with rioxarray enabled.")
+    return data.rio.clip(mask.geometry.apply(mapping), crs)
+
+def write_crs(ds, crs='epsg:3031'):
+    """
+    Write CRS information to an xarray dataset.
+
+    Args:
+        ds (xarray.Dataset): Dataset to update.
+        crs (str): Coordinate reference system.
+
+    Returns:
+        xarray.Dataset: Updated dataset.
+    """
+    ds.rio.write_crs(crs, inplace=True)
+    return ds
+
+
+##################################################################
+# Data utilities for xarray datasets
+# These modules provides helper functions to extrapolate the dataset
+# as required to create final forcing fields required by MPAS-LI.
+##################################################################
+
+def fill_nan_with_nearest_neighbor(da):
+    """
+    Fill NaN values in the data using nearest-neighbor interpolation.
+
+    Args:
+        da (xarray.DataArray): Input data.
+
+    Returns:
+        xarray.DataArray: Data with NaN values filled.
+    """
+    data = da.values
+    nan_indices = np.argwhere(np.isnan(data))
+    non_nan_indices = np.argwhere(~np.isnan(data))
+    non_nan_values = data[~np.isnan(data)]
+
+    # Create a KDTree for fast nearest-neighbor lookup
+    tree = spatial.KDTree(non_nan_indices)
+
+    # For each NaN value, find the nearest non-NaN value
+    for nan_index in nan_indices:
+        _, nearest_index = tree.query(nan_index)
+        data[tuple(nan_index)] = non_nan_values[nearest_index]
+
+    return xr.DataArray(data, dims=da.dims, coords=da.coords, attrs=da.attrs)
+
+def fill_nan_with_nearest_neighbor_vectorized(da):
+    """
+    Fill NaN values in the data using vectorized nearest-neighbor interpolation.
+
+    Args:
+        da (xarray.DataArray): Input data.
+
+    Returns:
+        xarray.DataArray: Data with NaN values filled.
+    """
+    data = da.values
+    mask = np.isnan(data)
+
+    # Get coordinates of all points and non-NaN points
+    coords = np.array(np.nonzero(np.ones_like(data))).T
+    valid_coords = coords[~mask.ravel()]
+    valid_values = data[~mask]
+
+    # Use KDTree for efficient nearest neighbor search
+    tree = spatial.cKDTree(valid_coords)
+    _, indices = tree.query(coords[mask.ravel()])
+
+    # Fill NaN values
+    data_filled = data.copy()
+    data_filled[mask] = valid_values[indices]
+
+    return xr.DataArray(data_filled, dims=da.dims, coords=da.coords, attrs=da.attrs)
+
+def delaunay_interp_weights(xy, uv, d=2):
+    """
+    Compute Delaunay interpolation weights.
+    Reference: https://docs.scipy.org/doc/scipy/reference/generated/scipy.spatial.Delaunay.html
+    
+    Reference: Trevor Hillebrand
+    Args:
+        xy (array): Input x, y coordinates.
+        uv (array): Output (MPAS-LI) x, y coordinates.
+        d (int): Dimensionality (default is 2).
+
+    Returns:
+        tuple: (vertices, weights, outside_indices, tree)
+    """
+    tri = scipy.spatial.Delaunay(xy)
+    simplex = tri.find_simplex(uv)
+    vertices = np.take(tri.simplices, simplex, axis=0)
+    temp = np.take(tri.transform, simplex, axis=0)
+    delta = uv - temp[:, d]
+    weights = np.einsum('njk,nk->nj', temp[:, :d, :], delta)
+    weights = np.hstack((weights, 1 - weights.sum(axis=1, keepdims=True)))
+    tree = scipy.spatial.cKDTree(xy)
+    return vertices, weights, tree
+
+def nn_interp_weights(xy, uv, d=2):
+    """
+    Compute nearest-neighbor interpolation weights.
+
+    Args:
+        xy (array): Input x, y coordinates.
+        uv (array): Output (MPAS-LI) x, y coordinates.
+        d (int): Dimensionality (default is 2).
+
+    Returns:
+        array: Indices of nearest neighbors.
+    """
+    tree = scipy.spatial.cKDTree(xy)
+    _, idx = tree.query(uv, k=1)
+    return idx
+
+##################################################################
+# Functions to create final forcing fields required by MALI.
+##################################################################
+
+
+def rename_dims_and_fillna(file_path, dims_to_rename=None, fill_value=0):
+    """
+    Rename dimensions and fill NaN values in a NetCDF file.
+
+    Args:
+        file_path (str or Path): Path to the NetCDF file.
+        dims_to_rename (dict, optional): Dictionary mapping old dimension names to new names (e.g., {'x': 'x1', 'y': 'y1'}).
+        fill_value (int or float, optional): Value to replace NaN values with. Default is 0.
+
+    Returns:
+        xarray.Dataset: Modified dataset.
+    """
+    # Open the dataset
+    ds = xr.open_dataset(file_path)
+
+    # Rename dimensions if specified
+    if dims_to_rename:
+        ds = ds.rename(dims_to_rename)
+
+    # Fill NaN values with the specified fill value
+    ds = ds.fillna(fill_value)
+
+    # Save the modified dataset, overwriting the original file
+    ds.to_netcdf(file_path)
+    print(f"Updated {file_path.name}: renamed dimensions and filled NaNs with {fill_value}.")
+    return ds
+
+
+def process_directory(directory, dims_to_rename=None, fill_value=0):
+    """
+    Process all NetCDF files in a directory: rename dimensions and fill NaN values.
+
+    Args:
+        directory (str or Path): Path to the directory containing NetCDF files.
+        dims_to_rename (dict, optional): Dictionary mapping old dimension names to new names (e.g., {'x': 'x1', 'y': 'y1'}).
+        fill_value (int or float, optional): Value to replace NaN values with. Default is 0.
+
+    Returns:
+        None
+    """
+    directory = Path(directory)
+
+    # Loop through all .nc files in the directory
+    for file_path in directory.glob("*.nc"):
+        rename_dims_and_fillna(file_path, dims_to_rename=dims_to_rename, fill_value=fill_value)
