@@ -1,6 +1,7 @@
 import numpy as np
 import xarray as xr
 import os
+from pathlib import Path
 import geopandas as gpd
 from shapely.geometry import mapping
 import scipy
@@ -327,3 +328,32 @@ def process_directory(directory, dims_to_rename=None, fill_value=0):
     # Loop through all .nc files in the directory
     for file_path in directory.glob("*.nc"):
         rename_dims_and_fillna(file_path, dims_to_rename=dims_to_rename, fill_value=fill_value)
+
+
+##################################################################
+# IO utilities for file handling
+# These modules provides helper functions for file handling
+# such as creating directories, checking file existence, etc.
+##################################################################
+
+def ensure_dir_exists(file_path):
+    """
+    Ensure that the directory for the given file path exists.
+    If it doesn't exist, create it.
+
+    Args:
+        file_path (str or Path): Path to the file or directory.
+    """
+    directory = Path(file_path).parent
+    if not directory.exists():
+        directory.mkdir(parents=True, exist_ok=True)
+
+def initialize_directories(directories):
+    """
+    Ensure that all directories in the given list exist.
+
+    Args:
+        directories (list of str or Path): List of directory paths to check/create.
+    """
+    for directory in directories:
+        Path(directory).mkdir(parents=True, exist_ok=True)
