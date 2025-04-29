@@ -1,15 +1,17 @@
 # Prepare satellite observations and model simulation data as required for subsequent steps.
 
-from modules.io import load_dataset, save_dataset
-from modules.legacy.data_preprocess import detrend_dim
+from aislens.io import load_dataset, save_dataset
+from aislens.dataprep import detrend_dim
+from aislens.config import CONFIG
 
-def prepare_satobs_data(input_path, output_path):
+def prepare_satobs_data(input_path, output_path, time_dim):
     """
     Prepare satellite observation data by calculating the time mean.
 
     Args:
         input_path (str): Path to the input satellite observation dataset.
         output_path (str): Path to save the prepared dataset.
+        time_dim (str): Name of the time dimension.
 
     Returns:
         xarray.Dataset: Prepared satellite observation dataset.
@@ -18,7 +20,7 @@ def prepare_satobs_data(input_path, output_path):
     satobs_data = load_dataset(input_path)
 
     # Calculate the time mean
-    time_mean = satobs_data.mean(dim="Time")
+    time_mean = satobs_data.mean(dim=time_dim)
 
     # Save the prepared dataset
     save_dataset(time_mean, output_path)
@@ -26,7 +28,7 @@ def prepare_satobs_data(input_path, output_path):
 
     return time_mean
 
-def prepare_model_data(input_path, output_path, start_year, end_year):
+def prepare_model_data(input_path, output_path, start_year, end_year, time_dim):
     """
     Prepare model simulation data by subsetting and detrending.
 
@@ -35,6 +37,7 @@ def prepare_model_data(input_path, output_path, start_year, end_year):
         output_path (str): Path to save the prepared dataset.
         start_year (int): Start year for subsetting the dataset.
         end_year (int): End year for subsetting the dataset.
+        time_dim (str): Name of the time dimension.
 
     Returns:
         xarray.Dataset: Prepared model dataset.
@@ -43,10 +46,10 @@ def prepare_model_data(input_path, output_path, start_year, end_year):
     model_data = load_dataset(input_path)
 
     # Subset the dataset to the desired time range
-    subset_data = model_data.sel(Time=slice(start_year, end_year))
+    subset_data = model_data.sel({time_dim: slice(start_year, end_year)})
 
     # Perform detrending along the time dimension
-    detrended_data = detrend_dim(subset_data, dim="Time", deg=1)
+    detrended_data = detrend_dim(subset_data, dim=time_dim, deg=1)
 
     # Save the prepared dataset
     save_dataset(detrended_data, output_path)
@@ -62,16 +65,21 @@ def run_prepare_data_workflow():
 
     # Prepare satellite observation data
     prepare_satobs_data(
-        input_path="data/external/basalmelt_satobs_data.nc",
-        output_path="data/interim/satobs_time_mean.nc"
+        input_path=CONFIG["satobs_input_path"],
+        output_path=CONFIG["satobs_output_path"],
+        time_dim=CONFIG["time_dim"]
     )
 
     # Prepare model simulation data
     prepare_model_data(
-        input_path="data/external/basalmelt_model_data.nc",
-        output_path="data/interim/model_detrended.nc",
-        start_year=300,
-        end_year=900
+        input_path=CONFIG["model_input_path"],
+        output_path=CONFIG["model_output_path"],
+        start_year=CONFIG["start_year"],
+        end_year=CONFIG["end_year"],
+        time_dim=CONFIG["time_dim"]
     )
 
     print("Data preparation workflow complete.")
+
+if __name__ == "__main__":
+    run_prepare_data_workflow()
