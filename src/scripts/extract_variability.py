@@ -1,23 +1,32 @@
-# Preprocess model simulation data to obtain model variability signal
+from aislens.dataprep import detrend_dim, deseasonalize
+from aislens.io import load_dataset, save_dataset
+from aislens.config import CONFIG
 
-from modules.legacy.data_preprocess import detrend, deseasonalize
-from modules.data_preprocessing import extract_seasonality
-from modules.draft_dependence import dedraft
+def extract_variability(input_path, output_path, time_dim):
+    """
+    Preprocess model simulation data to extract variability and seasonality components.
 
-def preprocess_model_data():
-    # Load model data
-    model_file = "data/external/basalmelt_model_data.nc"
-    model_data = load_dataset(model_file)
+    Args:
+        input_path (str): Path to the input dataset.
+        output_path (str): Path to save the processed dataset.
+        time_dim (str): Name of the time dimension.
+    """
+    # Load the dataset
+    dataset = load_dataset(input_path)
 
-    # Detrend and deseasonalize
-    detrended_data = detrend(model_data)
-    deseasonalized_data, seasonality_signal = deseasonalize(detrended_data)
+    # Detrend the dataset
+    detrended_data = detrend_dim(dataset, dim=time_dim, deg=1)
 
-    # Save seasonal signal
-    save_dataset(seasonality_signal, "data/interim/basalmelt_seasonality_model_data.nc")
+    # Deseasonalize the dataset
+    deseasonalized_data = deseasonalize(detrended_data)
 
-    # Dedraft the deseasonalized data
-    dedrafted_data = dedraft(deseasonalized_data)
+    # Save the processed dataset
+    save_dataset(deseasonalized_data, output_path)
+    print(f"Variability data saved to {output_path}")
 
-    # Save variability signal
-    save_dataset(dedrafted_data, "data/interim/basalmelt_variability_model_data.nc")
+if __name__ == "__main__":
+    extract_variability(
+        input_path=CONFIG["model_input_path"],
+        output_path=CONFIG["variability_output_path"],
+        time_dim=CONFIG["time_dim"]
+    )
