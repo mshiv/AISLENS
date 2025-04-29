@@ -1,36 +1,37 @@
-from aislens.dataprep import dedraft, extrapolate
-from aislens.io import load_dataset, save_dataset
-from aislens.config import CONFIG
+# This script preprocesses satellite observation data to calculate and extrapolate 
+# draft dependence parameters.
+# Run this script after running prepare_data.py
+# Steps:
+#   1. Load the satellite observation dataset.
+#   2. Calculate draft dependence parameters (draftDepenBasalMeltAlpha0 and 
+#      draftDepenBasalMeltAlpha1) using the dedraft function.
+#       2.1. This dedrafting is done by first, splitting the dataset into 
+#            different ice shelf regions and calculating draft params separately 
+#            for each one. Do this by using the ice shelf masks.
+#       2.2. Then, the draft params are merged across the entire ice sheet.
+#       2.3. The draft params are then saved to a file.
+#   3. Extrapolate the draft dependence parameters to the entire ice sheet grid.
+#       3.1. This is done by filling NaN values with the nearest neighbor values 
+#            using the fill_nan_with_nearest_neighbor_vectorized function.
+#   4. Save the extrapolated parameters to a specified output path.
 
-def preprocess_satellite_observations(input_path, output_path, draft_var, flux_var, grid_file):
-    """
-    Preprocess satellite observation data to calculate and extrapolate draft dependence.
+from aislens.dataprep import dedraft
+from aislens.utils import fill_nan_with_nearest_neighbor_vectorized
+from aislens.config import config
+import xarray as xr
 
-    Args:
-        input_path (str): Path to the input satellite observation dataset.
-        output_path (str): Path to save the draft dependence parameters.
-        draft_var (str): Name of the draft variable.
-        flux_var (str): Name of the freshwater flux variable.
-        grid_file (str): Path to the ice sheet grid file for extrapolation.
-    """
-    # Load satellite observations
-    satobs_data = load_dataset(input_path)
-
-    # Calculate draft dependence
-    draft_dependence_params = dedraft(satobs_data[flux_var], satobs_data[draft_var])
-
-    # Extrapolate draft dependence parameters to the entire ice sheet grid
-    extrapolated_params = extrapolate(draft_dependence_params, grid_file)
-
+def calculate_draft_dependence():
+    # Load the prepared satellite observation dataset
+    satobs = xr.open_dataset(config.FILE_PAOLO23_SATOBS_PREPARED)
+    
+    # Calculate draft dependence parameters
+    draft_dependence = dedraft(satobs[config.SATOBS_FLUX_VAR], satobs[config.SATOBS_DRAFT_VAR])
+    
+    # Extrapolate draft dependence parameters
+    draft_dependence_extrapolated = fill_nan_with_nearest_neighbor_vectorized(draft_dependence)
+    
     # Save the extrapolated parameters
-    save_dataset(extrapolated_params, output_path)
-    print(f"Draft dependence parameters saved to {output_path}")
+    draft_dependence_extrapolated.to_netcdf(config.FILE_DRAFT_DEPENDENCE)
 
 if __name__ == "__main__":
-    preprocess_satellite_observations(
-        input_path=CONFIG["satobs_input_path"],
-        output_path=CONFIG["draft_dependence_output_path"],
-        draft_var=CONFIG["draft_var"],
-        flux_var=CONFIG["flux_var"],
-        grid_file=CONFIG["grid_file"]
-    )
+    calculate_draft_dependence()

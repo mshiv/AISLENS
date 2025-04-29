@@ -34,8 +34,10 @@ class Config:
 
     # Constants
     TIME_DIM: str = "Time"
-    DRAFT_VAR: str = "draft"
-    FLUX_VAR: str = "freshwater_flux"
+    SATOBS_DRAFT_VAR: str = "draft"
+    SATOBS_FLUX_VAR: str = "melt"
+    SORRM_DRAFT_VAR: str = "timeMonthly"
+    SORRM_FLUX_VAR: str = "freshwater_flux"
     START_YEAR: int = 2000
     END_YEAR: int = 2020
     N_REALIZATIONS: int = 10
