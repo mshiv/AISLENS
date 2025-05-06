@@ -1,7 +1,7 @@
 [project]
 name = "aislens"
 version = "0.1.0"
-description = "Antarctic Ice Sheet Large Ensemble"
+description = "Antarctic Ice Sheet Large ENSemble"
 readme = "README.md"
 license = "MIT"  
 authors = [
