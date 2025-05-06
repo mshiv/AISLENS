@@ -3,7 +3,7 @@ name = "aislens"
 version = "0.1.0"
 description = "Antarctic Ice Sheet Large Ensemble"
 readme = "README.md"
-license = "MIT"  # Use SPDX expression
+license = "MIT"  
 authors = [
     {name = "Shivaprakash Muruganandham", email = "smurugan9@gatech.edu"}
 ]
