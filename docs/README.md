@@ -4,8 +4,9 @@ This assumes you have access to the datasets to prepare initial condition and fo
 
 - `basalmelt_satobs_data.nc`: Freshwater flux at the ice ocean interface, ice draft
 - `basalmelt_model_data.nc` : 1000 year long simulation of freshwater flux across the ice sheet (SORRMv2.1)
+- `thermalforcing_ismip6AE_data/` : Directory of thermal forcings calculated from different CMIP5 and CMIP6 models with the required forcing datasets. These are for the ISMIP6 Antarctic Extended simulations, i.e., 23rd century simulations that are used as reference. These datasets can be obtained as per instructions provided on [Ghub](https://theghub.org/resources/5161/about). You will need an account to access this page.
 
-Refer to the [zenodo link](zenodo data link) for access to these files.
+Refer to the [zenodo link](zenodo data link) for access to all of the above files.
 
 We extract a mean current basal melt rate field from the satellite observations, which will be used to derive the draft dependent parameterization of basal melt. We also extract seasonality and variability signals from the model simulation data. The former will serve as an initial condition for the ice sheet model, while the latter is the forcing. Note that the model is forced directly by freshwater flux, not thermal forcing.
 
