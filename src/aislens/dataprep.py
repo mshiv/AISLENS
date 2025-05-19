@@ -148,7 +148,7 @@ def detrend_with_breakpoints_vectorized(data, dim, deg=1, model="l2", penalty=10
         input_core_dims=[[dim], [dim]],  # Specify core dimensions
         output_core_dims=[[dim]],        # Specify output dimension
         vectorize=True,                  # Enable vectorization
-        #dask="parallelized",             # Allow Dask parallelization
+        #dask="parallelized",             # Allow Dask parallelization - Dataset already parallelized when loaded
         output_dtypes=[data.dtype]       # Ensure correct output dtype
     )
 
@@ -216,3 +216,80 @@ def detrend_with_breakpoints_ts(data, dim, deg=1, model="l2", penalty=10):
     )
 
     return detrended_data
+
+import xarray as xr
+import numpy as np
+
+def compute_ismip6_basal_melt(ds, gamma0, cste, scyr, rhoi):
+    """
+    Compute ISMIP6 basal melt (vectorized, dask-friendly).
+
+    ds: xarray.Dataset with variables:
+        - TFdraft (Time, x, y)
+        - deltaT (Time, x, y)
+        - basinNumber (x, y)
+        - ismip6shelfMelt_offset (Time, x, y)
+        - mask_floating (Time, x, y)
+    gamma0, cste, scyr, rhoi: scalars
+
+    Returns
+    -------
+    ds: Dataset with 'floatingBasalMassBal' (Time, x, y)
+    """
+    # Broadcast basinNumber for alignment with (Time, x, y)
+    basinNumber = ds['basinNumber'].broadcast_like(ds['TFdraft'])
+
+    # Stack x and y for groupby, then unstack after
+    stacked = ds[['TFdraft', 'deltaT']].stack(cell=('x', 'y'))
+    basin_stacked = basinNumber.stack(cell=('x', 'y'))
+
+    # Compute mean TF per basin for each time (area weighting is trivial since area is constant)
+    tf_grouped = stacked['TFdraft'].groupby(basin_stacked)
+    mean_TF = tf_grouped.mean(dim='cell')  # (Time, basin)
+
+    # Broadcast mean_TF back to (Time, x, y)
+    # Prepare a DataArray aligning basins to x, y
+    basin_vals = ds['basinNumber'].values.ravel()
+    unique_basins = np.unique(basin_vals)
+    # mean_TF: (Time, basin), basin values correspond to unique_basins
+    # Map each (x, y) location to its basin index
+    basin_idx_map = {b: i for i, b in enumerate(unique_basins)}
+    basin_idx = np.vectorize(basin_idx_map.get)(basin_vals).reshape(ds['basinNumber'].shape)
+
+    # Now, use advanced indexing to get (Time, x, y)
+    # mean_TF_arr = mean_TF.transpose('Time', 'basin').data  # (Time, n_basins)
+    mean_TF_arr = mean_TF.transpose('Time', 'basin_stacked').data  # (Time, n_basins)
+    # This uses numpy/dask advanced indexing
+    time_steps = ds.dims['Time']
+    n_x, n_y = ds.dims['x'], ds.dims['y']
+    # Use xarray's apply_ufunc for full dask-compatibility
+    def select_mean_tf(mean_TF_arr, basin_idx):
+        # mean_TF_arr: (Time, n_basins), basin_idx: (x, y)
+        # Output: (Time, x, y)
+        return mean_TF_arr[:, basin_idx]
+
+    mean_TF_per_cell = xr.apply_ufunc(
+        select_mean_tf,
+        mean_TF_arr,
+        basin_idx,
+        input_core_dims=[['Time', 'basin_stacked'], ['x', 'y']],
+        output_core_dims=[['Time', 'x', 'y']],
+        vectorize=True,
+        dask='parallelized',
+        output_dtypes=[ds['TFdraft'].dtype],
+    )
+
+    # Now, mean_TF_per_cell: (Time, x, y)
+    # Calculate coefficient
+    coef = gamma0 * cste / scyr * rhoi
+
+    # Calculate the melt (all vectorized)
+    term1 = ds['TFdraft'] + ds['deltaT']
+    term2 = np.abs(mean_TF_per_cell + ds['deltaT'])
+    floatingBasalMassBal = -coef * term1 * term2 + ds['ismip6shelfMelt_offset']
+
+    # Apply floating mask
+    floatingBasalMassBal = floatingBasalMassBal.where(ds['mask_floating'], 0.0)
+
+    ds['floatingBasalMassBal'] = floatingBasalMassBal
+    return ds

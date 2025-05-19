@@ -10,6 +10,56 @@ import scipy
 import numpy as np
 import xarray as xr
 from scipy import spatial
+import urllib
+
+##################################################################
+# Utilities to create the data directory structure and 
+# download all necessary data files.
+# The data directory structure is as follows:
+# data/
+# ├── external
+# │   ├── meansatobsPaolo23.nc
+# │   └── sorrmv21.nc
+# ├── interim
+# ├── processed
+# ├── raw
+# └── tmp
+
+##################################################################
+
+def create_data_directories(base_dir="data"):
+    """
+    Create the data directory structure as specified.
+    """
+    subdirs = ["external", "interim", "processed", "raw", "tmp"]
+    for sub in subdirs:
+        Path(base_dir, sub).mkdir(parents=True, exist_ok=True)
+
+def fetch_file(target_dir, filename, source):
+    """
+    Download or symlink a file to the target directory.
+    If source is an https link, download the file.
+    If source is a local path, create a symlink.
+    """
+    target_path = Path(target_dir) / filename
+    if str(source).startswith("https://") or str(source).startswith("http://"):
+        print(f"Downloading {filename} from {source}...")
+        urllib.request.urlretrieve(source, target_path)
+    else:
+        print(f"Creating symlink for {filename} from {source}...")
+        if target_path.exists():
+            target_path.unlink()
+        os.symlink(os.path.abspath(source), target_path)
+
+def prepare_external_data(sorrmv21_src, meansatobsPaolo23_src, base_dir="data"):
+    """
+    Prepare the external data directory and fetch the required files.
+    """
+    create_data_directories(base_dir)
+    external_dir = Path(base_dir) / "external"
+    fetch_file(external_dir, "sorrmv21.nc", sorrmv21_src)
+    fetch_file(external_dir, "meansatobsPaolo23.nc", meansatobsPaolo23_src)
+
 
 ##################################################################
 # Data utilities for xarray datasets
