@@ -29,9 +29,10 @@ pip install -e .
 
 Create a `data/` directory in the root project repository, with the following structure:
 
-```
+```Shell
 /AISLENS/
 ├── data/
+    ├── raw/
     ├── external/
     ├── interim/
     ├── processed/
