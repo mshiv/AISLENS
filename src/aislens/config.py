@@ -8,6 +8,7 @@ class Config:
     BASE_DIR: Path = here()
 
     # Directory paths
+    DIR_RAW: Path = BASE_DIR / "data/raw"
     DIR_EXTERNAL: Path = BASE_DIR / "data/external"
     DIR_INTERIM: Path = BASE_DIR / "data/interim"
     DIR_PROCESSED: Path = BASE_DIR / "data/processed"
@@ -36,8 +37,8 @@ class Config:
     TIME_DIM: str = "Time"
     SATOBS_DRAFT_VAR: str = "draft"
     SATOBS_FLUX_VAR: str = "melt"
-    SORRM_DRAFT_VAR: str = "timeMonthly"
-    SORRM_FLUX_VAR: str = "freshwater_flux"
+    SORRM_DRAFT_VAR: str = "timeMonthly_avg_ssh"
+    SORRM_FLUX_VAR: str = "timeMonthly_avg_landIceFreshwaterFlux"
     START_YEAR: int = 2000
     END_YEAR: int = 2020
     N_REALIZATIONS: int = 10
