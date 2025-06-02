@@ -52,7 +52,6 @@ def process_catchment(i, icems, satobs, config):
         mlt_coef_ds.name: mlt_coef_ds,
         mlt_intercept_ds.name: mlt_intercept_ds
         })
-    initialize_directories(directories=config.DIR_ICESHELF_DEDRAFT)
     mlt_coefs.to_netcdf(config.DIR_ICESHELF_DEDRAFT / f'draftDepenBasalMeltAlpha_{icems.name.values[i]}.nc')
     print(f'{icems.name.values[i]} file saved')
 
