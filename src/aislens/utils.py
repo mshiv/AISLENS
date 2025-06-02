@@ -12,6 +12,7 @@ import xarray as xr
 from scipy import spatial
 import urllib
 import gc
+from aislens.config import config
 
 ##################################################################
 # Utilities to create the data directory structure and 
@@ -401,7 +402,38 @@ def ensure_dir_exists(file_path):
     if not directory.exists():
         directory.mkdir(parents=True, exist_ok=True)
 
-def initialize_directories(directories):
+def is_directory_path(attr_name, path_obj):
+    """
+    Check if the given attribute name and path object represent a directory path. 
+    Directory paths are defined to start with 'DIR_' or end with '_DIR' and are Path objects.
+    Args:
+        attr_name (str): Name of the attribute.
+        path_obj (Path): Path object to check.
+    Returns:
+        bool: True if the attribute name indicates 
+              a directory path and the path object is a Path object, False otherwise.
+    """
+    
+    return (
+        isinstance(path_obj, Path)
+        and (
+            attr_name.startswith("DIR_") or attr_name.endswith("_DIR")
+            or "DIR_" in attr_name
+        )
+    )
+
+def collect_directories(config_obj):
+    directories = []
+    for attr_name in dir(config_obj):
+        # Skip dunder and private/protected attributes
+        if attr_name.startswith("_"):
+            continue
+        value = getattr(config_obj, attr_name)
+        if is_directory_path(attr_name, value):
+            directories.append(value)
+    return directories
+
+def initialize_directories(directories=collect_directories(config)):
     """
     Ensure that all directories in the given list exist.
 
