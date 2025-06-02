@@ -32,6 +32,7 @@ icems = xr.open_dataset(config.FILE_ICESHELFMASKS)
 # Merge the dedrafted data across the entire ice sheet
 
 def calculate_draft_dependence(icems, satobs, config):
+    print("CALCULATING DRAFT DEPENDENCE PARAMETERS FOR SATELLITE OBSERVATIONS...")
     for i in config.ICE_SHELF_REGIONS:
         process_catchment(i, icems, satobs, config, 
                           save_dir=config.DIR_ICESHELF_DEDRAFT_SATOBS,
@@ -40,6 +41,7 @@ def calculate_draft_dependence(icems, satobs, config):
     draft_dependence_params = xr.Dataset()
     for i in config.ICE_SHELF_REGIONS:
         draft_dependence_params = xr.merge([draft_dependence_params, xr.open_dataset(config.DIR_ICESHELF_DEDRAFT_SATOBS / 'draftDepenBasalMeltAlpha_{}.nc'.format(icems.name.values[i]))])
+    print("DRAFT DEPENDENCE PARAMETERS CALCULATED AND SAVED FOR SATELLITE OBSERVATIONS.")
     # Extrapolate draft dependence parameters
     draft_dependence_params = draft_dependence_params.fillna(0)  # Fill NaN values with 0 before extrapolation
     # draft_dependence_extrapolated = fill_nan_with_nearest_neighbor_vectorized(draft_dependence_params)
