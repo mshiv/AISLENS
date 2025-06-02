@@ -48,6 +48,7 @@ def prepare_model_simulation():
     # Load model simulation dataset
     print("Preparing model simulation data...")
     model = xr.open_dataset(config.FILE_MPASO_MODEL, chunks={config.TIME_DIM: 36})
+    model = write_crs(model, config.CRS_TARGET)
 
     print("Model simulation data loaded successfully.")
     print("Subsetting model simulation data by time...")
