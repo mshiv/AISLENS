@@ -45,8 +45,10 @@ def prepare_model_simulation():
     model_deseasonalized = deseasonalize(model_detrended)
     model_dedrafted = dedraft(model_deseasonalized, model_subset[config.SORRM_DRAFT_VAR])
     
+    model_seasonality = model_detrended - model_deseasonalized
+    
     # Save the processed components
-    model_deseasonalized.to_netcdf(config.FILE_SEASONALITY)
+    model_seasonality.to_netcdf(config.FILE_SEASONALITY)
     model_dedrafted.to_netcdf(config.FILE_VARIABILITY)
 
 if __name__ == "__main__":
