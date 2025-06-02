@@ -40,6 +40,11 @@ Create a `data/` directory in the root project repository, with the following st
 ```
 
 Copy the data files provided in the Zenodo object into this directory.
+The `scripts/main.py` script initializes and creates these directories based on the Path definitions provided in `aislens/config.py`, either in the root project repository, or in an alternative data location defined by `DATA_ROOT` (typically, the `$SCRATCH` working directory in a HPC machine.) This is best defined by the `AISLENS_DATA_DIR` environment variable, example below:
+
+```Shell
+export AISLENS_DATA_DIR=$HOME/scratch/AISLENS
+```
 
 ## Workflow
 
