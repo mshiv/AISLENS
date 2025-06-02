@@ -17,7 +17,7 @@
 #   6. Save the seasonality and variability components thus obtained.
 
 from aislens.dataprep import detrend_dim, deseasonalize, dedraft_catchment, extrapolate_catchment_over_time
-from aislens.utils import merge_catchment_files, subset_dataset_by_time
+from aislens.utils import merge_catchment_files, subset_dataset_by_time, collect_directories, initialize_directories
 from aislens.config import config
 import numpy as np
 import xarray as xr
@@ -104,5 +104,7 @@ def prepare_model_simulation():
 
 
 if __name__ == "__main__":
+    dirs_to_create = collect_directories(config)
+    initialize_directories(dirs_to_create)
     prepare_satellite_observations()
     prepare_model_simulation()
