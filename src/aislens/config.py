@@ -1,15 +1,6 @@
 from dataclasses import dataclass, field
 from pathlib import Path
 from pyprojroot import here
-
-@dataclass
-class Config:
-    # Define the root directory of the project
-    BASE_DIR: Path = here()
-
-    from dataclasses import dataclass, field
-from pathlib import Path
-from pyprojroot import here
 import os
 
 @dataclass
