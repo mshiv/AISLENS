@@ -17,10 +17,11 @@ class Config:
     # Project root (code location, for source files, scripts, etc.)
     BASE_DIR: Path = here()
 
-    # Data root, configurable by environment variable (defaults to $SCRATCH/AISLENS if set, else falls back to code location)
-    DATA_ROOT: Path = Path(
-        os.environ.get('AISLENS_DATA_DIR', os.path.expandvars('$HOME/scratch/AISLENS'))
-    )
+    # Data root, configurable by environment variable (if set, else defaults back to project location of BASE_DIR)
+    # DATA_ROOT: Path = Path(
+    #    os.environ.get('AISLENS_DATA_DIR', os.path.expandvars('$HOME/scratch/AISLENS'))
+    #)
+    DATA_ROOT: Path = Path(os.environ.get('AISLENS_DATA_DIR', BASE_DIR))
 
     # Directory paths (all data is stored under DATA_ROOT/data). 
     # Replace DATA_ROOT with BASE_DIR if you want to use the project code location as the data root.
