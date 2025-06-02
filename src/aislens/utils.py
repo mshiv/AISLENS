@@ -158,7 +158,10 @@ def subset_dataset(file_path, dim, start, end, output_path=None, chunk_size=10):
 
 def copy_subset_data(ds_data, merged_ds):
     """
-    Copy data from merged datasets into the original dataset.
+    Copy data from merged datasets into the original dataset. 
+    This utility function is used to update the original dataset with data from merged datasets,
+    and is useful in the extrapolation workflows where we merge data from multiple ice shelf catchments
+    and extrapolate data to the entire ice sheet grid.
 
     Args:
         ds_data (xarray.Dataset): Original dataset.
@@ -167,25 +170,28 @@ def copy_subset_data(ds_data, merged_ds):
     Returns:
         xarray.Dataset: Updated dataset with merged data.
     """
+    # Find the indices in ds_data that correspond to merged_ds coordinates
     x_indices = np.searchsorted(ds_data.x, merged_ds.x)
     y_indices = np.searchsorted(ds_data.y, merged_ds.y)
-
+    # Create a boolean mask for the subset area in ds_data based on sizes of x and y dimensions.
     mask = np.zeros((ds_data.sizes['y'], ds_data.sizes['x']), dtype=bool)
     mask[np.ix_(y_indices, x_indices)] = True
-
+    # Create a new dataset with the same structure as ds_data
     ds_result = ds_data.copy(deep=True)
-
+    # Update the values in ds_result where the mask is True
     for var in merged_ds.data_vars:
         if var in ds_result:
+            # Create a full-sized array with NaNs
             full_sized_data = np.full(ds_result[var].shape, np.nan)
+            # Fill in the data from merged_ds
             full_sized_data[np.ix_(y_indices, x_indices)] = merged_ds[var].values
+            # Update ds_result, preserving the original values where merged_ds doesn't have data
             ds_result[var] = xr.where(np.isnan(full_sized_data), ds_result[var], full_sized_data)
-
     return ds_result
 
-def merge_catchments(results):
+def merge_catchment_data(results):
     """
-    Merge datasets from multiple ice shelf catchments.
+    Merge in-memory, loaded datasets from multiple ice shelf catchments. Used in the extrapolation workflows.
 
     Args:
         results (list): List of xarray.Dataset objects.
@@ -194,6 +200,22 @@ def merge_catchments(results):
         xarray.Dataset: Merged dataset.
     """
     return xr.merge(results)
+
+def merge_catchment_files(filepaths):
+    """
+    Merge a list of NetCDF files into a single xarray.Dataset.
+
+    Args:
+        filepaths (list): List of paths to NetCDF files.
+
+    Returns:
+        xarray.Dataset: Merged dataset.
+    """
+    datasets = [xr.open_dataset(fp) for fp in filepaths]
+    merged = xr.merge(datasets)
+    for ds in datasets:
+        ds.close()
+    return merged
 
 ##################################################################
 # Geospatial utilities for xarray and geopandas datasets
