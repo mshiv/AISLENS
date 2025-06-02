@@ -13,6 +13,7 @@ from sklearn.linear_model import LinearRegression
 import ruptures as rpt
 from aislens.config import config
 from aislens.geospatial import clip_data, write_crs
+from aislens.utils import fill_nan_with_nearest_neighbor_vectorized, merge_catchment_data, copy_subset_data
 
 def detrend_dim(data, dim, deg):
     """
@@ -73,11 +74,11 @@ def dedraft(data, draft):
     data_stack_noNaN = data_stack.fillna(0)
     draft_stack_noNaN = draft_stack.fillna(0)
     reg = LinearRegression().fit(draft_stack_noNaN.values.reshape(-1, 1), data_stack_noNaN.values.reshape(-1, 1))
-    #data_pred_stack_noNaN_vals = reg.predict(draft_stack_noNaN.values.reshape(-1, 1)).reshape(-1)
-    #data_pred_stack_noNaN = data_stack_noNaN.copy(data=data_pred_stack_noNaN_vals)
-    #data_pred_stack = data_pred_stack_noNaN.where(~data_stack.isnull(), np.nan)
-    #data_pred = data_pred_stack.unstack('z').transpose()
-    return reg.coef_, reg.intercept_ #, data_pred
+    data_pred_stack_noNaN_vals = reg.predict(draft_stack_noNaN.values.reshape(-1, 1)).reshape(-1)
+    data_pred_stack_noNaN = data_stack_noNaN.copy(data=data_pred_stack_noNaN_vals)
+    data_pred_stack = data_pred_stack_noNaN.where(~data_stack.isnull(), np.nan)
+    data_pred = data_pred_stack.unstack('z').transpose()
+    return reg.coef_, reg.intercept_, data_pred
 
 def setup_draft_depen_field(param_ref, param_data, param_name, i, icems):
     """
@@ -105,6 +106,89 @@ def setup_draft_depen_field(param_ref, param_data, param_name, i, icems):
     param_ds = clip_data(param_ds, i, icems)
     return param_ds
 
+def dedraft_catchment(
+    i, icems, data, config, 
+    save_dir, 
+    save_pred=False, 
+    save_coefs=False
+    ):
+    """
+    This function processes individual ice shelf catchments to dedraft and:
+    - save predicted melt (to isolate and calculate variability in model data), 
+    - or save regression coefficients (to calculate draft dependence from observations).
+    
+    Args:
+        i (int): Index for ice shelf catchment.
+        icems: geoDataframe with ice shelf masks.
+        data (xarray.DataArray): Input data containing melt and draft fields for model or observations.
+        config: Configuration object containing paths and attributes.
+        save_dir (Path): Directory to save output.
+        save_pred (bool): Save predicted melt (model).
+        save_coefs (bool): Save regression coefficients (obs).
+    """
+    catchment_name = icems.name.values[i]
+    print(f'Extracting data for catchment {catchment_name}')
+    ds = clip_data(data, i, icems)
+    ds_tm = ds.mean(dim='time')
+
+    print(f'Calculating draft dependent linear regression for catchment {catchment_name}')
+    coef, intercept, pred = dedraft(ds.melt, ds.draft)
+
+    if save_coefs:
+        # Retrieve attribute keys explicitly for clarity
+        alpha0_key, alpha1_key = list(config.DATA_ATTRS.keys())
+        coef_ds = setup_draft_depen_field(ds_tm.melt, coef, alpha1_key, i, icems)
+        intercept_ds = setup_draft_depen_field(ds_tm.melt, intercept, alpha0_key, i, icems)
+        ds_out = xr.Dataset({coef_ds.name: coef_ds, intercept_ds.name: intercept_ds})
+        filename = save_dir / f'draftDepenBasalMeltAlpha_{catchment_name}.nc'
+        ds_out.to_netcdf(filename)
+        print(f'{catchment_name} coefficients file saved: {filename}')
+    if save_pred:
+        filename = save_dir / f'draftDepenModelPred_{catchment_name}.nc'
+        pred.to_netcdf(filename)
+        print(f'{catchment_name} prediction file saved: {filename}')
+
+def extrapolate_catchment(data, i, icems):
+    """
+    Extrapolate specified data field for a given ice shelf catchment into the interior of the ice sheet.
+    Args:
+        ds_data (xarray.DataArray): Input data containing melt and draft fields for model or observations.
+        i (int): Index for ice shelf catchment.
+        icems: geoDataframe with ice shelf masks.
+    Returns:
+        xarray.DataArray: Extrapolated data field for the given ice shelf catchment.
+    """
+    ice_shelf_mask = icems.loc[[i], 'geometry'].apply(mapping)
+    ds = clip_data(data, i, icems)
+    ds = ds.map(fill_nan_with_nearest_neighbor_vectorized, keep_attrs=True)
+    ds = ds.rio.clip(ice_shelf_mask, icems.crs)
+    return ds
+
+def extrapolate_catchment_over_time(dataset, icems, config, var_name):
+    """
+    Extrapolate catchment data for each time step.
+    Returns an xarray.Dataset with filled values.
+    """
+    times = dataset[var_name].coords[config.TIME_DIM]
+    shape = dataset[var_name].shape
+    extrap_array = np.full(shape, np.nan)
+
+    extrap_ds = xr.DataArray(
+        extrap_array,
+        coords=dataset[var_name].coords,
+        dims=dataset[var_name].dims,
+        attrs=dataset[var_name].attrs
+    )
+    extrap_ds = xr.Dataset({var_name: extrap_ds})
+
+    for t in range(len(times)):
+        ds_data = dataset.isel({config.TIME_DIM: t}).rename({'x1': 'x', 'y1': 'y'})
+        results = [extrapolate_catchment(ds_data, i, icems) for i in config.ICE_SHELF_REGIONS]
+        merged_ds = merge_catchment_data(results)
+        result_ds = copy_subset_data(ds_data, merged_ds)
+        extrap_ds[var_name][t] = result_ds[var_name]
+        print(f"Completed {var_name} time step {t}")
+    return extrap_ds
 
 def detect_breakpoints(arr, model="l2", penalty=10):
     """
