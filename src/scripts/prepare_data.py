@@ -16,8 +16,10 @@
 #   5. Dedraft the data.
 #   6. Save the seasonality and variability components thus obtained.
 
-from aislens.dataprep import detrend_dim, deseasonalize, dedraft
+from aislens.dataprep import detrend_dim, deseasonalize, dedraft_catchment, extrapolate_catchment, extrapolate_catchment_over_time
+from aislens.utils import merge_catchment_data, copy_subset_data, merge_catchment_files
 from aislens.config import config
+import numpy as np
 import xarray as xr
 
 def prepare_satellite_observations():
@@ -29,7 +31,10 @@ def prepare_satellite_observations():
     
     # Deseasonalize the data
     satobs_deseasonalized = deseasonalize(satobs_detrended)
-    
+
+    # TODO: Take the time-mean of the dataset
+    # TODO: Ensure that melt is converted to flux, if not, and is in SI units
+
     # Save the prepared data
     satobs_deseasonalized.to_netcdf(config.FILE_PAOLO23_SATOBS_PREPARED)
 
@@ -43,13 +48,41 @@ def prepare_model_simulation():
     # Detrend, deseasonalize, and dedraft the data
     model_detrended = detrend_dim(model_subset[config.SORRM_FLUX_VAR], dim=config.TIME_DIM, deg=1)
     model_deseasonalized = deseasonalize(model_detrended)
-    model_dedrafted = dedraft(model_deseasonalized, model_subset[config.SORRM_DRAFT_VAR])
-    
+    icems = xr.open_dataset(config.FILE_ICESHELFMASKS)
+
+    for i in config.ICE_SHELF_REGIONS:
+        dedraft_catchment(i, icems, model_deseasonalized, config, 
+                          save_dir=config.DIR_ICESHELF_DEDRAFT_MODEL,
+                          save_pred=True
+                          )
+    #draft_dependence_pred = xr.Dataset()
+    #for i in config.ICE_SHELF_REGIONS:
+    #    draft_dependence_pred = xr.merge([draft_dependence_pred, xr.open_dataset(config.DIR_ICESHELF_DEDRAFT_MODEL / 'draftDepenModelPred_{}.nc'.format(icems.name.values[i]))])
+
+    draft_dependence_pred = merge_catchment_files([config.DIR_ICESHELF_DEDRAFT_MODEL / f'draftDepenModelPred_{icems.name.values[i]}.nc'
+                                                   for i in config.ICE_SHELF_REGIONS
+                                                   ])
+
+    model_variability = model_deseasonalized - draft_dependence_pred
     model_seasonality = model_detrended - model_deseasonalized
+
+    # Extrapolate the seasonality and variability components to the entire ice sheet grid
+    model_variability_extrapl = extrapolate_catchment_over_time(model_variability, 
+                                                                icems, config, 
+                                                                config.SORRM_FLUX_VAR
+                                                                )
+    model_seasonality_extrapl = extrapolate_catchment_over_time(model_seasonality, 
+                                                                icems, config, 
+                                                                config.SORRM_FLUX_VAR
+                                                                )
     
     # Save the processed components
     model_seasonality.to_netcdf(config.FILE_SEASONALITY)
-    model_dedrafted.to_netcdf(config.FILE_VARIABILITY)
+    model_seasonality_extrapl.to_netcdf(config.FILE_SEASONALITY_EXTRAPL)
+    model_variability.to_netcdf(config.FILE_VARIABILITY)
+    model_variability_extrapl.to_netcdf(config.FILE_VARIABILITY_EXTRAPL)
+    print("Processing complete. Updated dataset saved.")
+
 
 if __name__ == "__main__":
     prepare_satellite_observations()
