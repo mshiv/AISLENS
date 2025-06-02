@@ -42,7 +42,7 @@ def prepare_satellite_observations():
 
 def prepare_model_simulation():
     # Load model simulation dataset
-    model = xr.open_dataset(config.FILE_MPASO_MODEL)
+    model = xr.open_dataset(config.FILE_MPASO_MODEL, chunks={config.TIME_DIM: 36})
 
     model_subset = subset_dataset_by_time(model,
                                           time_dim=config.TIME_DIM,
