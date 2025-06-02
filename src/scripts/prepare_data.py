@@ -31,7 +31,7 @@ def prepare_satellite_observations():
     print("Satellite observations loaded successfully.")
     # Detrend the data along the time dimension
     print("Detrending satellite observations...")
-    satobs_detrended = detrend_dim(satobs[config.SATOBS_FLUX_VAR], dim=config.SATOBS_TIME_DIM, deg=1)
+    satobs_detrended = detrend_dim(satobs[config.SATOBS_FLUX_VAR], dim=config.TIME_DIM, deg=1)
     print("Satellite observations detrended successfully.")
     print("Deseasonalizing satellite observations...")
     # Deseasonalize the data

@@ -40,7 +40,7 @@ class Config:
     DIR_MALI_DRAFT_DEPENDENCE: Path = DIR_PROCESSED / "mali_grid/draft_dependence" # Location of the final draft dependence fields on the MALI grid
 
     # File paths
-    FILE_PAOLO23_SATOBS: Path = DIR_EXTERNAL / "ANT_G1920V01_IceShelfMeltDraft.nc"
+    FILE_PAOLO23_SATOBS: Path = DIR_EXTERNAL / "ANT_G1920V01_IceShelfMeltDraft_Time.nc"
     FILE_MPASO_MODEL: Path = DIR_EXTERNAL / "Regridded_SORRMv2.1.ISMF.FULL.nc"
     FILE_ICESHELFMASKS: Path = DIR_EXTERNAL / "iceShelves.geojson"
 
@@ -56,7 +56,6 @@ class Config:
 
     # Constants
     TIME_DIM: str = "Time"
-    SATOBS_TIME_DIM: str = "time"
     SATOBS_DRAFT_VAR: str = "draft"
     SATOBS_FLUX_VAR: str = "melt"
     SORRM_DRAFT_VAR: str = "timeMonthly_avg_ssh"
