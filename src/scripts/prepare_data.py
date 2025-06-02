@@ -21,12 +21,13 @@ from aislens.utils import merge_catchment_files, subset_dataset_by_time, collect
 from aislens.config import config
 import numpy as np
 import xarray as xr
+import geopandas as gpd
 
 # initialize_directories(collect_directories(config))
 
 def prepare_satellite_observations():
     # Load satellite observation dataset
-    print("Preparing satellite observations...")
+    print("Preparing satellite observaticons...")
     satobs = xr.open_dataset(config.FILE_PAOLO23_SATOBS)
     print("Satellite observations loaded successfully.")
     # Detrend the data along the time dimension
@@ -64,7 +65,7 @@ def prepare_model_simulation():
     model_deseasonalized = deseasonalize(model_detrended)
     print("Model simulation data deseasonalized successfully.")
     print("Dedrafting model simulation data...")
-    icems = xr.open_dataset(config.FILE_ICESHELFMASKS)
+    icems = gpd.read_file(config.FILE_ICESHELFMASKS).to_crs({'init': 'epsg:3031'});
 
     for i in config.ICE_SHELF_REGIONS:
         dedraft_catchment(i, icems, model_deseasonalized, config, 
@@ -106,5 +107,5 @@ def prepare_model_simulation():
 if __name__ == "__main__":
     dirs_to_create = collect_directories(config)
     initialize_directories(dirs_to_create)
-    prepare_satellite_observations()
+    #prepare_satellite_observations()
     prepare_model_simulation()
