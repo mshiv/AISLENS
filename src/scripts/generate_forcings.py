@@ -29,9 +29,9 @@ from aislens.config import config
 import xarray as xr
 
 def generate_forcings():
-    # Load seasonality and variability datasets
-    seasonality = xr.open_dataset(config.FILE_SEASONALITY)
-    variability = xr.open_dataset(config.FILE_VARIABILITY)
+    # Load extrapolated seasonality and variability datasets
+    seasonality = xr.open_dataset(config.FILE_SEASONALITY_EXTRAPL)
+    variability = xr.open_dataset(config.FILE_VARIABILITY_EXTRAPL)
     
     # Generate variability realizations
     realizations = generate_variability_realizations(variability, n_realizations=config.N_REALIZATIONS)
