@@ -56,6 +56,7 @@ class Config:
 
     # Constants
     TIME_DIM: str = "Time"
+    SATOBS_TIME_DIM: str = "time"
     SATOBS_DRAFT_VAR: str = "draft"
     SATOBS_FLUX_VAR: str = "melt"
     SORRM_DRAFT_VAR: str = "timeMonthly_avg_ssh"
