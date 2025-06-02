@@ -129,7 +129,7 @@ def dedraft_catchment(
     catchment_name = icems.name.values[i]
     print(f'Extracting data for catchment {catchment_name}')
     ds = clip_data(data, i, icems)
-    ds_tm = ds.mean(dim='time')
+    ds_tm = ds.mean(dim=config.TIME_DIM)
 
     print(f'Calculating draft dependent linear regression for catchment {catchment_name}')
     coef, intercept, pred = dedraft(ds.melt, ds.draft)
