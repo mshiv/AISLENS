@@ -11,6 +11,8 @@ from pathlib import Path
 import numpy as np
 from sklearn.linear_model import LinearRegression
 import ruptures as rpt
+from aislens.config import config
+from aislens.geospatial import clip_data, write_crs
 
 def detrend_dim(data, dim, deg):
     """
@@ -24,9 +26,14 @@ def detrend_dim(data, dim, deg):
     Returns:
         xarray.DataArray: Detrended data.
     """
+    # Store the original mean
+    original_mean = data.mean(dim=dim)
+    # Detrend along a single dimension
     p = data.polyfit(dim=dim, deg=deg)
     fit = xr.polyval(data[dim], p.polyfit_coefficients)
     detrended = data - fit
+    # Add back the original mean
+    detrended += original_mean
     return detrended
 
 def deseasonalize(data):
@@ -55,6 +62,8 @@ def dedraft(data, draft):
         draft (xarray.DataArray): Draft data.
 
     Returns:
+        reg.coef_: Coefficients of the regression.
+        reg.intercept_: Intercept of the regression.
         xarray.DataArray: Predicted draft dependence.
     """
     data_tm = data.mean(dim='Time')
@@ -64,11 +73,38 @@ def dedraft(data, draft):
     data_stack_noNaN = data_stack.fillna(0)
     draft_stack_noNaN = draft_stack.fillna(0)
     reg = LinearRegression().fit(draft_stack_noNaN.values.reshape(-1, 1), data_stack_noNaN.values.reshape(-1, 1))
-    data_pred_stack_noNaN_vals = reg.predict(draft_stack_noNaN.values.reshape(-1, 1)).reshape(-1)
-    data_pred_stack_noNaN = data_stack_noNaN.copy(data=data_pred_stack_noNaN_vals)
-    data_pred_stack = data_pred_stack_noNaN.where(~data_stack.isnull(), np.nan)
-    data_pred = data_pred_stack.unstack('z').transpose()
-    return data_pred
+    #data_pred_stack_noNaN_vals = reg.predict(draft_stack_noNaN.values.reshape(-1, 1)).reshape(-1)
+    #data_pred_stack_noNaN = data_stack_noNaN.copy(data=data_pred_stack_noNaN_vals)
+    #data_pred_stack = data_pred_stack_noNaN.where(~data_stack.isnull(), np.nan)
+    #data_pred = data_pred_stack.unstack('z').transpose()
+    return reg.coef_, reg.intercept_ #, data_pred
+
+def setup_draft_depen_field(param_ref, param_data, param_name, i, icems):
+    """
+    Set up a DataArray for draft dependence parameter field.
+
+    Args:
+        param_ref (xarray.Dataset): Time-averaged dataset.
+        param_data (xarray.Dataset): Parameter data calculated by dedraft.
+
+    Returns:
+        xarray.DataArray: Initialized DataArray for the parameter.
+    """
+    param_ds = xr.DataArray(
+        np.full((param_ref.shape[0], param_ref.shape[1]), param_data),
+        dims=['y', 'x'],
+        coords={'x': param_ref.x, 'y': param_ref.y}
+    )
+    param_ds.name = param_name
+    param_ds.attrs["long_name"] = config.DATA_ATTRS[param_name]['long_name']
+    param_ds.attrs["units"] = config.DATA_ATTRS[param_name]['units']
+    write_crs(param_ds)
+    # Create a boolean mask for the ice shelf of interest using the icems geometry
+    # # This mask will be used to filter the two data arrays above to define values only inside the ice shelf mask region
+    # Filter the mlt_coef_ds data array using this mask
+    param_ds = clip_data(param_ds, i, icems)
+    return param_ds
+
 
 def detect_breakpoints(arr, model="l2", penalty=10):
     """
