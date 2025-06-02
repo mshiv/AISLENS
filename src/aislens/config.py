@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from pyprojroot import here
 
@@ -13,12 +13,14 @@ class Config:
     DIR_INTERIM: Path = BASE_DIR / "data/interim"
     DIR_PROCESSED: Path = BASE_DIR / "data/processed"
     DIR_TMP: Path = BASE_DIR / "data/tmp"
-    DIR_ICESHELF_DEDRAFT: Path = DIR_INTERIM / "draft_dependence"
-    DIR_DRAFT_DEPENDENCE: Path = DIR_PROCESSED / "draft_dependence"
-    DIR_VARGENS: Path = DIR_PROCESSED / "vargen_realizations"
-    DIR_FORCINGS: Path = DIR_PROCESSED / "forcings" # this is the sum of extrapolated seasonality and vargen_realizations
-    DIR_MALI_FORCINGS: Path = DIR_PROCESSED / "mali_grid/forcings"
-    DIR_MALI_DRAFT_DEPENDENCE: Path = DIR_PROCESSED / "mali_grid/draft_dependence"
+
+    DIR_ICESHELF_DEDRAFT: Path = DIR_INTERIM / "draft_dependence" # Draft dependence parameters calculated for individual ice shelves
+    DIR_DRAFT_DEPENDENCE: Path = DIR_PROCESSED / "draft_dependence" # Draft dependence parameters that are combined for entire ice sheet
+    DIR_VARGENS: Path = DIR_PROCESSED / "vargen_realizations" # Generated realizations of variability
+    
+    DIR_FORCINGS: Path = DIR_PROCESSED / "forcings" # Location of the sum of extrapolated seasonality and vargen_realizations and trends
+    DIR_MALI_FORCINGS: Path = DIR_PROCESSED / "mali_grid/forcings" # Location of the final forcing files converted to MALI grid
+    DIR_MALI_DRAFT_DEPENDENCE: Path = DIR_PROCESSED / "mali_grid/draft_dependence" # Location of the final draft dependence fields on the MALI grid
 
     # File paths
     FILE_PAOLO23_SATOBS: Path = DIR_EXTERNAL / "ANT_G1920V01_IceShelfMeltDraft.nc"
@@ -39,10 +41,22 @@ class Config:
     SATOBS_FLUX_VAR: str = "melt"
     SORRM_DRAFT_VAR: str = "timeMonthly_avg_ssh"
     SORRM_FLUX_VAR: str = "timeMonthly_avg_landIceFreshwaterFlux"
+    ICE_SHELF_REGIONS: range = range(33,133)
     START_YEAR: int = 2000
     END_YEAR: int = 2020
     N_REALIZATIONS: int = 10
     CRS_TARGET: str = "epsg:3031"
+    DATA_ATTRS: dict = field(default_factory=lambda: {
+        "draftDepenBasalMeltAlpha0": {
+            "long_name": "Basal melt rate draft dependency coefficient (alpha0 or intercept)",
+            "units": "m/yr",
+        },
+        "draftDepenBasalMeltAlpha1": {
+            "long_name": "Basal melt rate draft dependency coefficient (alpha1 or slope)",
+            "units": "m/yr/m",
+        },
+
+    })
 
 # Instantiate the configuration
 config = Config()
