@@ -12,8 +12,8 @@ import numpy as np
 from sklearn.linear_model import LinearRegression
 import ruptures as rpt
 from aislens.config import config
-from aislens.geospatial import clip_data, write_crs
-from aislens.utils import fill_nan_with_nearest_neighbor_vectorized, merge_catchment_data, copy_subset_data
+from aislens.geospatial import clip_data
+from aislens.utils import fill_nan_with_nearest_neighbor_vectorized, merge_catchment_data, copy_subset_data, write_crs
 
 def detrend_dim(data, dim, deg):
     """

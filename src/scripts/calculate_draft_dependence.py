@@ -15,7 +15,7 @@
 #            using the fill_nan_with_nearest_neighbor_vectorized function.
 #   4. Save the extrapolated parameters to a specified output path.
 
-from aislens.dataprep import process_catchment
+from aislens.dataprep import dedraft_catchment
 from aislens.config import config
 import xarray as xr
 
@@ -34,7 +34,7 @@ icems = xr.open_dataset(config.FILE_ICESHELFMASKS)
 def calculate_draft_dependence(icems, satobs, config):
     print("CALCULATING DRAFT DEPENDENCE PARAMETERS FOR SATELLITE OBSERVATIONS...")
     for i in config.ICE_SHELF_REGIONS:
-        process_catchment(i, icems, satobs, config, 
+        dedraft_catchment(i, icems, satobs, config, 
                           save_dir=config.DIR_ICESHELF_DEDRAFT_SATOBS,
                           save_coefs=True
                           )
