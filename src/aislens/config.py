@@ -39,7 +39,8 @@ class Config:
     #DIR_PROCESSED: Path = BASE_DIR / "data/processed"
     #DIR_TMP: Path = BASE_DIR / "data/tmp"
 
-    DIR_ICESHELF_DEDRAFT: Path = DIR_INTERIM / "draft_dependence" # Draft dependence parameters calculated for individual ice shelves
+    DIR_ICESHELF_DEDRAFT_SATOBS: Path = DIR_INTERIM / "draft_dependence/satobs" # Draft dependence parameters calculated for individual ice shelves from satellite observations
+    DIR_ICESHELF_DEDRAFT_MODEL: Path = DIR_INTERIM / "draft_dependence/model" # Draft dependence parameters calculated for individual ice shelves from model simulations
     DIR_DRAFT_DEPENDENCE: Path = DIR_PROCESSED / "draft_dependence" # Draft dependence parameters that are combined for entire ice sheet
     DIR_VARGENS: Path = DIR_PROCESSED / "vargen_realizations" # Generated realizations of variability
     
@@ -57,7 +58,9 @@ class Config:
     FILE_MPASO_MODEL_PREPARED: Path = DIR_PROCESSED / "model_simulation_prepared.nc"
     FILE_DRAFT_DEPENDENCE: Path = DIR_PROCESSED / "draft_dependence_params.nc"
     FILE_SEASONALITY: Path = DIR_PROCESSED / "sorrm_seasonality.nc"
+    FILE_SEASONALITY_EXTRAPL: Path = DIR_PROCESSED / "sorrm_seasonality_extrapolated.nc"
     FILE_VARIABILITY: Path = DIR_PROCESSED / "sorrm_variability.nc"
+    FILE_VARIABILITY_EXTRAPL: Path = DIR_PROCESSED / "sorrm_variability_extrapolated.nc"
     FILE_FORCING: Path = DIR_PROCESSED / "sorrm_forcing.nc"
 
     # Constants
