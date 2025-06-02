@@ -11,6 +11,7 @@ import numpy as np
 import xarray as xr
 from scipy import spatial
 import urllib
+import gc
 
 ##################################################################
 # Utilities to create the data directory structure and 
@@ -181,9 +182,9 @@ def copy_subset_data(ds_data, merged_ds):
 
     return ds_result
 
-def merge_datasets(results):
+def merge_catchments(results):
     """
-    Merge datasets from multiple ice shelves.
+    Merge datasets from multiple ice shelf catchments.
 
     Args:
         results (list): List of xarray.Dataset objects.
@@ -409,3 +410,12 @@ def initialize_directories(directories):
     """
     for directory in directories:
         Path(directory).mkdir(parents=True, exist_ok=True)
+
+def cleanup(*variables):
+    """
+    Delete interim variables and collect garbage.
+    """
+    for var in variables:
+        del var
+    print('Deleted interim variables')
+    gc.collect()
