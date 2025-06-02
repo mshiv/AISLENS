@@ -17,7 +17,7 @@
 #   6. Save the seasonality and variability components thus obtained.
 
 from aislens.dataprep import detrend_dim, deseasonalize, dedraft_catchment, extrapolate_catchment_over_time
-from aislens.utils import merge_catchment_files, subset_dataset_by_time, collect_directories, initialize_directories
+from aislens.utils import merge_catchment_files, subset_dataset_by_time, collect_directories, initialize_directories, write_crs
 from aislens.config import config
 import numpy as np
 import xarray as xr
@@ -65,7 +65,8 @@ def prepare_model_simulation():
     model_deseasonalized = deseasonalize(model_detrended)
     print("Model simulation data deseasonalized successfully.")
     print("Dedrafting model simulation data...")
-    icems = gpd.read_file(config.FILE_ICESHELFMASKS).to_crs({'init': 'epsg:3031'});
+    icems = gpd.read_file(config.FILE_ICESHELFMASKS);
+    icems = icems.to_crs({'init': config.CRS_TARGET});
 
     for i in config.ICE_SHELF_REGIONS:
         dedraft_catchment(i, icems, model_deseasonalized, config, 

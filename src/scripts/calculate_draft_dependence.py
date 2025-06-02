@@ -18,10 +18,12 @@
 from aislens.dataprep import dedraft_catchment
 from aislens.config import config
 import xarray as xr
+import geopandas as gpd
 
 # Load the prepared satellite observation dataset
 satobs = xr.open_dataset(config.FILE_PAOLO23_SATOBS_PREPARED)
-icems = xr.open_dataset(config.FILE_ICESHELFMASKS)
+icems = gpd.read_file(config.FILE_ICESHELFMASKS);
+icems = icems.to_crs({'init': config.CRS_TARGET});
 
 # 3 main functions to be run:
 # 1. dedraft_ice_shelf_region: Dedraft the satellite observation data for each ice shelf region.
