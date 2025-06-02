@@ -7,12 +7,36 @@ class Config:
     # Define the root directory of the project
     BASE_DIR: Path = here()
 
-    # Directory paths
-    DIR_RAW: Path = BASE_DIR / "data/raw"
-    DIR_EXTERNAL: Path = BASE_DIR / "data/external"
-    DIR_INTERIM: Path = BASE_DIR / "data/interim"
-    DIR_PROCESSED: Path = BASE_DIR / "data/processed"
-    DIR_TMP: Path = BASE_DIR / "data/tmp"
+    from dataclasses import dataclass, field
+from pathlib import Path
+from pyprojroot import here
+import os
+
+@dataclass
+class Config:
+    # Project root (code location, for source files, scripts, etc.)
+    BASE_DIR: Path = here()
+
+    # Data root, configurable by environment variable (defaults to $SCRATCH/AISLENS if set, else falls back to code location)
+    DATA_ROOT: Path = Path(
+        os.environ.get('AISLENS_DATA_DIR', os.path.expandvars('$HOME/scratch/AISLENS'))
+    )
+
+    # Directory paths (all data is stored under DATA_ROOT/data). 
+    # Replace DATA_ROOT with BASE_DIR if you want to use the project code location as the data root.
+    DIR_RAW: Path = DATA_ROOT / "data/raw"
+    DIR_EXTERNAL: Path = DATA_ROOT / "data/external"
+    DIR_INTERIM: Path = DATA_ROOT / "data/interim"
+    DIR_PROCESSED: Path = DATA_ROOT / "data/processed"
+    DIR_TMP: Path = DATA_ROOT / "data/tmp"
+
+    # Alternative directory paths (comment out the above DIR_* lines if you use these)
+    # Uncomment the following lines if you want to use the project code location as the data root.
+    #DIR_RAW: Path = BASE_DIR / "data/raw"
+    #DIR_EXTERNAL: Path = BASE_DIR / "data/external"
+    #DIR_INTERIM: Path = BASE_DIR / "data/interim"
+    #DIR_PROCESSED: Path = BASE_DIR / "data/processed"
+    #DIR_TMP: Path = BASE_DIR / "data/tmp"
 
     DIR_ICESHELF_DEDRAFT: Path = DIR_INTERIM / "draft_dependence" # Draft dependence parameters calculated for individual ice shelves
     DIR_DRAFT_DEPENDENCE: Path = DIR_PROCESSED / "draft_dependence" # Draft dependence parameters that are combined for entire ice sheet
