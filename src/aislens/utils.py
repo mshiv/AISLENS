@@ -156,6 +156,27 @@ def subset_dataset(file_path, dim, start, end, output_path=None, chunk_size=10):
 
     return subset
 
+def subset_dataset_by_time(ds, time_dim, start_year, end_year):
+    """
+    Subset an xarray Dataset or DataArray along a cftime-based time dimension by year.
+    
+    Parameters:
+      ds: xarray.Dataset or xarray.DataArray
+      time_dim: str, name of the time dimension (e.g., "Time")
+      start_year: int, start year (exclusive)
+      end_year: int, end year (inclusive)
+      
+    Returns:
+      Subsetted xarray object
+    """
+    years = ds[time_dim].dt.year
+    # If .dt.year fails (e.g., non-standard calendars), fallback to list comprehension
+    # if isinstance(years, xr.DataArray):
+    #    years = years.values
+    #    years = np.array([t.year for t in model[config.TIME_DIM].values])
+    mask = (years > start_year) & (years <= end_year)
+    return ds.isel({time_dim: mask})
+
 def copy_subset_data(ds_data, merged_ds):
     """
     Copy data from merged datasets into the original dataset. 

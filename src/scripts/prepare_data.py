@@ -16,11 +16,13 @@
 #   5. Dedraft the data.
 #   6. Save the seasonality and variability components thus obtained.
 
-from aislens.dataprep import detrend_dim, deseasonalize, dedraft_catchment, extrapolate_catchment, extrapolate_catchment_over_time
-from aislens.utils import merge_catchment_data, copy_subset_data, merge_catchment_files
+from aislens.dataprep import detrend_dim, deseasonalize, dedraft_catchment, extrapolate_catchment_over_time
+from aislens.utils import merge_catchment_files, subset_dataset_by_time
 from aislens.config import config
 import numpy as np
 import xarray as xr
+
+# initialize_directories(collect_directories(config))
 
 def prepare_satellite_observations():
     # Load satellite observation dataset
@@ -41,10 +43,13 @@ def prepare_satellite_observations():
 def prepare_model_simulation():
     # Load model simulation dataset
     model = xr.open_dataset(config.FILE_MPASO_MODEL)
-    
-    # Subset the dataset to the desired time range
-    model_subset = model.sel({config.TIME_DIM: slice(config.START_YEAR, config.END_YEAR)})
-    
+
+    model_subset = subset_dataset_by_time(model,
+                                          time_dim=config.TIME_DIM,
+                                          start_year=config.SORRM_START_YEAR,
+                                          end_year=config.SORRM_END_YEAR,
+                                          )
+
     # Detrend, deseasonalize, and dedraft the data
     model_detrended = detrend_dim(model_subset[config.SORRM_FLUX_VAR], dim=config.TIME_DIM, deg=1)
     model_deseasonalized = deseasonalize(model_detrended)
