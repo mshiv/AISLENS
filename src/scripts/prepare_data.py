@@ -60,7 +60,8 @@ def prepare_model_simulation():
     print("Model simulation data subsetted successfully.")
     print("Detrending model simulation data...")
     # Detrend, deseasonalize, and dedraft the data
-    model_detrended = detrend_dim(model_subset[config.SORRM_FLUX_VAR], dim=config.TIME_DIM, deg=1)
+    model_detrended = model_subset.copy()
+    model_detrended[config.SORRM_FLUX_VAR] = detrend_dim(model_subset[config.SORRM_FLUX_VAR], dim=config.TIME_DIM, deg=1)
     print("Model simulation data detrended successfully.")
     print("Deseasonalizing model simulation data...")
     model_deseasonalized = deseasonalize(model_detrended)

@@ -131,11 +131,11 @@ def dedraft_catchment(
     ds = clip_data(data, i, icems)
     ds_tm = ds.mean(dim=config.TIME_DIM)
     # Choose the correct variable names based on the data type
-    if config.SORRM_FLUX_VAR in ds.data_vars:
+    if config.SORRM_FLUX_VAR==ds.name:
         # If the data is from the model, use SORRM variables
         flux_var = config.SORRM_FLUX_VAR
         draft_var = config.SORRM_DRAFT_VAR
-    elif config.SATOBS_FLUX_VAR in ds.data_vars:
+    elif config.SATOBS_FLUX_VAR==ds.name:
         # For satellite observations, use the SATOBS variables
         flux_var = config.SATOBS_FLUX_VAR
         draft_var = config.SATOBS_DRAFT_VAR
