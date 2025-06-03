@@ -17,11 +17,13 @@
 
 from aislens.dataprep import dedraft_catchment
 from aislens.config import config
+from aislens.utils import write_crs
 import xarray as xr
 import geopandas as gpd
 
 # Load the prepared satellite observation dataset
 satobs = xr.open_dataset(config.FILE_PAOLO23_SATOBS_PREPARED)
+satobs = write_crs(satobs, config.CRS_TARGET)
 icems = gpd.read_file(config.FILE_ICESHELFMASKS);
 icems = icems.to_crs({'init': config.CRS_TARGET});
 
