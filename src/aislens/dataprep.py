@@ -187,11 +187,12 @@ def extrapolate_catchment_over_time(dataset, icems, config, var_name):
         coords=dataset[var_name].coords,
         dims=dataset[var_name].dims,
         attrs=dataset[var_name].attrs
+        
     )
     extrap_ds = xr.Dataset({var_name: extrap_ds})
 
     for t in range(len(times)):
-        ds_data = dataset.isel({config.TIME_DIM: t}).rename({'x': 'x1', 'y': 'y1'})
+        ds_data = dataset.isel({config.TIME_DIM: t}) #.rename({'x': 'x1', 'y': 'y1'})
         results = [extrapolate_catchment(ds_data, i, icems) for i in config.ICE_SHELF_REGIONS]
         merged_ds = merge_catchment_data(results)
         result_ds = copy_subset_data(ds_data, merged_ds)
