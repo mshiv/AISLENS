@@ -74,7 +74,7 @@ def prepare_model_simulation():
     #    dedraft_catchment(i, icems, model_deseasonalized, config, 
     #                      save_dir=config.DIR_ICESHELF_DEDRAFT_MODEL,
     #                      save_pred=True
-                          )
+    #                      )
     #draft_dependence_pred = xr.Dataset()
     #for i in config.ICE_SHELF_REGIONS:
     #    draft_dependence_pred = xr.merge([draft_dependence_pred, xr.open_dataset(config.DIR_ICESHELF_DEDRAFT_MODEL / 'draftDepenModelPred_{}.nc'.format(icems.name.values[i]))])
