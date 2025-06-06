@@ -70,15 +70,15 @@ def prepare_model_simulation():
     icems = gpd.read_file(config.FILE_ICESHELFMASKS);
     icems = icems.to_crs({'init': config.CRS_TARGET});
 
-    for i in config.ICE_SHELF_REGIONS:
-        dedraft_catchment(i, icems, model_deseasonalized, config, 
-                          save_dir=config.DIR_ICESHELF_DEDRAFT_MODEL,
-                          save_pred=True
+    #for i in config.ICE_SHELF_REGIONS:
+    #    dedraft_catchment(i, icems, model_deseasonalized, config, 
+    #                      save_dir=config.DIR_ICESHELF_DEDRAFT_MODEL,
+    #                      save_pred=True
                           )
     #draft_dependence_pred = xr.Dataset()
     #for i in config.ICE_SHELF_REGIONS:
     #    draft_dependence_pred = xr.merge([draft_dependence_pred, xr.open_dataset(config.DIR_ICESHELF_DEDRAFT_MODEL / 'draftDepenModelPred_{}.nc'.format(icems.name.values[i]))])
-    print("Model simulation data dedrafted successfully.")
+    #print("Model simulation data dedrafted successfully.")
     print("Merging draft dependence predictions across all ice shelf regions...")
     draft_dependence_pred = merge_catchment_files([config.DIR_ICESHELF_DEDRAFT_MODEL / f'draftDepenModelPred_{icems.name.values[i]}.nc'
                                                    for i in config.ICE_SHELF_REGIONS
@@ -111,4 +111,4 @@ if __name__ == "__main__":
     dirs_to_create = collect_directories(config)
     initialize_directories(dirs_to_create)
     #prepare_satellite_observations()
-    prepare_model_simulation()
+    prepare_model_simulation() 
