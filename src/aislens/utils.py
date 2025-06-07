@@ -10,6 +10,7 @@ import scipy
 import numpy as np
 import xarray as xr
 from scipy import spatial
+from sklearn.neighbors import BallTree
 import urllib
 import gc
 from aislens.config import config
@@ -334,6 +335,25 @@ def fill_nan_with_nearest_neighbor_vectorized(da):
     data_filled[mask] = valid_values[indices]
 
     return xr.DataArray(data_filled, dims=da.dims, coords=da.coords, attrs=da.attrs)
+
+def fill_nan_with_nearest_neighbor_vectorized_balltree(da):
+    data = da.values  # extract values from DataArray
+    mask = np.isnan(data)  # create a mask of NaN values
+    
+    # Get coordinates of all points and non-NaN points
+    coords = np.array(np.nonzero(np.ones_like(data))).T
+    valid_coords = coords[~mask.ravel()]
+    valid_values = data[~mask]
+    
+    # Use BallTree for efficient nearest neighbor search
+    tree = BallTree(valid_coords)
+    _, indices = tree.query(coords[mask.ravel()], k=1)
+    
+    # Fill NaN values
+    data_filled = data.copy()
+    data_filled[mask] = valid_values[indices.ravel()]
+    
+    return data_filled
 
 def delaunay_interp_weights(xy, uv, d=2):
     """

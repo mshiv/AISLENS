@@ -32,11 +32,12 @@ def prepare_satellite_observations():
     print("Satellite observations loaded successfully.")
     # Detrend the data along the time dimension
     print("Detrending satellite observations...")
-    satobs_detrended = detrend_dim(satobs[config.SATOBS_FLUX_VAR], dim=config.TIME_DIM, deg=1)
+    satobs_deseasonalized = satobs.copy()
+    satobs_detrended = detrend_dim(satobs_deseasonalized[config.SATOBS_FLUX_VAR], dim=config.TIME_DIM, deg=1)
     print("Satellite observations detrended successfully.")
     print("Deseasonalizing satellite observations...")
     # Deseasonalize the data
-    satobs_deseasonalized = deseasonalize(satobs_detrended)
+    satobs_deseasonalized[config.SATOBS_FLUX_VAR] = deseasonalize(satobs_detrended)
     print("Satellite observations deseasonalized successfully.")
     # TODO: Take the time-mean of the dataset
     # TODO: Ensure that melt is converted to flux, if not, and is in SI units
@@ -110,5 +111,5 @@ def prepare_model_simulation():
 if __name__ == "__main__":
     dirs_to_create = collect_directories(config)
     initialize_directories(dirs_to_create)
-    #prepare_satellite_observations()
+    prepare_satellite_observations()
     prepare_model_simulation() 
