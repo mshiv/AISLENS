@@ -169,7 +169,7 @@ def extrapolate_catchment(data, i, icems):
     """
     ice_shelf_mask = icems.loc[[i], 'geometry'].apply(mapping)
     ds = clip_data(data, i, icems)
-    ds = ds.map(fill_nan_with_nearest_neighbor_vectorized, keep_attrs=True)
+    #ds = ds.map(fill_nan_with_nearest_neighbor_vectorized, keep_attrs=True)
     ds = ds.map(fill_nan_with_nearest_neighbor_vectorized_balltree, keep_attrs=True)
     ds = ds.rio.clip(ice_shelf_mask, icems.crs)
     return ds
