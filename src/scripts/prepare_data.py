@@ -88,6 +88,10 @@ def prepare_model_simulation():
     print("Calculating variability and seasonality components...")
     model_variability = model_deseasonalized - draft_dependence_pred
     model_seasonality = model_detrended - model_deseasonalized
+    print("Saving model components...")
+    model_seasonality.to_netcdf(config.FILE_SEASONALITY)
+    model_variability.to_netcdf(config.FILE_VARIABILITY)
+    print("Model components saved successfully.")
     print("Processing complete. Extrapolating components to the entire ice sheet grid...")
 
     # Extrapolate the seasonality and variability components to the entire ice sheet grid
@@ -101,9 +105,7 @@ def prepare_model_simulation():
                                                                 )
     print("Components extrapolated successfully.")
     # Save the processed components
-    model_seasonality.to_netcdf(config.FILE_SEASONALITY)
     model_seasonality_extrapl.to_netcdf(config.FILE_SEASONALITY_EXTRAPL)
-    model_variability.to_netcdf(config.FILE_VARIABILITY)
     model_variability_extrapl.to_netcdf(config.FILE_VARIABILITY_EXTRAPL)
     print("Processing complete. Model components saved.")
 
@@ -111,5 +113,5 @@ def prepare_model_simulation():
 if __name__ == "__main__":
     dirs_to_create = collect_directories(config)
     initialize_directories(dirs_to_create)
-    prepare_satellite_observations()
+    #prepare_satellite_observations()
     prepare_model_simulation() 

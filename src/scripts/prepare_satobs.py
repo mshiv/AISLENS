@@ -40,7 +40,7 @@ def prepare_satellite_observations():
     satobs_deseasonalized[config.SATOBS_FLUX_VAR] = deseasonalize(satobs_detrended)
     print("Satellite observations deseasonalized successfully.")
     # TODO: Take the time-mean of the dataset
-    # TODO: Ensure that melt is converted to flux, if not, and is in SI units
+    # TODO: Ensure that melt is converted to flux, if not, sand is in SI units
 
     # Save the prepared data
     satobs_deseasonalized.to_netcdf(config.FILE_PAOLO23_SATOBS_PREPARED)
