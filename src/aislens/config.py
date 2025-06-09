@@ -61,8 +61,8 @@ class Config:
     SORRM_DRAFT_VAR: str = "timeMonthly_avg_ssh"
     SORRM_FLUX_VAR: str = "timeMonthly_avg_landIceFreshwaterFlux"
     ICE_SHELF_REGIONS: range = range(33,133)
-    SORRM_START_YEAR: int = 300
-    SORRM_END_YEAR: int = 900
+    SORRM_START_YEAR: int = 450
+    SORRM_END_YEAR: int = 750
     N_REALIZATIONS: int = 10
     CRS_TARGET: str = "epsg:3031"
     DATA_ATTRS: dict = field(default_factory=lambda: {
