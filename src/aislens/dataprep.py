@@ -13,7 +13,7 @@ from sklearn.linear_model import LinearRegression
 import ruptures as rpt
 from aislens.config import config
 from aislens.geospatial import clip_data
-from aislens.utils import fill_nan_with_nearest_neighbor_vectorized, fill_nan_with_nearest_neighbor_vectorized_balltree, merge_catchment_data, copy_subset_data, write_crs
+from aislens.utils import fill_nan_with_nearest_neighbor_vectorized, fill_nan_with_nearest_neighbor_vectorized_balltree, fill_nan_with_nearest_neighbor_ndimage, merge_catchment_data, copy_subset_data, write_crs
 
 def detrend_dim(data, dim, deg):
     """
@@ -171,6 +171,7 @@ def extrapolate_catchment(data, i, icems):
     ds = clip_data(data, i, icems)
     #ds = ds.map(fill_nan_with_nearest_neighbor_vectorized, keep_attrs=True)
     ds = ds.map(fill_nan_with_nearest_neighbor_vectorized_balltree, keep_attrs=True)
+    #ds = ds.map(fill_nan_with_nearest_neighbor_ndimage, keep_attrs=True)
     ds = ds.rio.clip(ice_shelf_mask, icems.crs)
     return ds
 

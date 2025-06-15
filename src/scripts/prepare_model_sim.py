@@ -51,6 +51,7 @@ def prepare_model_simulation():
     icems = gpd.read_file(config.FILE_ICESHELFMASKS);
     icems = icems.to_crs({'init': config.CRS_TARGET});
 
+    # Dedraft the model simulation data for each ice shelf region if not done already
     #for i in config.ICE_SHELF_REGIONS:
     #    dedraft_catchment(i, icems, model_deseasonalized, config, 
     #                      save_dir=config.DIR_ICESHELF_DEDRAFT_MODEL,

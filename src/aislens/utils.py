@@ -7,6 +7,7 @@ from shapely.geometry import mapping
 
 
 import scipy
+from scipy import ndimage
 import numpy as np
 import xarray as xr
 from scipy import spatial
@@ -353,6 +354,28 @@ def fill_nan_with_nearest_neighbor_vectorized_balltree(da):
     data_filled = data.copy()
     data_filled[mask] = valid_values[indices.ravel()]
     
+    return data_filled
+
+def fill_nan_with_nearest_neighbor_ndimage(da):
+    """
+    Fill NaN values in a 2D xarray.DataArray with the value of the nearest non-NaN neighbor.
+    Uses scipy.ndimage.distance_transform_edt for maximum speed.
+    
+    Parameters:
+        da: xarray.DataArray (2D)
+    Returns:
+        xarray.DataArray with NaNs filled
+    """
+    data = da.values
+    mask = np.isnan(data)
+    if not np.any(mask):
+        return da.copy()  # No NaNs to fill
+    
+    # Find nearest non-NaN for each NaN cell
+    idx = ndimage.distance_transform_edt(mask, return_distances=False, return_indices=True)
+    data_filled = data[tuple(idx)]
+    # Return as DataArray with original coords/dims/attrs
+    #return xr.DataArray(filled, coords=da.coords, dims=da.dims, attrs=da.attrs)
     return data_filled
 
 def delaunay_interp_weights(xy, uv, d=2):
