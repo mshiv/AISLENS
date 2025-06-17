@@ -37,7 +37,7 @@ def generate_forcings():
         variability = variability.rename({"Time": "time"})
     if 'Time' in seasonality.dims:
         seasonality = seasonality.rename({"Time": "time"})
-    data = variability
+    data = variability[config.SORRM_FLUX_VAR]
     data_tmean = data.mean('time')
     data_tstd = data.std('time')
     data_norm = (data - data_tmean) / data_tstd
