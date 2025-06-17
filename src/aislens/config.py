@@ -49,9 +49,9 @@ class Config:
     FILE_MPASO_MODEL_PREPARED: Path = DIR_PROCESSED / "model_simulation_prepared.nc"
     FILE_DRAFT_DEPENDENCE: Path = DIR_PROCESSED / "draft_dependence_params.nc"
     FILE_SEASONALITY: Path = DIR_PROCESSED / "sorrm_seasonality.nc"
-    FILE_SEASONALITY_EXTRAPL: Path = DIR_PROCESSED / "sorrm_seasonality_extrapolated.nc"
+    FILE_SEASONALITY_EXTRAPL: Path = DIR_PROCESSED / "sorrm_seasonality_extrapolated_fillNA.nc"
     FILE_VARIABILITY: Path = DIR_PROCESSED / "sorrm_variability.nc"
-    FILE_VARIABILITY_EXTRAPL: Path = DIR_PROCESSED / "sorrm_variability_extrapolated.nc"
+    FILE_VARIABILITY_EXTRAPL: Path = DIR_PROCESSED / "sorrm_variability_extrapolated_fillNA_meanAdjusted.nc"
     FILE_FORCING: Path = DIR_PROCESSED / "sorrm_forcing.nc"
 
     # Constants
