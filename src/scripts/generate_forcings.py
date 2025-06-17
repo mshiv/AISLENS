@@ -41,9 +41,15 @@ def generate_forcings():
     data_tmean = data.mean('time')
     data_tstd = data.std('time')
     data_norm = (data - data_tmean) / data_tstd
+    print("Data normalization complete.")
+    print("Performing EOF decomposition...")
     model, eofs, pcs, nmodes, varexpl = eof_decomposition(data_norm)
+    print("EOF DECOMP COMPLETE.")
     n_realizations = config.N_REALIZATIONS
+    print(f"Phase randomization for {n_realizations} realizations...")
     new_pcs = phase_randomization(pcs.values, n_realizations)
+    print("Phase randomization complete.")
+    print("Generating synthetic data...")
     for i in range(n_realizations):
         new_data = generate_data(model, new_pcs, i, nmodes, 1)
         new_data = (new_data * data_tstd) + data_tmean
@@ -52,6 +58,7 @@ def generate_forcings():
         new_data.name = data.name
         forcing = seasonality + new_data
         forcing.to_netcdf(config.DIR_FORCINGS / f"forcing_realization_{i}.nc")
+        print(f"Generated forcing realization {i} and saved to {config.DIR_FORCINGS / f'forcing_realization_{i}.nc'}")  
 
 if __name__ == "__main__":
     generate_forcings()
