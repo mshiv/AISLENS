@@ -97,7 +97,6 @@ data = data.__xarray_dataarray_variable__[:3600]
 #TODO: change tdim from 'time' to 'Time', as the EOF method requires.
 data = data.rename({"Time":"time"})
 
-
 # Normalize 
 data_tmean = data.mean('time')
 data_tstd = data.std('time')

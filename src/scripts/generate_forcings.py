@@ -24,21 +24,33 @@
 #      create the final forcing dataset for each ensemble member.
 #   6. Save the final forcing datasets to a specified output path.
 
-from aislens.generator import generate_variability_realizations
+from aislens.generator import eof_decomposition, phase_randomization, generate_data
 from aislens.config import config
 import xarray as xr
 
 def generate_forcings():
     # Load extrapolated seasonality and variability datasets
-    seasonality = xr.open_dataset(config.FILE_SEASONALITY_EXTRAPL)
-    variability = xr.open_dataset(config.FILE_VARIABILITY_EXTRAPL)
-    
-    # Generate variability realizations
-    realizations = generate_variability_realizations(variability, n_realizations=config.N_REALIZATIONS)
-    
-    # Add seasonality to each realization and save
-    for i, realization in enumerate(realizations):
-        forcing = realization + seasonality
+    seasonality = xr.open_dataset(config.FILE_SEASONALITY_EXTRAPL, chunks={config.TIME_DIM: 36})
+    variability = xr.open_dataset(config.FILE_VARIABILITY_EXTRAPL, chunks={config.TIME_DIM: 36})
+    # Verify that the time dimension in the dataset is named "time"
+    if 'Time' in variability.dims:
+        variability = variability.rename({"Time": "time"})
+    if 'Time' in seasonality.dims:
+        seasonality = seasonality.rename({"Time": "time"})
+    data = variability
+    data_tmean = data.mean('time')
+    data_tstd = data.std('time')
+    data_norm = (data - data_tmean) / data_tstd
+    model, eofs, pcs, nmodes, varexpl = eof_decomposition(data_norm)
+    n_realizations = config.N_REALIZATIONS
+    new_pcs = phase_randomization(pcs.values, n_realizations)
+    for i in range(n_realizations):
+        new_data = generate_data(model, new_pcs, i, nmodes, 1)
+        new_data = (new_data * data_tstd) + data_tmean
+        new_data = xr.DataArray(new_data, dims=data.dims, coords=data.coords)
+        new_data.attrs = data.attrs
+        new_data.name = data.name
+        forcing = seasonality + new_data
         forcing.to_netcdf(config.DIR_FORCINGS / f"forcing_realization_{i}.nc")
 
 if __name__ == "__main__":
