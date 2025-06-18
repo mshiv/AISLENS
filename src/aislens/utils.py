@@ -445,11 +445,13 @@ def rename_dims_and_fillna(file_path, dims_to_rename=None, fill_value=0):
 
     # Fill NaN values with the specified fill value
     ds = ds.fillna(fill_value)
+    tmp_path = str(file_path) + ".tmp"
 
     # Save the modified dataset, overwriting the original file
-    ds.to_netcdf(file_path)
+    ds.to_netcdf(tmp_path)
+    ds.close()
+    os.replace(tmp_path, file_path)  # Atomically replace original file
     print(f"Updated {file_path.name}: renamed dimensions and filled NaNs with {fill_value}.")
-    return ds
 
 
 def process_directory(directory, dims_to_rename=None, fill_value=0):
