@@ -18,8 +18,9 @@ own variable mappings in the dictionary for the 'other' filetype at the end of t
 Multiple time levels can be interpolated using the --timestart and --timeend options.
 Default is to copy the first time level from the source file to the first time level of
 the destination file.  If multiple time levels are used, they are translated directly
-from the source to the destination.  NOTE: There is no processing of actual time stamps!
-NOTE: xtime is NOT copied and must be copied manually, if desired!
+from the source to the destination.  
+NOTE: There is no processing of actual time stamps!
+NOTE: xtime is NOT copied and must be copied manually, if desired! Use add_xtime.py script to do so.
 '''
 
 from __future__ import absolute_import, division, print_function, \
