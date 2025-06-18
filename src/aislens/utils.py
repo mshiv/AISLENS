@@ -15,6 +15,7 @@ from sklearn.neighbors import BallTree
 import urllib
 import gc
 from aislens.config import config
+import cftime
 
 ##################################################################
 # Utilities to create the data directory structure and 

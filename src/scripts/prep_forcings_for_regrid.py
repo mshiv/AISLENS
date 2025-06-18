@@ -21,6 +21,7 @@
 
 from aislens.utils import rename_dims_and_fillna, process_directory
 from aislens.config import config
+import cftime
 
 def regrid_to_mali():
     # Regrid draft dependence parameters
