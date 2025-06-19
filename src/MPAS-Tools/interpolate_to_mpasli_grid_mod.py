@@ -95,7 +95,8 @@ def ESMF_interp(sourceField):
 def BilinearInterp(Value, gridType):
     # Calculate bilinear interpolation of Value field from x, y to new ValueCell field (return value)  at xCell, yCell
     # This assumes that x, y, Value are regular CISM style grids and xCell, yCell, ValueCell are 1-D unstructured MPAS style grids
-
+    print("Value.shape:", Value.shape)
+    
     ValueCell = np.zeros(xCell.shape)
 
     if gridType == 'x0':
@@ -118,14 +119,14 @@ def BilinearInterp(Value, gridType):
           ygrid = len(y) - 2
        elif ygrid < 0:
           ygrid = 0
-       print(xgrid, ygrid, i)
-       print(f"xCell[i]: {xCell[i]}, type: {type(xCell[i])}, shape: {getattr(xCell[i], 'shape', None)}")
-       print(f"yCell[i]: {yCell[i]}, type: {type(yCell[i])}, shape: {getattr(yCell[i], 'shape', None)}")
-       print(f"Value[ygrid,xgrid]: {Value[ygrid,xgrid]}, type: {type(Value[ygrid,xgrid])}, shape: {getattr(Value[ygrid,xgrid], 'shape', None)}")
+       print("ygrid:", ygrid, "xgrid:", xgrid)
+       print("Value[ygrid, xgrid]:", Value[ygrid, xgrid], "shape:", getattr(Value[ygrid, xgrid], "shape", "scalar"))
+    
+       #print(xgrid, ygrid, i)
        ValueCell[i] = Value[ygrid,xgrid] * (x[xgrid+1] - xCell[i]) * (y[ygrid+1] - yCell[i]) / (dx * dy) + \
                  Value[ygrid+1,xgrid] * (x[xgrid+1] - xCell[i]) * (yCell[i] - y[ygrid]) / (dx * dy) + \
                  Value[ygrid,xgrid+1] * (xCell[i] - x[xgrid]) * (y[ygrid+1] - yCell[i]) / (dx * dy) + \
-                 Value[ygrid+1,xgrid+1] * (xCell[i] - x[xgrid]) * (yCell[i] - y[ygrid]) / (dx * dy)    
+                 Value[ygrid+1,xgrid+1] * (xCell[i] - x[xgrid]) * (yCell[i] - y[ygrid]) / (dx * dy)
     return ValueCell
 
 #----------------------------
@@ -222,7 +223,7 @@ def interpolate_field(MPASfieldName):
 
     InputFieldName = fieldInfo[MPASfieldName]['InputName']
     if filetype=='cism':
-       if 'time' in inputFile.variables[InputFieldName].dimensions:
+       if 'Time' in inputFile.variables[InputFieldName].dimensions:
            InputField = inputFile.variables[InputFieldName][timelev,:,:]
        else:
            if timelev>0:
