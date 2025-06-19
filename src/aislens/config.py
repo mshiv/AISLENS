@@ -53,6 +53,7 @@ class Config:
     FILE_VARIABILITY: Path = DIR_PROCESSED / "sorrm_variability.nc"
     FILE_VARIABILITY_EXTRAPL: Path = DIR_PROCESSED / "sorrm_variability_extrapolated_fillNA_meanAdjusted.nc"
     FILE_FORCING: Path = DIR_PROCESSED / "sorrm_forcing.nc"
+    FILE_FORCING_OG: Path = DIR_FORCINGS / "forcing_realization_OG.nc"
 
     # Constants
     TIME_DIM: str = "Time"
