@@ -27,24 +27,34 @@
 from aislens.generator import eof_decomposition, phase_randomization, generate_data
 from aislens.config import config
 import xarray as xr
+import pickle
+from pathlib import Path
 
 def generate_forcings():
     # Load extrapolated seasonality and variability datasets
     seasonality = xr.open_dataset(config.FILE_SEASONALITY_EXTRAPL, chunks={config.TIME_DIM: 36})
     variability = xr.open_dataset(config.FILE_VARIABILITY_EXTRAPL, chunks={config.TIME_DIM: 36})
     # Verify that the time dimension in the dataset is named "time"
-    #if 'Time' in variability.dims:
-    #    variability = variability.rename({"Time": "time"})
-    #if 'Time' in seasonality.dims:
-    #    seasonality = seasonality.rename({"Time": "time"})
+    if 'Time' in variability.dims:
+        variability = variability.rename({"Time": "time"})
+    if 'Time' in seasonality.dims:
+        seasonality = seasonality.rename({"Time": "time"})
     data = variability[config.SORRM_FLUX_VAR]
     data_tmean = data.mean('time')
     data_tstd = data.std('time')
     data_norm = (data - data_tmean) / data_tstd
     print("Data normalization complete.")
     print("Performing EOF decomposition...")
-    model, eofs, pcs, nmodes, varexpl = eof_decomposition(data_norm)
+    # Comment this out if you want to load the model from a pickle file instead of running EOF.
+    model, _, pcs, nmodes, _ = eof_decomposition(data_norm)
     print("EOF DECOMP COMPLETE.")
+    print("Save model to pickle file...")
+    pickle_path = Path(config.DIR_PROCESSED) / "model.pkl"
+    with open(pickle_path, 'wb') as f:
+        pickle.dump(model, f)
+    # Uncomment the following lines to load the model from a pickle file instead of running EOF above.
+    # with open(pickle_path, "rb") as f:
+    #     model = pickle.load(f)
     n_realizations = config.N_REALIZATIONS
     print(f"Phase randomization for {n_realizations} realizations...")
     new_pcs = phase_randomization(pcs.values, n_realizations)
