@@ -33,10 +33,10 @@ def generate_forcings():
     seasonality = xr.open_dataset(config.FILE_SEASONALITY_EXTRAPL, chunks={config.TIME_DIM: 36})
     variability = xr.open_dataset(config.FILE_VARIABILITY_EXTRAPL, chunks={config.TIME_DIM: 36})
     # Verify that the time dimension in the dataset is named "time"
-    if 'Time' in variability.dims:
-        variability = variability.rename({"Time": "time"})
-    if 'Time' in seasonality.dims:
-        seasonality = seasonality.rename({"Time": "time"})
+    #if 'Time' in variability.dims:
+    #    variability = variability.rename({"Time": "time"})
+    #if 'Time' in seasonality.dims:
+    #    seasonality = seasonality.rename({"Time": "time"})
     data = variability[config.SORRM_FLUX_VAR]
     data_tmean = data.mean('time')
     data_tstd = data.std('time')
