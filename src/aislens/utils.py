@@ -437,7 +437,7 @@ def rename_dims_and_fillna(file_path, dims_to_rename=None, fill_value=0):
         xarray.Dataset: Modified dataset.
     """
     # Open the dataset
-    ds = xr.open_dataset(file_path, decode_times=False)
+    ds = xr.open_dataset(file_path, chunks={config.TIME_DIM: 36}) #, decode_times=False)
 
     # Rename dimensions if specified
     if dims_to_rename:
