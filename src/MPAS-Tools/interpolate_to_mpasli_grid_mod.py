@@ -118,7 +118,10 @@ def BilinearInterp(Value, gridType):
           ygrid = len(y) - 2
        elif ygrid < 0:
           ygrid = 0
-       #print(xgrid, ygrid, i)
+       print(xgrid, ygrid, i)
+       print(f"xCell[i]: {xCell[i]}, type: {type(xCell[i])}, shape: {getattr(xCell[i], 'shape', None)}")
+       print(f"yCell[i]: {yCell[i]}, type: {type(yCell[i])}, shape: {getattr(yCell[i], 'shape', None)}")
+       print(f"Value[ygrid,xgrid]: {Value[ygrid,xgrid]}, type: {type(Value[ygrid,xgrid])}, shape: {getattr(Value[ygrid,xgrid], 'shape', None)}")
        ValueCell[i] = Value[ygrid,xgrid] * (x[xgrid+1] - xCell[i]) * (y[ygrid+1] - yCell[i]) / (dx * dy) + \
                  Value[ygrid+1,xgrid] * (x[xgrid+1] - xCell[i]) * (yCell[i] - y[ygrid]) / (dx * dy) + \
                  Value[ygrid,xgrid+1] * (xCell[i] - x[xgrid]) * (y[ygrid+1] - yCell[i]) / (dx * dy) + \
