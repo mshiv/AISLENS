@@ -46,6 +46,7 @@ class Config:
 
     # Processed file paths
     FILE_PAOLO23_SATOBS_PREPARED: Path = DIR_PROCESSED / "satellite_observations_prepared.nc"
+    FILE_PAOLO23_SATOBS_MEAN_IC: Path = DIR_PROCESSED / "satellite_observations_meanfield_ic.nc"
     FILE_MPASO_MODEL_PREPARED: Path = DIR_PROCESSED / "model_simulation_prepared.nc"
     FILE_DRAFT_DEPENDENCE: Path = DIR_PROCESSED / "draft_dependence_params.nc"
     FILE_SEASONALITY: Path = DIR_PROCESSED / "sorrm_seasonality.nc"
