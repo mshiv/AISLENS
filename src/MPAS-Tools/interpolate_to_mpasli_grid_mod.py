@@ -107,11 +107,6 @@ def BilinearInterp(Value, gridType):
     dx = x[1] - x[0]
     dy = y[1] - y[0]
     for i in range(len(xCell)):
-       # Check for NaN in xCell[i] or yCell[i] and replace with 0 if needed.
-       #if np.isnan(xCell[i]):
-       #   xCell[i] = 0
-       #if np.isnan(yCell[i]):
-       #   yCell[i] = 0
        # Calculate the CISM grid cell indices (these are the lower index)
        xgrid = int(math.floor( (xCell[i]-x[0]) / dx ))
        if xgrid >= len(x) - 1:
@@ -127,7 +122,7 @@ def BilinearInterp(Value, gridType):
        ValueCell[i] = Value[ygrid,xgrid] * (x[xgrid+1] - xCell[i]) * (y[ygrid+1] - yCell[i]) / (dx * dy) + \
                  Value[ygrid+1,xgrid] * (x[xgrid+1] - xCell[i]) * (yCell[i] - y[ygrid]) / (dx * dy) + \
                  Value[ygrid,xgrid+1] * (xCell[i] - x[xgrid]) * (y[ygrid+1] - yCell[i]) / (dx * dy) + \
-                 Value[ygrid+1,xgrid+1] * (xCell[i] - x[xgrid]) * (yCell[i] - y[ygrid]) / (dx * dy)
+                 Value[ygrid+1,xgrid+1] * (xCell[i] - x[xgrid]) * (yCell[i] - y[ygrid]) / (dx * dy)    
     return ValueCell
 
 #----------------------------
