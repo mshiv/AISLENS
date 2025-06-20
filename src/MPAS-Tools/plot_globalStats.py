@@ -52,7 +52,7 @@ else:
 print("Using volume/mass units of: ", massUnit)
 
 if options.plotChange:
-    plotChangeStr = ' change'
+    plotChangeStr = ' change (%)'
 else:
     plotChangeStr = ''
 
@@ -121,33 +121,33 @@ def plotStat(fname):
 
     vol = f.variables['totalIceVolume'][:] / scaleVol
     if options.plotChange:
-        vol = vol - vol[0]
+        vol = (vol - vol[0])*100/vol
     axVol.plot(yr, vol, label=name)
 
     VAF = f.variables['volumeAboveFloatation'][:] / scaleVol       
     if options.plotChange:
-        VAF = VAF - VAF[0]
+        VAF = (VAF - VAF[0])*100/VAF
     axVAF.plot(yr, VAF, label=name)
     addSeaLevAx(axVAF)
 
     volGround = f.variables['groundedIceVolume'][:] / scaleVol
     if options.plotChange:
-        volGround = volGround - volGround[0]
+        volGround = (volGround - volGround[0])*100/volGround
     axVolGround.plot(yr, volGround, label=name)
 
     volFloat = f.variables['floatingIceVolume'][:] / scaleVol
     if options.plotChange:
-        volFloat = volFloat - volFloat[0]
+        volFloat = (volFloat - volFloat[0])*100/volFloat
     axVolFloat.plot(yr, volFloat, label=name)
 
     areaGrd = f.variables['groundedIceArea'][:] / 1000.0**2
     if options.plotChange:
-        areaGrd = areaGrd - areaGrd[0]
+        areaGrd = (areaGrd - areaGrd[0])*100/areaGrd
     axGrdArea.plot(yr, areaGrd, label=name)
 
     areaFlt = f.variables['floatingIceArea'][:] / 1000.0**2
     if options.plotChange:
-        areaFlt = areaFlt - areaFlt[0]
+        areaFlt = (areaFlt - areaFlt[0])*100/areaFlt
     axFltArea.plot(yr, areaFlt, label=name)
 
     GLflux = f.variables['groundingLineFlux'][:]

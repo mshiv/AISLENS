@@ -36,6 +36,11 @@ parser.add_option("-1", dest="file1inName", help="input filename", default="glob
 parser.add_option("-2", dest="file2inName", help="input filename", metavar="FILENAME")
 parser.add_option("-3", dest="file3inName", help="input filename", metavar="FILENAME")
 parser.add_option("-4", dest="file4inName", help="input filename", metavar="FILENAME")
+parser.add_option("-5", dest="file5inName", help="input filename", metavar="FILENAME")
+parser.add_option("-6", dest="file6inName", help="input filename", metavar="FILENAME")
+parser.add_option("-7", dest="file7inName", help="input filename", metavar="FILENAME")
+parser.add_option("-8", dest="file8inName", help="input filename", metavar="FILENAME")
+parser.add_option("-9", dest="file9inName", help="input filename", metavar="FILENAME")
 options, args = parser.parse_args()
 
 plt.figure(figsize=(25,8))
@@ -46,7 +51,7 @@ def plotStat(fname, variable, timeLevelStart, timeLevelEnd):
     print("Reading and plotting file: {}".format(fname))
 
     name = fname
-    f = xr.open_dataset(fname)
+    f = xr.open_dataset(fname, engine='netcdf4')
 
     # f = Dataset(fname, 'r')
     var = f[variable][timeLevelStart:timeLevelEnd]/scaleVol
@@ -71,6 +76,22 @@ if options.file3inName:
 
 if options.file4inName:
     plotStat(options.file4inName, options.variable, options.timeLevelStart, options.timeLevelEnd)
+
+if options.file5inName:
+    plotStat(options.file5inName, options.variable, options.timeLevelStart, options.timeLevelEnd)
+
+if options.file6inName:
+    plotStat(options.file6inName, options.variable, options.timeLevelStart, options.timeLevelEnd)
+
+if options.file7inName:
+    plotStat(options.file7inName, options.variable, options.timeLevelStart, options.timeLevelEnd)
+
+if options.file8inName:
+    plotStat(options.file8inName, options.variable, options.timeLevelStart, options.timeLevelEnd)
+
+if options.file9inName:
+    plotStat(options.file9inName, options.variable, options.timeLevelStart, options.timeLevelEnd)
+
 
 plt.legend()
 print("Generating plot")
