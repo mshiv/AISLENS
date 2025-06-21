@@ -249,7 +249,7 @@ def detrend_segmented(arr, time, breakpoints, deg=1):
 
     return detrended_values
 
-def detrend_with_breakpoints_vectorized(data, dim, deg=1, model="l2", penalty=10):
+def detrend_with_breakpoints_vectorized(data, dim, deg=1, model="rbf", penalty=10):
     """
     Automatically detrend an xarray.DataArray with breakpoints along a specified dimension.
 

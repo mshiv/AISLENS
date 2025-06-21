@@ -38,6 +38,7 @@ class Config:
     DIR_FORCINGS: Path = DIR_PROCESSED / "forcings" # Location of the sum of extrapolated seasonality and vargen_realizations and trends
     DIR_MALI_FORCINGS: Path = DIR_PROCESSED / "mali_grid/forcings" # Location of the final forcing files converted to MALI grid
     DIR_MALI_DRAFT_DEPENDENCE: Path = DIR_PROCESSED / "mali_grid/draft_dependence" # Location of the final draft dependence fields on the MALI grid
+    DIR_MALI_ISMIP6_FORCINGS: Path = DATA_ROOT / "MALI/ISMIP6"
 
     # File paths
     FILE_PAOLO23_SATOBS: Path = DIR_EXTERNAL / "ANT_G1920V01_IceShelfMeltDraft_Time.nc"
@@ -56,12 +57,17 @@ class Config:
     FILE_FORCING: Path = DIR_PROCESSED / "sorrm_forcing.nc"
     FILE_FORCING_OG: Path = DIR_FORCINGS / "forcing_realization_OG.nc"
 
+    FILE_ISMIP6_SSP585_FORCING: Path = DIR_MALI_ISMIP6_FORCINGS / "floatingBasalMassBalApplied_SSP585_Trend_2000-2270.nc"
+    FILE_ISMIP6_SSP126_FORCING: Path = DIR_MALI_ISMIP6_FORCINGS / "floatingBasalMassBalApplied_SSP126_Trend_2000-2270.nc"
+
     # Constants
     TIME_DIM: str = "Time"
     SATOBS_DRAFT_VAR: str = "draft"
     SATOBS_FLUX_VAR: str = "melt"
     SORRM_DRAFT_VAR: str = "timeMonthly_avg_ssh"
     SORRM_FLUX_VAR: str = "timeMonthly_avg_landIceFreshwaterFlux"
+    MALI_FLOATINGBMB_VAR: str = "floatingBasalMassBalApplied"
+    AISLENS_FLOATINGBMB_VAR: str = "floatingBasalMassBalAdjustment"
     ICE_SHELF_REGIONS: range = range(33,133)
     SORRM_START_YEAR: int = 450
     SORRM_END_YEAR: int = 750
