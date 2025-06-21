@@ -280,7 +280,7 @@ def detrend_with_breakpoints_vectorized(data, dim, deg=1, model="rbf", penalty=1
         input_core_dims=[[dim], [dim]],  # Specify core dimensions
         output_core_dims=[[dim]],        # Specify output dimension
         vectorize=True,                  # Enable vectorization
-        #dask="parallelized",             # Allow Dask parallelization - Dataset already parallelized when loaded
+        dask="parallelized",             # Allow Dask parallelization - Dataset already parallelized when loaded
         output_dtypes=[data.dtype]       # Ensure correct output dtype
     )
 

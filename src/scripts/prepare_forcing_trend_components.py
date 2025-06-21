@@ -20,7 +20,7 @@ def detrend_forcing_trend_components(forcing_file_path):
     xarray.Dataset: The dataset with detrended forcing trend components.
     """
     # Detrend each variable in the dataset
-    ds = xr.open_dataset(forcing_file_path, chunks={config.TIME_DIM: 36})
+    ds = xr.open_dataset(forcing_file_path)#, chunks={config.TIME_DIM: 36})
     ds[config.MALI_FLOATINGBMB_VAR] = (ds[config.MALI_FLOATINGBMB_VAR].isel(Time=0) - ds[config.MALI_FLOATINGBMB_VAR])
     detrended_data = detrend_with_breakpoints_vectorized(ds[config.MALI_FLOATINGBMB_VAR],
                                                          dim="Time",        # Specify the dimension to detrend
