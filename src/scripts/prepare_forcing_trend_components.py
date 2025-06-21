@@ -28,8 +28,9 @@ def detrend_forcing_trend_components(forcing_file_path):
                                                          model="rbf",        # Cost model for ruptures
                                                          penalty=10         # Penalty value for change point detection
                                                          )
-    detrended_data = detrended_data.to_dataset(name=config.AISLENS_FLOATINGBMB_VAR)  # Convert back to Dataset
+    detrended_data = detrended_data.to_dataset(name=config.MALI_FLOATINGBMB_VAR)  # Convert back to Dataset
     trend_with_breakpoints = ds - detrended_data
+    trend_with_breakpoints = trend_with_breakpoints.rename({config.MALI_FLOATINGBMB_VAR: config.AISLENS_FLOATINGBMB_VAR})
     trend_with_breakpoints.to_netcdf(Path(config.DIR_MALI_ISMIP6_FORCINGS) / "ISMIP6_SSP585_UKESM_FLOATINGBMB_TREND.nc")
     print("Detrending complete. Detrended data saved to 'ISMIP6_SSP585_UKESM_FLOATINGBMB_TREND.nc'.")
 
