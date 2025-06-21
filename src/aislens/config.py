@@ -57,7 +57,7 @@ class Config:
     FILE_FORCING: Path = DIR_PROCESSED / "sorrm_forcing.nc"
     FILE_FORCING_OG: Path = DIR_FORCINGS / "forcing_realization_OG.nc"
 
-    FILE_ISMIP6_SSP585_FORCING: Path = s / "floatingBasalMassBalApplied_SSP585_Trend_2000-2270.nc"
+    FILE_ISMIP6_SSP585_FORCING: Path = DIR_MALI_ISMIP6_FORCINGS / "floatingBasalMassBalApplied_SSP585_Trend_2000-2270.nc"
     FILE_ISMIP6_SSP126_FORCING: Path = DIR_MALI_ISMIP6_FORCINGS / "floatingBasalMassBalApplied_SSP126_Trend_2000-2270.nc"
 
     # Constants
