@@ -21,6 +21,7 @@ class Config:
     DIR_INTERIM: Path = DATA_ROOT / "data/interim"
     DIR_PROCESSED: Path = DATA_ROOT / "data/processed"
     DIR_TMP: Path = DATA_ROOT / "data/tmp"
+    DIR_MALI: Path = DATA_ROOT / "data/MALI"
 
     # Alternative directory paths (comment out the above DIR_* lines if you use these)
     # Uncomment the following lines if you want to use the project code location as the data root.
@@ -38,7 +39,6 @@ class Config:
     DIR_FORCINGS: Path = DIR_PROCESSED / "forcings" # Location of the sum of extrapolated seasonality and vargen_realizations and trends
     DIR_MALI_FORCINGS: Path = DIR_PROCESSED / "mali_grid/forcings" # Location of the final forcing files converted to MALI grid
     DIR_MALI_DRAFT_DEPENDENCE: Path = DIR_PROCESSED / "mali_grid/draft_dependence" # Location of the final draft dependence fields on the MALI grid
-    DIR_MALI_ISMIP6_FORCINGS: Path = DATA_ROOT / "MALI/ISMIP6"
 
     # File paths
     FILE_PAOLO23_SATOBS: Path = DIR_EXTERNAL / "ANT_G1920V01_IceShelfMeltDraft_Time.nc"
@@ -57,8 +57,8 @@ class Config:
     FILE_FORCING: Path = DIR_PROCESSED / "sorrm_forcing.nc"
     FILE_FORCING_OG: Path = DIR_FORCINGS / "forcing_realization_OG.nc"
 
-    FILE_ISMIP6_SSP585_FORCING: Path = DIR_MALI_ISMIP6_FORCINGS / "floatingBasalMassBalApplied_SSP585_Trend_2000-2270.nc"
-    FILE_ISMIP6_SSP126_FORCING: Path = DIR_MALI_ISMIP6_FORCINGS / "floatingBasalMassBalApplied_SSP126_Trend_2000-2270.nc"
+    FILE_ISMIP6_SSP585_FORCING: Path = DIR_MALI / "ISMIP6/floatingBasalMassBalApplied_SSP585_Trend_2000-2270.nc"
+    FILE_ISMIP6_SSP126_FORCING: Path = DIR_MALI / "ISMIP6/floatingBasalMassBalApplied_SSP126_Trend_2000-2270.nc"
 
     # Constants
     TIME_DIM: str = "Time"
