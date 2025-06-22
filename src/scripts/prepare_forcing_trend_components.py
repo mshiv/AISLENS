@@ -1,5 +1,5 @@
 from aislens.config import config
-from aislens.dataprep import detrend_with_breakpoints_vectorized
+from aislens.dataprep import detrend_with_breakpoints_vectorized, detrend_with_breakpoints_ts
 import xarray as xr
 import numpy as np
 import pandas as pd
@@ -49,13 +49,13 @@ def detrend_forcing_trend_components_ts(forcing_file_path):
     # Detrend each variable in the dataset
     ds = xr.open_dataset(forcing_file_path)#, chunks={config.TIME_DIM: 36})
     ds[config.MALI_FLOATINGBMB_VAR] = (ds[config.MALI_FLOATINGBMB_VAR].isel(Time=0) - ds[config.MALI_FLOATINGBMB_VAR])
-    ds_ts = ds.mean(dim=config.TIME_DIM)  # Calculate the mean across the time dimension
-    detrended_data = detrend_with_breakpoints_vectorized(ds_ts[config.MALI_FLOATINGBMB_VAR],
-                                                         dim="Time",        # Specify the dimension to detrend
-                                                         deg=1,             # Degree of polynomial (e.g., 1 for linear detrending)
-                                                         model="rbf",        # Cost model for ruptures
-                                                         penalty=10         # Penalty value for change point detection
-                                                         )
+    #ds_ts = ds.mean(dim=config.TIME_DIM)  # Calculate the mean across the time dimension
+    detrended_data = detrend_with_breakpoints_ts(ds[config.MALI_FLOATINGBMB_VAR].mean(dim=config.TIME_DIM),
+                                                  dim="Time",        # Specify the dimension to detrend
+                                                  deg=1,             # Degree of polynomial (e.g., 1 for linear detrending)
+                                                  model="rbf",        # Cost model for ruptures
+                                                  penalty=10         # Penalty value for change point detection
+                                                  )
     detrended_data = detrended_data.to_dataset(name=config.MALI_FLOATINGBMB_VAR)  # Convert back to Dataset
     trend_with_breakpoints = ds - detrended_data
     trend_with_breakpoints = trend_with_breakpoints.rename({config.MALI_FLOATINGBMB_VAR: config.AISLENS_FLOATINGBMB_VAR})

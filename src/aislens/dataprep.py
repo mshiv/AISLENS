@@ -286,7 +286,7 @@ def detrend_with_breakpoints_vectorized(data, dim, deg=1, model="rbf", penalty=1
 
     return detrended_data
 
-def detrend_with_breakpoints_ts(data, dim, deg=1, model="l2", penalty=10):
+def detrend_with_breakpoints_ts(data, dim, deg=1, model="rbf", penalty=10):
     """
     Automatically detrend data with breakpoints based on changes in the slope.
     This function is used only for prototyping and testing, or for quick analysis using spatially averaged time series data.
