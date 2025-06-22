@@ -1,6 +1,6 @@
 # SCRIPTS
 
-This directory contains example scripts that make use of the [`aislens`](https://github.com/mshiv/AISLENS/tree/refactor/src/aislens) package.
+This directory contains example scripts that make use of the [`aislens`](https://github.com/mshiv/AISLENS/tree/refactor/src/aislens) package to prepare MALI forcing files and bash `nco` commands to manipulate MALI output files.
 
 1. `prepare_data.py`: Loads appropriate subsets (user-defined) of the raw input dataset from SORRMv2.1 and satellite observations
 2. `calculate_draft_dependence.py`: Preprocessses the satellite observations and saves the draft dependence parameterization
