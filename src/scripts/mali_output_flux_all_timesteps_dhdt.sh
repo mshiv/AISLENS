@@ -43,11 +43,13 @@ ncecat -O -u Time output_flux_all_timesteps_2100_tAvg.nc output_flux_all_timeste
 # -------------------
 
 
-python plot_mali_float_maps_masked.py -v dhdt -r ../../../../../../DATA/AISLENS/MALI-outputs/draftDepen/output_flux_all_timesteps_dhdt_300yr.nc -m ../../../../../../DATA/AISLENS/MALI-outputs/draftDepen/output_flux_all_timesteps_2000.nc -m2 ../../../../../../DATA/AISLENS/MALI-outputs/draftDepen/output_flux_all_timesteps_2000.nc
-python plot_mali_float_maps_masked.py -v dhdt -r ../../../../data/MALI/ISMIP6/SSP585-RIGNOT2013/output_flux_all_timesteps_dhdt_270yr.nc -m ../../../../data/MALI/ISMIP6/SSP585-RIGNOT2013/output_flux_all_timesteps_2000_tAvg.nc -m2 ../../../../data/MALI/ISMIP6/SSP585-RIGNOT2013/output_flux_all_timesteps_2270_tAvg.nc
+python plot_output_maps_masked.py -v dhdt -r ../../../../../../DATA/AISLENS/MALI-outputs/draftDepen/output_flux_all_timesteps_dhdt_300yr.nc -m ../../../../../../DATA/AISLENS/MALI-outputs/draftDepen/output_flux_all_timesteps_2000.nc -m2 ../../../../../../DATA/AISLENS/MALI-outputs/draftDepen/output_flux_all_timesteps_2000.nc
+python plot_output_maps_masked.py -v dhdt -r ../../data/MALI/ISMIP6/SSP585-RIGNOT2013/output_flux_all_timesteps_dhdt_270yr.nc -m ../../data/MALI/ISMIP6/SSP585-RIGNOT2013/output_flux_all_timesteps_2000_tAvg.nc -m2 ../../data/MALI/ISMIP6/SSP585-RIGNOT2013/output_flux_all_timesteps_2270_tAvg.nc
 
-python plot_mali_float_maps_masked.py -v dhdt -r ../../../../data/MALI/ENSEMBLES/CTRL/EM2/output_flux_all_timesteps_dhdt_100yr.nc -m ../../../../data/MALI/ENSEMBLES/CTRL/EM2/output_flux_all_timesteps_2000_tAvg.nc -m2 ../../../../data/MALI/ENSEMBLES/CTRL/EM2/output_flux_all_timesteps_2100_tAvg.nc
-python plot_mali_float_maps_masked.py -v dhdt -r ../../../../data/MALI/ENSEMBLES/CTRL/EM3/output_flux_all_timesteps_dhdt_090yr.nc -m ../../../../data/MALI/ENSEMBLES/CTRL/EM3/output_flux_all_timesteps_2000_tAvg.nc -m2 ../../../../data/MALI/ENSEMBLES/CTRL/EM3/output_flux_all_timesteps_2090_tAvg.nc
+python plot_output_maps_masked.py -v dhdt -r ../../data/MALI/ENSEMBLES/CTRL/EM2/output_flux_all_timesteps_dhdt_100yr.nc -m ../../data/MALI/ENSEMBLES/CTRL/EM2/output_flux_all_timesteps_2000_tAvg.nc -m2 ../../data/MALI/ENSEMBLES/CTRL/EM2/output_flux_all_timesteps_2100_tAvg.nc
+python plot_output_maps_masked.py -v dhdt -r ../../../../data/MALI/ENSEMBLES/CTRL/EM3/output_flux_all_timesteps_dhdt_090yr.nc -m ../../../../data/MALI/ENSEMBLES/CTRL/EM3/output_flux_all_timesteps_2000_tAvg.nc -m2 ../../../../data/MALI/ENSEMBLES/CTRL/EM3/output_flux_all_timesteps_2090_tAvg.nc
+
+python plot_output_maps_masked.py -v dhdt -r ../../data/MALI/ENSEMBLES/CTRL/EM3/output_flux_all_timesteps_dhdt_090yr.nc -m ../../data/MALI/ENSEMBLES/CTRL/EM3/output_flux_all_timesteps_2000_tAvg.nc -m2 ../../data/MALI/ENSEMBLES/CTRL/EM3/output_flux_all_timesteps_2090_tAvg.nc
 
 -n /Users/smurugan9/research/aislens/aislens_emulation/data/external/MALI_projects/ISMIP6_2300/initial_conditions/AIS_4to20km_20230105/AIS_4to20km_r01_20220907.regionMask_ismip6.nc
 
