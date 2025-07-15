@@ -40,6 +40,9 @@ def calculate_draft_dependence(icems, satobs, config):
     for i in config.ICE_SHELF_REGIONS:
         dedraft_catchment(i, icems, satobs, config, 
                           save_dir=config.DIR_ICESHELF_DEDRAFT_SATOBS,
+                          weights=True,
+                          weight_power=0.25,
+                          save_pred=True,
                           save_coefs=True
                           )
     draft_dependence_params = xr.Dataset()

@@ -16,6 +16,9 @@ import urllib
 import gc
 from aislens.config import config
 import cftime
+from scipy.spatial import cKDTree
+from sklearn.linear_model import LinearRegression
+from scipy.signal import savgol_filter, medfilt
 
 ##################################################################
 # Utilities to create the data directory structure and 
@@ -540,3 +543,214 @@ def cleanup(*variables):
         del var
     print('Deleted interim variables')
     gc.collect()
+
+################################
+# --- Helper Functions ---
+################################
+
+def get_distance_to_gl(mlt, icems, insar_gl_shape):
+    gl_union = unary_union(insar_gl_shape.to_crs(icems.crs).geometry)
+    gl_points = []
+    for geom in gl_union.geoms if hasattr(gl_union, 'geoms') else [gl_union]:
+        if geom.geom_type == 'LineString':
+            gl_points.extend(np.array(geom.coords))
+        elif geom.geom_type == 'MultiLineString':
+            for line in geom.geoms:
+                gl_points.extend(np.array(line.coords))
+    gl_points = np.array(gl_points)
+    tree = cKDTree(gl_points)
+    x_coords, y_coords = np.meshgrid(mlt['x'].values, mlt['y'].values, indexing='xy')
+    points_flat = np.column_stack([x_coords.ravel(), y_coords.ravel()])
+    distances, _ = tree.query(points_flat)
+    return distances.reshape(mlt.shape)
+
+def find_draft_threshold_knee(h, mlt, window=15, poly=2):
+    hvals = h.values.flatten()
+    mvals = mlt.values.flatten()
+    mask = ~np.isnan(hvals) & ~np.isnan(mvals)
+    hvals = hvals[mask]
+    mvals = mvals[mask]
+    if len(hvals) < 10:
+        return 1000
+    sort_idx = np.argsort(hvals)
+    h_sorted = hvals[sort_idx]
+    m_sorted = mvals[sort_idx]
+    bins = np.linspace(h_sorted.min(), h_sorted.max(), 100)
+    digitized = np.digitize(h_sorted, bins)
+    bin_medians = np.array([np.median(m_sorted[digitized == i]) for i in range(1, len(bins))])
+    bin_centers = 0.5 * (bins[1:] + bins[:-1])
+    win = min(window, len(bin_medians)//2*2+1)
+    if win < 3: win = 3
+    smoothed = savgol_filter(bin_medians, window_length=win, polyorder=poly)
+    d2 = np.gradient(np.gradient(smoothed))
+    knee_idx = np.argmax(d2)
+    threshold = bin_centers[knee_idx]
+    return threshold
+
+def find_draft_threshold_knee_smooth(h, mlt, window=15, poly=2, min_draft=None, max_draft=None, quantile_clip=(0.01, 0.99)):
+    hvals = h.values.flatten()
+    mvals = mlt.values.flatten()
+    mask = ~np.isnan(hvals) & ~np.isnan(mvals)
+    hvals = hvals[mask]
+    mvals = mvals[mask]
+    # Clip outliers using quantiles
+    if len(hvals) < 10:
+        return 1000
+    qlo, qhi = np.quantile(hvals, quantile_clip)
+    hmask = (hvals >= qlo) & (hvals <= qhi)
+    hvals = hvals[hmask]
+    mvals = mvals[hmask]
+    sort_idx = np.argsort(hvals)
+    h_sorted = hvals[sort_idx]
+    m_sorted = mvals[sort_idx]
+    bins = np.linspace(h_sorted.min(), h_sorted.max(), 100)
+    digitized = np.digitize(h_sorted, bins)
+    # Use median for robustness
+    bin_medians = np.array([np.median(m_sorted[digitized == i]) if np.sum(digitized == i) > 3 else np.nan for i in range(1, len(bins))])
+    bin_centers = 0.5 * (bins[1:] + bins[:-1])
+    # Remove bins with too few points
+    valid = ~np.isnan(bin_medians)
+    bin_medians = bin_medians[valid]
+    bin_centers = bin_centers[valid]
+    if len(bin_medians) < 5:
+        return 1000
+    # Robust smoothing
+    win = min(window, len(bin_medians)//2*2+1)
+    if win < 3: win = 3
+    smoothed = medfilt(bin_medians, kernel_size=win)
+    if len(smoothed) >= win:
+        smoothed = savgol_filter(smoothed, window_length=win, polyorder=min(poly, win-1))
+    d2 = np.gradient(np.gradient(smoothed))
+    knee_idx = np.argmax(d2)
+    threshold = bin_centers[knee_idx]
+    # Enforce physical bounds
+    if min_draft is not None:
+        threshold = max(threshold, min_draft)
+    if max_draft is not None:
+        threshold = min(threshold, max_draft)
+    return threshold
+
+
+################################################################
+# Weighting Methods for draft dependence calculation
+################################################################
+
+def draft_threshold_weight(h, threshold=1000):
+    w = np.where(h.values > threshold, 1.0, 0.0)
+    w[np.isnan(h.values)] = np.nan
+    return w
+
+def draft_threshold_weight_dynamic(h, mlt):
+    threshold = find_draft_threshold_knee(h, mlt)
+    print(f"Dynamic threshold for shelf: {threshold}")
+    w = np.where(h.values > threshold, 1.0, 0.0)
+    w[np.isnan(h.values)] = np.nan
+    return w
+
+def draft_threshold_weight_dynamic_smooth(h, mlt):
+    threshold = find_draft_threshold_knee_smooth(h, mlt)
+    print(f"Dynamic threshold for shelf (smooth): {threshold}")
+    w = np.where(h.values > threshold, 1.0, 0.0)
+    w[np.isnan(h.values)] = np.nan
+    return w
+
+def inv_GLdistance_weight(mlt, distances_2d, a=1):
+    epsilon = 1e-6
+    w = (1.0/(distances_2d + epsilon))**a
+    w[np.isnan(mlt.values)] = np.nan
+    return w
+
+def draft_x_inv_GLdistance_weight(mlt, h, distances_2d, a=1, b=1):
+    epsilon = 1e-6
+    w = (np.abs(h.values)**a) * (1.0/(distances_2d + epsilon))**b
+    w[np.isnan(mlt.values)] = np.nan
+    return w
+
+def melt_x_inv_GLdistance_weight(mlt, distances_2d, a=1, b=1):
+    epsilon = 1e-6
+    w = (np.abs(mlt.values)**a) * (1.0/(distances_2d + epsilon))**b
+    w[np.isnan(mlt.values)] = np.nan
+    return w
+
+def melt_x_draft_weight(mlt, h, a=1, b=1):
+    w = (np.abs(mlt.values)**a) * (np.abs(h.values)**b)
+    w[np.isnan(mlt.values)] = np.nan
+    return w
+
+def gaussian_draft_weight(h, mu=1200, sigma=300):
+    w = np.exp(-0.5 * ((h.values-mu)/sigma)**2)
+    w[np.isnan(h.values)] = np.nan
+    return w
+
+def gaussian_draft_weight_dynamic(h):
+    # Compute mean and std only for non-NaN values
+    valid = ~np.isnan(h.values)
+    mu = np.nanmean(h.values)
+    sigma = np.nanstd(h.values)
+    w = np.exp(-0.5 * ((h.values - mu) / sigma) ** 2)
+    w[~valid] = np.nan
+    return w
+
+def sigmoid_weight(h, mu=None, k=0.005, a=1):
+    """
+    Sigmoid weighting function with optional power law.
+    Args:
+        h: draft array
+        mu: center of sigmoid (default: mean of h)
+        k: steepness
+        a: power to raise the sigmoid (default 1)
+    Returns:
+        Weight array, same shape as h
+    """
+    if mu is None:
+        mu = np.nanmean(h.values)
+    w = 1 / (1 + np.exp(-k * (h.values - mu)))
+    w = w ** a
+    w[np.isnan(h.values)] = np.nan
+    return w
+
+def sigmoid_x_inv_GLdistance_weight(mlt, h, distances_2d, a=1, b=1, k=0.005, mu=None):
+    """
+    Combined weight: (sigmoid_draft^a) * (inv_GLdistance^b)
+    - a: power for sigmoid_draft
+    - b: power for inv_GLdistance
+    - k: steepness for sigmoid
+    - mu: center for sigmoid (default: mean draft)
+    """
+    if mu is None:
+        mu = np.nanmean(h.values)
+    # Sigmoid draft weight
+    sigmoid = 1 / (1 + np.exp(-k * (h.values - mu)))
+    # Inverse GL distance weight
+    epsilon = 1e-6
+    inv_dist = 1.0 / (distances_2d + epsilon)
+    # Combine with powers
+    w = (sigmoid ** a) * (inv_dist ** b)
+    w[np.isnan(mlt.values)] = np.nan
+    return w
+
+def uniform_weight(mlt, h):
+    w = np.ones_like(mlt.values)
+    w[np.isnan(mlt.values)] = np.nan
+    return w
+
+def abs_melt_weight(mlt, h):
+    w = np.abs(mlt.values)
+    w[np.isnan(mlt.values)] = np.nan
+    return w
+
+def draft_weight(mlt, h, a=1):
+    w = np.abs(h.values)**a
+    w[np.isnan(mlt.values)] = np.nan
+    return w
+
+def combined_weight(mlt, h, distances_2d, a=1, b=1, c=1, d=1, e=1, f=1):
+    # a: melt, b: draft, c: inv_distance, d: gaussian, e: static threshold, f: dynamic threshold
+    w = (np.abs(mlt.values)**a) * (np.abs(h.values)**b)
+    if distances_2d is not None:
+        w *= (1.0/(distances_2d + 1e-6))**c
+    w *= gaussian_draft_weight(h, mu=1200, sigma=300)**d
+    w *= draft_threshold_weight(h, threshold=1000)**e
+    w *= draft_threshold_weight_dynamic(h, mlt)**f
+    w[np.isnan(mlt.values)] = np.nan
+    return w

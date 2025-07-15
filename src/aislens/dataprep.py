@@ -14,6 +14,8 @@ import ruptures as rpt
 from aislens.config import config
 from aislens.geospatial import clip_data
 from aislens.utils import fill_nan_with_nearest_neighbor_vectorized, fill_nan_with_nearest_neighbor_vectorized_balltree, fill_nan_with_nearest_neighbor_ndimage, merge_catchment_data, copy_subset_data, write_crs
+from aislens.utils import draft_weight
+
 
 def detrend_dim(data, dim, deg):
     """
@@ -54,7 +56,7 @@ def deseasonalize(data):
     data_anm += original_mean
     return data_anm
 
-def dedraft(data, draft):
+def dedraft(data, draft, weights=None):
     """
     Remove draft dependence from the data using linear regression.
 
@@ -73,7 +75,13 @@ def dedraft(data, draft):
     draft_stack = draft_tm.stack(z=('x', 'y'))
     data_stack_noNaN = data_stack.fillna(0)
     draft_stack_noNaN = draft_stack.fillna(0)
-    reg = LinearRegression().fit(draft_stack_noNaN.values.reshape(-1, 1), data_stack_noNaN.values.reshape(-1, 1))
+    if weights is not None:
+        weights_tm = weights.mean(dim='Time')
+        weights_stack = weights_tm.stack(z=('x', 'y'))
+        w = weights_stack.fillna(0)
+    else:
+        w = None
+    reg = LinearRegression().fit(draft_stack_noNaN.values.reshape(-1, 1), data_stack_noNaN.values.reshape(-1, 1), sample_weight=np.squeeze(w.values.reshape(-1,1)) if w is not None else None)
     data_pred_stack_noNaN_vals = reg.predict(draft_stack_noNaN.values.reshape(-1, 1)).reshape(-1)
     data_pred_stack_noNaN = data_stack_noNaN.copy(data=data_pred_stack_noNaN_vals)
     data_pred_stack = data_pred_stack_noNaN.where(~data_stack.isnull(), np.nan)
@@ -109,6 +117,8 @@ def setup_draft_depen_field(param_ref, param_data, param_name, i, icems):
 def dedraft_catchment(
     i, icems, data, config, 
     save_dir, 
+    weights=True,
+    weight_power=0.25,
     save_pred=False, 
     save_coefs=False
     ):
@@ -123,6 +133,8 @@ def dedraft_catchment(
         data (xarray.DataArray): Input data containing melt and draft fields for model or observations.
         config: Configuration object containing paths and attributes.
         save_dir (Path): Directory to save output.
+        weights (xarray.DataArray, optional): Weights for regression (binary).
+        weight_power (float): Power for draft_weight (default 0.25).
         save_pred (bool): Save predicted melt (model).
         save_coefs (bool): Save regression coefficients (obs).
     """
@@ -139,9 +151,14 @@ def dedraft_catchment(
         # For satellite observations, use the SATOBS variables
         flux_var = config.SATOBS_FLUX_VAR
         draft_var = config.SATOBS_DRAFT_VAR
+    if weights:
+        w = ds[flux_var].copy(data=draft_weight(ds[flux_var], ds[draft_var], a=weight_power))
+        w = clip_data(w, i, icems)
+    else:
+        w = None
 
     print(f'Calculating draft dependent linear regression for catchment {catchment_name}')
-    coef, intercept, pred = dedraft(ds[flux_var], ds[draft_var])
+    coef, intercept, pred = dedraft(ds[flux_var], ds[draft_var], weights=w)
 
     if save_coefs:
         # Retrieve attribute keys explicitly for clarity

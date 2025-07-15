@@ -192,7 +192,6 @@ for ii, run in enumerate(runs):
     xCell = m.variables["xCell"][0]
     yCell = m.variables["yCell"][0]
     dcEdge = m.variables["dcEdge"][0]
-
     #if args.mesh is not None:
     #   m.close()
 
