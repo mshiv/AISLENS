@@ -366,9 +366,6 @@ def detrend_with_breakpoints_ts(data, dim, deg=1, model="rbf", penalty=10):
 
     return detrended_data
 
-import xarray as xr
-import numpy as np
-
 def compute_ismip6_basal_melt(ds, gamma0, cste, scyr, rhoi):
     """
     Compute ISMIP6 basal melt (vectorized, dask-friendly).
