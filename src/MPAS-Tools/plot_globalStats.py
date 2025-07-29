@@ -187,8 +187,7 @@ axCalvFlux.legend(loc='best', prop={'size': 6})
 print("Generating plot.")
 fig.tight_layout()
 
-if args.plotSave:
+if options.plotSave:
     fig.savefig(f'globalStats.png', dpi=400, bbox_inches='tight')
     
-
 plt.show()
