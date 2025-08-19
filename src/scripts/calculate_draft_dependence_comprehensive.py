@@ -21,7 +21,7 @@ from pathlib import Path
 def calculate_draft_dependence_comprehensive(icems, satobs, config, 
                                            n_bins=50, min_points_per_bin=5,
                                            ruptures_method='pelt', ruptures_penalty=1.0,
-                                           min_r2_threshold=0.1, min_correlation=0.3,
+                                           min_r2_threshold=0.05, min_correlation=0.1,
                                            noisy_fallback='zero', model_selection='best',
                                            ice_shelf_range=None):
     """
@@ -51,6 +51,18 @@ def calculate_draft_dependence_comprehensive(icems, satobs, config,
     if ice_shelf_range is None:
         ice_shelf_range = config.ICE_SHELF_REGIONS
     
+    # Debug information
+    print(f"Ice shelf range: {list(ice_shelf_range)[:5]}...{list(ice_shelf_range)[-5:]} (showing first/last 5)")
+    print(f"Total ice shelves to process: {len(list(ice_shelf_range))}")
+    print(f"icems dataframe length: {len(icems)}")
+    print(f"Satellite data shape: {satobs[config.SATOBS_FLUX_VAR].shape}")
+    
+    # Check for any obvious issues
+    max_index = max(ice_shelf_range)
+    if max_index >= len(icems):
+        print(f"WARNING: Maximum ice shelf index ({max_index}) >= icems length ({len(icems)})")
+        print("This will cause some indices to be skipped!")
+    
     # Create save directory for comprehensive results
     save_dir_comprehensive = config.DIR_ICESHELF_DEDRAFT_SATOBS / "comprehensive"
     save_dir_comprehensive.mkdir(parents=True, exist_ok=True)
@@ -60,8 +72,20 @@ def calculate_draft_dependence_comprehensive(icems, satobs, config,
     all_draft_params = {}
     
     # Process each ice shelf
+    processed_count = 0
+    skipped_count = 0
+    
     for i in ice_shelf_range:
         try:
+            # Check if ice shelf index is valid
+            if i >= len(icems):
+                print(f"✗ Skipping index {i}: exceeds icems length ({len(icems)})")
+                skipped_count += 1
+                continue
+                
+            catchment_name = icems.name.values[i]
+            print(f"Processing ice shelf {i}: {catchment_name}...")
+            
             result = dedraft_catchment_comprehensive(
                 i, icems, satobs, config,
                 save_dir=save_dir_comprehensive,
@@ -79,20 +103,29 @@ def calculate_draft_dependence_comprehensive(icems, satobs, config,
                 model_selection=model_selection
             )
             
-            catchment_name = result['catchment_name']
             all_results[catchment_name] = result['full_results']
             all_draft_params[catchment_name] = result['draft_params']
+            processed_count += 1
             
             print(f"✓ Processed {catchment_name}: "
                   f"meaningful={result['full_results']['is_meaningful']}, "
                   f"paramType={result['draft_params']['paramType']}")
                   
         except Exception as e:
-            catchment_name = icems.name.values[i]
-            print(f"✗ Error processing {catchment_name}: {e}")
+            try:
+                catchment_name = icems.name.values[i] if i < len(icems) else f"Index_{i}"
+            except:
+                catchment_name = f"Index_{i}"
+            print(f"✗ Error processing {catchment_name} (index {i}): {e}")
+            import traceback
+            traceback.print_exc()
+            skipped_count += 1
             continue
     
-    print(f"\nProcessed {len(all_results)} ice shelves successfully")
+    print(f"\nProcessing Summary:")
+    print(f"  Successfully processed: {processed_count} ice shelves")
+    print(f"  Skipped/Failed: {skipped_count} ice shelves")
+    print(f"  Expected total: {len(list(ice_shelf_range))} ice shelves")
     
     # Create comprehensive summary
     create_comprehensive_summary(all_results, all_draft_params, save_dir_comprehensive)
@@ -150,7 +183,10 @@ def create_comprehensive_summary(all_results, all_draft_params, save_dir):
 def merge_comprehensive_parameters(all_draft_params, icems, satobs, config, save_dir):
     """Merge individual ice shelf parameters into full ice sheet grids."""
     
-    # Initialize empty datasets for each parameter
+    # Get reference spatial grid from satellite observations
+    ref_grid = satobs[config.SATOBS_FLUX_VAR].isel({config.TIME_DIM: 0}) if config.TIME_DIM in satobs[config.SATOBS_FLUX_VAR].dims else satobs[config.SATOBS_FLUX_VAR]
+    
+    # Initialize empty datasets for each parameter with full spatial grid
     param_names = ['minDraft', 'constantValue', 'paramType', 'alpha0', 'alpha1']
     config_param_names = [
         'draftDepenBasalMelt_minDraft',
@@ -160,48 +196,95 @@ def merge_comprehensive_parameters(all_draft_params, icems, satobs, config, save
         'draftDepenBasalMeltAlpha1'
     ]
     
+    # Create full-grid datasets initialized with zeros/NaN
     merged_datasets = {}
+    for config_param_name in config_param_names:
+        # Initialize with zeros to match original behavior
+        full_grid = xr.zeros_like(ref_grid)
+        full_grid.name = config_param_name
+        full_grid.attrs = config.DATA_ATTRS[config_param_name]
+        merged_datasets[config_param_name] = xr.Dataset({config_param_name: full_grid})
+        print(f"Initialized {config_param_name} with shape: {full_grid.shape}")
     
-    for param_name, config_param_name in zip(param_names, config_param_names):
-        merged_datasets[config_param_name] = xr.Dataset()
-    
-    # Merge individual catchment files
+    # Merge individual catchment files onto the full grid
+    merged_count = 0
     for shelf_name, draft_params in all_draft_params.items():
         for param_name, config_param_name in zip(param_names, config_param_names):
             try:
                 # Look for individual parameter files
                 param_file = save_dir / f"{config_param_name}_{shelf_name}.nc"
                 if param_file.exists():
+                    # Load the individual ice shelf parameter file
                     param_ds = xr.open_dataset(param_file)
-                    merged_datasets[config_param_name] = xr.merge([
-                        merged_datasets[config_param_name], param_ds
-                    ])
+                    param_da = param_ds[config_param_name]
+                    
+                    # Check if the coordinates match
+                    if not (param_da.x.equals(ref_grid.x) and param_da.y.equals(ref_grid.y)):
+                        print(f"Warning: Coordinate mismatch for {shelf_name} {config_param_name}")
+                        print(f"  Ice shelf shape: {param_da.shape}, Full grid shape: {ref_grid.shape}")
+                        print(f"  Ice shelf x range: [{param_da.x.min().values:.1f}, {param_da.x.max().values:.1f}]")
+                        print(f"  Ice shelf y range: [{param_da.y.min().values:.1f}, {param_da.y.max().values:.1f}]")
+                        print(f"  Full grid x range: [{ref_grid.x.min().values:.1f}, {ref_grid.x.max().values:.1f}]")
+                        print(f"  Full grid y range: [{ref_grid.y.min().values:.1f}, {ref_grid.y.max().values:.1f}]")
+                        
+                        # Try to align the data by interpolating to the full grid coordinates
+                        try:
+                            param_da_aligned = param_da.interp(x=ref_grid.x, y=ref_grid.y, method='nearest')
+                            # Update the full grid where we have valid data
+                            valid_mask = ~param_da_aligned.isnull()
+                            if valid_mask.any():
+                                merged_datasets[config_param_name][config_param_name] = xr.where(
+                                    valid_mask,
+                                    param_da_aligned,
+                                    merged_datasets[config_param_name][config_param_name]
+                                )
+                                merged_count += 1
+                                print(f"  Successfully interpolated and merged {shelf_name} {config_param_name}")
+                            else:
+                                print(f"  No valid data after interpolation for {shelf_name} {config_param_name}")
+                        except Exception as interp_error:
+                            print(f"  Failed to interpolate {shelf_name} {config_param_name}: {interp_error}")
+                            continue
+                    else:
+                        # Coordinates match, can directly merge
+                        overlap_mask = ~param_da.isnull()
+                        if overlap_mask.any():
+                            merged_datasets[config_param_name][config_param_name] = xr.where(
+                                overlap_mask, 
+                                param_da, 
+                                merged_datasets[config_param_name][config_param_name]
+                            )
+                            merged_count += 1
+                        
+                else:
+                    print(f"Warning: File not found: {param_file}")
+                    
             except Exception as e:
                 print(f"Warning: Could not merge {config_param_name} for {shelf_name}: {e}")
+                import traceback
+                traceback.print_exc()
     
-    # Fill NaN values and save merged datasets
+    print(f"Successfully merged {merged_count} parameter files onto full grids")
+    
+    # Save merged datasets
     for config_param_name, merged_ds in merged_datasets.items():
-        if len(merged_ds.data_vars) > 0:
-            # Fill NaN values with 0 (consistent with original approach)
-            filled_ds = merged_ds.fillna(0)
-            
-            # Save individual parameter file
-            output_file = config.DIR_PROCESSED / f"draft_dependence_changepoint" / f"ruptures_{config_param_name}.nc"
-            output_file.parent.mkdir(parents=True, exist_ok=True)
-            filled_ds.to_netcdf(output_file)
-            print(f"Saved {config_param_name} to {output_file}")
+        # Save individual parameter file
+        output_file = config.DIR_PROCESSED / f"draft_dependence_changepoint" / f"ruptures_{config_param_name}.nc"
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+        merged_ds.to_netcdf(output_file)
+        print(f"Saved {config_param_name} to {output_file} with shape: {merged_ds[config_param_name].shape}")
     
     # Create combined dataset with all parameters
     combined_ds = xr.Dataset()
     for config_param_name, merged_ds in merged_datasets.items():
-        if len(merged_ds.data_vars) > 0:
-            filled_ds = merged_ds.fillna(0)
-            combined_ds = xr.merge([combined_ds, filled_ds])
+        combined_ds = xr.merge([combined_ds, merged_ds])
     
-    if len(combined_ds.data_vars) > 0:
-        combined_file = config.DIR_PROCESSED / "draft_dependence_changepoint" / "ruptures_draftDepenBasalMelt_parameters.nc"
-        combined_ds.to_netcdf(combined_file)
-        print(f"Saved combined parameters to {combined_file}")
+    # Save combined file
+    combined_file = config.DIR_PROCESSED / "draft_dependence_changepoint" / "ruptures_draftDepenBasalMelt_parameters.nc"
+    combined_ds.to_netcdf(combined_file)
+    print(f"Saved combined parameters to {combined_file}")
+    print(f"Combined dataset shape: {list(combined_ds.dims.values())}")
+    print(f"Combined dataset variables: {list(combined_ds.data_vars.keys())}")
 
 if __name__ == "__main__":
     # Load data
