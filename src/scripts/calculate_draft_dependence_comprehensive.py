@@ -17,13 +17,30 @@ import xarray as xr
 import geopandas as gpd
 import numpy as np
 from pathlib import Path
+import traceback
+
+# Check for optional dependencies
+try:
+    import ruptures
+    RUPTURES_AVAILABLE = True
+    print(f"✓ ruptures library available (version: {ruptures.__version__})")
+except ImportError:
+    RUPTURES_AVAILABLE = False
+    print(" WARNING: ruptures library not available - changepoint detection will fail!")
+    print("   Install with: pip install ruptures")
+
+try:
+    import pandas as pd
+    PANDAS_AVAILABLE = True
+except ImportError:
+    PANDAS_AVAILABLE = False
+    print(" WARNING: pandas library not available - summary creation will fail!")
 
 def calculate_draft_dependence_comprehensive(icems, satobs, config, 
                                            n_bins=50, min_points_per_bin=5,
                                            ruptures_method='pelt', ruptures_penalty=1.0,
                                            min_r2_threshold=0.05, min_correlation=0.1,
-                                           noisy_fallback='zero', model_selection='best',
-                                           ice_shelf_range=None):
+                                           noisy_fallback='zero', model_selection='best'):
     """
     Calculate comprehensive draft dependence parameters for all ice shelf regions.
     
@@ -39,29 +56,30 @@ def calculate_draft_dependence_comprehensive(icems, satobs, config,
         min_correlation: Minimum correlation for meaningful relationship (default: 0.3)
         noisy_fallback: For noisy data ('zero' or 'mean') (default: 'zero')
         model_selection: Which model to use ('best', 'zero_shallow', 'mean_shallow', 'threshold_intercept') (default: 'best')
-        ice_shelf_range: Range of ice shelf indices to process (default: config.ICE_SHELF_REGIONS)
     """
     
     print("CALCULATING COMPREHENSIVE DRAFT DEPENDENCE PARAMETERS...")
     print(f"Settings: method={ruptures_method}, penalty={ruptures_penalty}")
     print(f"Quality thresholds: R²≥{min_r2_threshold}, |corr|≥{min_correlation}")
     print(f"Model selection: {model_selection}, noisy fallback: {noisy_fallback}")
-    
-    # Use provided range or default to all ice shelf regions
-    if ice_shelf_range is None:
-        ice_shelf_range = config.ICE_SHELF_REGIONS
+    print(f"Processing ice shelves starting from index 33 (Abbott Ice Shelf)")
     
     # Debug information
-    print(f"Ice shelf range: {list(ice_shelf_range)[:5]}...{list(ice_shelf_range)[-5:]} (showing first/last 5)")
-    print(f"Total ice shelves to process: {len(list(ice_shelf_range))}")
+    print(f"Total ice shelves to process: {len(list(icems.name.values[33:]))}")  # Count from index 33 onwards
     print(f"icems dataframe length: {len(icems)}")
     print(f"Satellite data shape: {satobs[config.SATOBS_FLUX_VAR].shape}")
     
-    # Check for any obvious issues
-    max_index = max(ice_shelf_range)
-    if max_index >= len(icems):
-        print(f"WARNING: Maximum ice shelf index ({max_index}) >= icems length ({len(icems)})")
-        print("This will cause some indices to be skipped!")
+    # Check ice shelf names for first few
+    print("Sample ice shelf names (starting from index 33):")
+    for i, name in enumerate(list(icems.name.values[33:40])):  # Show first 7 from index 33
+        actual_index = i + 33
+        print(f"  Index {actual_index}: {name}")
+    
+    if len(icems) <= 40:
+        print(f"⚠️  WARNING: icems only has {len(icems)} rows, so only {max(0, len(icems) - 33)} ice shelves will be processed")
+    else:
+        expected_count = len(icems) - 33
+        print(f"Expected to process ~{expected_count} ice shelves (from index 33 to {len(icems)-1})")
     
     # Create save directory for comprehensive results
     save_dir_comprehensive = config.DIR_ICESHELF_DEDRAFT_SATOBS / "comprehensive"
@@ -71,23 +89,40 @@ def calculate_draft_dependence_comprehensive(icems, satobs, config,
     all_results = {}
     all_draft_params = {}
     
-    # Process each ice shelf
+    # Process each ice shelf - use sequential processing like notebook
     processed_count = 0
     skipped_count = 0
+    error_details = {}  # Track specific error types
     
-    for i in ice_shelf_range:
+    # Get ice shelf names starting from index 33 (like notebook does with [33:])
+    shelf_names = list(icems.name.values[33:])  # Start from Abbott Ice Shelf
+    
+    for i, shelf_name in enumerate(shelf_names):
+        actual_index = i + 33  # Convert back to actual DataFrame index
         try:
-            # Check if ice shelf index is valid
-            if i >= len(icems):
-                print(f"✗ Skipping index {i}: exceeds icems length ({len(icems)})")
-                skipped_count += 1
-                continue
-                
-            catchment_name = icems.name.values[i]
-            print(f"Processing ice shelf {i}: {catchment_name}...")
+            print(f"\nProcessing ice shelf {actual_index} ({i+1}/{len(shelf_names)}): {shelf_name}...")
             
+            # Additional checks before processing
+            try:
+                # Check if the ice shelf geometry is valid
+                ice_shelf_geom = icems.iloc[actual_index].geometry
+                if ice_shelf_geom is None or ice_shelf_geom.is_empty:
+                    print(f"✗ Skipping {shelf_name}: Empty or invalid geometry")
+                    skipped_count += 1
+                    error_details[actual_index] = "Empty geometry"
+                    continue
+                    
+                print(f"  Geometry area: {ice_shelf_geom.area:.2e} (projection units)")
+                
+            except Exception as geom_error:
+                print(f"✗ Skipping {shelf_name}: Geometry error - {geom_error}")
+                skipped_count += 1
+                error_details[actual_index] = f"Geometry error: {geom_error}"
+                continue
+            
+            print(f"  Starting comprehensive analysis...")
             result = dedraft_catchment_comprehensive(
-                i, icems, satobs, config,
+                actual_index, icems, satobs, config,  # Use actual_index instead of i
                 save_dir=save_dir_comprehensive,
                 weights=True,
                 weight_power=0.25,
@@ -102,22 +137,41 @@ def calculate_draft_dependence_comprehensive(icems, satobs, config,
                 noisy_fallback=noisy_fallback,
                 model_selection=model_selection
             )
+            print(f"  Analysis completed successfully!")
             
-            all_results[catchment_name] = result['full_results']
-            all_draft_params[catchment_name] = result['draft_params']
+            # Check if result has expected structure
+            if not isinstance(result, dict) or 'full_results' not in result or 'draft_params' not in result:
+                print(f"✗ Invalid result structure for {shelf_name}: {type(result)}")
+                skipped_count += 1
+                error_details[actual_index] = "Invalid result structure"
+                continue
+            
+            all_results[shelf_name] = result['full_results']
+            all_draft_params[shelf_name] = result['draft_params']
             processed_count += 1
             
-            print(f"✓ Processed {catchment_name}: "
+            print(f"✓ Processed {shelf_name}: "
                   f"meaningful={result['full_results']['is_meaningful']}, "
                   f"paramType={result['draft_params']['paramType']}")
                   
         except Exception as e:
-            try:
-                catchment_name = icems.name.values[i] if i < len(icems) else f"Index_{i}"
-            except:
-                catchment_name = f"Index_{i}"
-            print(f"✗ Error processing {catchment_name} (index {i}): {e}")
-            import traceback
+            error_msg = str(e)
+            print(f"✗ Error processing {shelf_name} (index {actual_index}): {error_msg}")
+            
+            # Categorize common error types
+            if "ruptures" in error_msg.lower():
+                error_type = "Ruptures library error"
+            elif "memory" in error_msg.lower() or "allocation" in error_msg.lower():
+                error_type = "Memory error"
+            elif "data" in error_msg.lower() or "empty" in error_msg.lower():
+                error_type = "Data error"
+            elif "coordinate" in error_msg.lower() or "dimension" in error_msg.lower():
+                error_type = "Coordinate error"
+            else:
+                error_type = "Other error"
+                
+            error_details[actual_index] = f"{error_type}: {error_msg[:100]}..."  # Truncate long errors
+            
             traceback.print_exc()
             skipped_count += 1
             continue
@@ -125,7 +179,37 @@ def calculate_draft_dependence_comprehensive(icems, satobs, config,
     print(f"\nProcessing Summary:")
     print(f"  Successfully processed: {processed_count} ice shelves")
     print(f"  Skipped/Failed: {skipped_count} ice shelves")
-    print(f"  Expected total: {len(list(ice_shelf_range))} ice shelves")
+    print(f"  Expected total: {len(shelf_names)} ice shelves")
+    print(f"  Success rate: {processed_count/(processed_count+skipped_count)*100:.1f}%")
+    
+    # Detailed error breakdown
+    if error_details:
+        print(f"\nError Breakdown:")
+        error_types = {}
+        for idx, error in error_details.items():
+            error_type = error.split(":")[0] if ":" in error else error
+            error_types[error_type] = error_types.get(error_type, 0) + 1
+            
+        for error_type, count in sorted(error_types.items(), key=lambda x: x[1], reverse=True):
+            print(f"  {error_type}: {count} ice shelves")
+            
+        # Show first few specific errors for debugging
+        print(f"\nFirst few specific errors:")
+        for idx, error in list(error_details.items())[:5]:
+            shelf_name = icems.name.values[idx] if idx < len(icems) else f"Index_{idx}"
+            print(f"  {idx} ({shelf_name}): {error}")
+        
+        if len(error_details) > 5:
+            print(f"  ... and {len(error_details)-5} more errors")
+    
+    if processed_count == 0:
+        print(f"\n⚠️  WARNING: No ice shelves were processed successfully!")
+        print(f"   This suggests a systematic issue. Common causes:")
+        print(f"   1. Missing dependencies (ruptures library)")
+        print(f"   2. Data format/coordinate issues")
+        print(f"   3. Index range problems")
+        print(f"   4. Insufficient data in ice shelf regions")
+        return {}, {}  # Return empty results to avoid downstream errors
     
     # Create comprehensive summary
     create_comprehensive_summary(all_results, all_draft_params, save_dir_comprehensive)
@@ -139,6 +223,10 @@ def calculate_draft_dependence_comprehensive(icems, satobs, config,
 
 def create_comprehensive_summary(all_results, all_draft_params, save_dir):
     """Create summary statistics and save to CSV."""
+    if not PANDAS_AVAILABLE:
+        print("⚠️  Cannot create summary - pandas not available")
+        return
+        
     import pandas as pd
     
     summary_data = []
@@ -187,7 +275,6 @@ def merge_comprehensive_parameters(all_draft_params, icems, satobs, config, save
     ref_grid = satobs[config.SATOBS_FLUX_VAR].isel({config.TIME_DIM: 0}) if config.TIME_DIM in satobs[config.SATOBS_FLUX_VAR].dims else satobs[config.SATOBS_FLUX_VAR]
     
     # Initialize empty datasets for each parameter with full spatial grid
-    param_names = ['minDraft', 'constantValue', 'paramType', 'alpha0', 'alpha1']
     config_param_names = [
         'draftDepenBasalMelt_minDraft',
         'draftDepenBasalMelt_constantMeltValue', 
@@ -208,8 +295,8 @@ def merge_comprehensive_parameters(all_draft_params, icems, satobs, config, save
     
     # Merge individual catchment files onto the full grid
     merged_count = 0
-    for shelf_name, draft_params in all_draft_params.items():
-        for param_name, config_param_name in zip(param_names, config_param_names):
+    for shelf_name in all_draft_params.keys():
+        for config_param_name in config_param_names:
             try:
                 # Look for individual parameter files
                 param_file = save_dir / f"{config_param_name}_{shelf_name}.nc"
@@ -234,7 +321,7 @@ def merge_comprehensive_parameters(all_draft_params, icems, satobs, config, save
                                 x=ref_grid.x, 
                                 y=ref_grid.y, 
                                 method='nearest',
-                                kwargs={'fill_value': 0}  # Fill outside interpolation range with 0
+                                fill_value=0  # Fill outside interpolation range with 0
                             )
                             
                             # Ensure the aligned data has the same shape as ref_grid
@@ -266,7 +353,6 @@ def merge_comprehensive_parameters(all_draft_params, icems, satobs, config, save
                                 
                         except Exception as interp_error:
                             print(f"  Failed to interpolate {shelf_name} {config_param_name}: {interp_error}")
-                            import traceback
                             traceback.print_exc()
                             continue
                     else:
@@ -295,7 +381,6 @@ def merge_comprehensive_parameters(all_draft_params, icems, satobs, config, save
                                 
                         except Exception as merge_error:
                             print(f"  Failed to directly merge {shelf_name} {config_param_name}: {merge_error}")
-                            import traceback
                             traceback.print_exc()
                             continue
                         
@@ -304,7 +389,6 @@ def merge_comprehensive_parameters(all_draft_params, icems, satobs, config, save
                     
             except Exception as e:
                 print(f"Warning: Could not merge {config_param_name} for {shelf_name}: {e}")
-                import traceback
                 traceback.print_exc()
     
     print(f"Successfully merged {merged_count} parameter files onto full grids")
@@ -340,7 +424,7 @@ if __name__ == "__main__":
     icems = icems.to_crs({'init': config.CRS_TARGET})
     
     # Run comprehensive analysis
-    # Note: Using config.ICE_SHELF_REGIONS which starts from index 33 (Abbott Ice Shelf)
+    # Note: Now processes ice shelves sequentially starting from index 33 (Abbott Ice Shelf)
     all_results, all_draft_params = calculate_draft_dependence_comprehensive(
         icems, satobs, config,
         n_bins=50,
@@ -350,8 +434,7 @@ if __name__ == "__main__":
         min_r2_threshold=0.1,
         min_correlation=0.2,
         noisy_fallback='zero',
-        model_selection='best',
-        ice_shelf_range=config.ICE_SHELF_REGIONS  # This starts from 33 (Abbott)
+        model_selection='best'
     )
     
     print(f"\nProcessing complete! Processed {len(all_results)} ice shelves.")
