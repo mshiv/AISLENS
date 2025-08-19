@@ -124,7 +124,7 @@ def calculate_draft_dependence_comprehensive(icems, satobs, config,
             result = dedraft_catchment_comprehensive(
                 actual_index, icems, satobs, config,  # Use actual_index instead of i
                 save_dir=save_dir_comprehensive,
-                weights=True,
+                weights=None,  # Don't use weights - set to None instead of False
                 weight_power=0.25,
                 save_pred=True,
                 save_coefs=True,
