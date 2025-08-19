@@ -117,7 +117,7 @@ def setup_draft_depen_field(param_ref, param_data, param_name, i, icems):
 def dedraft_catchment(
     i, icems, data, config, 
     save_dir, 
-    weights=True,
+    weights=False,
     weight_power=0.25,
     save_pred=False, 
     save_coefs=False
@@ -173,6 +173,564 @@ def dedraft_catchment(
         filename = save_dir / f'draftDepenModelPred_{catchment_name}.nc'
         pred.to_netcdf(filename)
         print(f'{catchment_name} prediction file saved: {filename}')
+
+def dedraft_catchment_comprehensive(
+    i, icems, data, config, 
+    save_dir, 
+    weights=False,
+    weight_power=0.25,
+    save_pred=False, 
+    save_coefs=False,
+    # New parameters for comprehensive analysis
+    n_bins=50,
+    min_points_per_bin=5,
+    ruptures_method='pelt',
+    ruptures_penalty=1.0,
+    min_r2_threshold=0.1,
+    min_correlation=0.3,
+    noisy_fallback='zero',
+    model_selection='best'  # 'best', 'zero_shallow', 'mean_shallow', 'threshold_intercept'
+):
+    """
+    Enhanced function that processes individual ice shelf catchments using changepoint detection
+    and multiple piecewise linear models to create comprehensive draft dependence parameters.
+    
+    Args:
+        i (int): Index for ice shelf catchment.
+        icems: geoDataframe with ice shelf masks.
+        data (xarray.DataArray): Input data containing melt and draft fields.
+        config: Configuration object containing paths and attributes.
+        save_dir (Path): Directory to save output.
+        weights (xarray.DataArray, optional): Weights for regression (binary).
+        weight_power (float): Power for draft_weight (default 0.25).
+        save_pred (bool): Save predicted melt (model).
+        save_coefs (bool): Save regression coefficients (obs).
+        
+        # New comprehensive parameters
+        n_bins (int): Number of bins for draft binning (default: 50)
+        min_points_per_bin (int): Minimum points required per bin (default: 5)
+        ruptures_method (str): Ruptures method: 'pelt', 'binseg', or 'window' (default: 'pelt')
+        ruptures_penalty (float): Penalty parameter for ruptures (default: 1.0)
+        min_r2_threshold (float): Minimum R² for meaningful relationship (default: 0.1)
+        min_correlation (float): Minimum correlation for meaningful relationship (default: 0.3)
+        noisy_fallback (str): For noisy data: 'zero' or 'mean' (default: 'zero')
+        model_selection (str): Which model to use for output (default: 'best')
+    
+    Returns:
+        dict: Comprehensive results including all five draft dependence parameters
+    """
+    
+    catchment_name = icems.name.values[i]
+    print(f'Processing catchment {catchment_name} with comprehensive analysis')
+    
+    # Clip data to catchment
+    ds = clip_data(data, i, icems)
+    ds_tm = ds.mean(dim=config.TIME_DIM)
+    
+    # Choose the correct variable names based on the data type
+    if config.SORRM_FLUX_VAR in ds.data_vars:
+        flux_var = config.SORRM_FLUX_VAR
+        draft_var = config.SORRM_DRAFT_VAR
+    elif config.SATOBS_FLUX_VAR in ds.data_vars:
+        flux_var = config.SATOBS_FLUX_VAR
+        draft_var = config.SATOBS_DRAFT_VAR
+    
+    # Apply weights if specified
+    if weights:
+        w = ds[flux_var].copy(data=draft_weight(ds[flux_var], ds[draft_var], a=weight_power))
+        w = clip_data(w, i, icems)
+    else:
+        w = None
+    
+    # Run comprehensive analysis
+    result = calculate_single_shelf_comprehensive(
+        ds[flux_var], ds[draft_var], catchment_name,
+        n_bins=n_bins,
+        min_points_per_bin=min_points_per_bin,
+        ruptures_method=ruptures_method,
+        ruptures_penalty=ruptures_penalty,
+        min_r2_threshold=min_r2_threshold,
+        min_correlation=min_correlation,
+        noisy_fallback=noisy_fallback,
+        weights=w
+    )
+    
+    # Extract the five draft dependence parameters
+    draft_params = extract_draft_dependence_parameters(result, model_selection)
+    
+    # Save results if requested
+    if save_coefs:
+        save_comprehensive_coefficients(
+            ds_tm, draft_params, catchment_name, save_dir, config, i, icems
+        )
+    
+    if save_pred:
+        save_comprehensive_predictions(
+            result, catchment_name, save_dir, ds[draft_var]
+        )
+    
+    return {
+        'catchment_name': catchment_name,
+        'draft_params': draft_params,
+        'full_results': result
+    }
+
+def calculate_single_shelf_comprehensive(melt_data, draft_data, shelf_name,
+                                       n_bins=50, min_points_per_bin=5,
+                                       ruptures_method='pelt', ruptures_penalty=1.0,
+                                       min_r2_threshold=0.1, min_correlation=0.3,
+                                       noisy_fallback='zero', weights=None):
+    """
+    Comprehensive analysis for a single ice shelf using changepoint detection.
+    
+    Args:
+        melt_data (xarray.DataArray): Melt rate data for the shelf
+        draft_data (xarray.DataArray): Draft data for the shelf
+        shelf_name (str): Name of the ice shelf
+        ... (other parameters as in main function)
+        
+    Returns:
+        dict: Comprehensive results for the shelf
+    """
+    from scipy.stats import pearsonr
+    
+    # Convert to time-mean if needed
+    if 'Time' in melt_data.dims:
+        melt_tm = melt_data.mean(dim='Time')
+        draft_tm = draft_data.mean(dim='Time')
+    else:
+        melt_tm = melt_data
+        draft_tm = draft_data
+    
+    # Flatten arrays and remove NaN
+    melt_vals = melt_tm.values.flatten()
+    draft_vals = draft_tm.values.flatten()
+    
+    # Keep melt rates in original units (m/yr) - no unit conversion
+    
+    # Remove NaN values
+    mask = ~np.isnan(melt_vals) & ~np.isnan(draft_vals)
+    if np.sum(mask) < 20:
+        return create_fallback_result(shelf_name, melt_vals, draft_vals, noisy_fallback)
+    
+    melt_clean = melt_vals[mask]
+    draft_clean = draft_vals[mask]
+    
+    # Apply weights if provided
+    if weights is not None:
+        weights_clean = weights.values.flatten()[mask]
+    else:
+        weights_clean = None
+    
+    # Assess data quality
+    is_meaningful, correlation, r2 = assess_data_quality(
+        draft_clean, melt_clean, min_r2_threshold, min_correlation)
+    
+    if not is_meaningful:
+        print(f"Skipping {shelf_name}: relationship too noisy (corr={correlation:.3f}, R²={r2:.3f})")
+        return create_fallback_result(shelf_name, melt_clean, draft_clean, noisy_fallback, 
+                                    correlation=correlation, r2=r2)
+    
+    # Find changepoint threshold
+    threshold, binned_draft, binned_melt, _ = find_changepoint_threshold_ruptures(
+        draft_clean, melt_clean, n_bins, min_points_per_bin, ruptures_method, ruptures_penalty)
+    
+    if np.isnan(threshold):
+        print(f"Skipping {shelf_name}: insufficient data for changepoint detection")
+        return create_fallback_result(shelf_name, melt_clean, draft_clean, noisy_fallback,
+                                    correlation=correlation, r2=r2)
+    
+    # Fit piecewise models
+    slope, shallow_mean, deep_intercept = fit_piecewise_models(
+        draft_clean, melt_clean, threshold, weights=weights_clean)
+    
+    # Create predictions
+    predictions = predict_piecewise_multiple(draft_clean, threshold, slope, shallow_mean, deep_intercept)
+    
+    return {
+        'shelf_name': shelf_name,
+        'threshold': threshold,
+        'slope': slope,
+        'shallow_mean': shallow_mean,
+        'deep_intercept': deep_intercept,
+        'draft_vals': draft_clean,
+        'melt_vals': melt_clean,
+        'predictions': predictions,
+        'binned_draft': binned_draft,
+        'binned_melt': binned_melt,
+        'is_meaningful': True,
+        'correlation': correlation,
+        'r2': r2
+    }
+
+def assess_data_quality(draft_vals, melt_vals, min_r2=0.1, min_corr=0.3):
+    """Assess if the draft-melt relationship is meaningful or too noisy."""
+    from scipy.stats import pearsonr
+    
+    mask = ~np.isnan(draft_vals) & ~np.isnan(melt_vals)
+    if np.sum(mask) < 20:
+        return False, 0.0, 0.0
+    
+    draft_clean = draft_vals[mask]
+    melt_clean = melt_vals[mask]
+    
+    # Calculate correlation
+    try:
+        correlation, p_value = pearsonr(draft_clean, melt_clean)
+    except:
+        correlation, p_value = 0.0, 1.0
+    
+    # Calculate R² from simple linear regression
+    try:
+        reg = LinearRegression()
+        reg.fit(draft_clean.reshape(-1, 1), melt_clean)
+        r2 = reg.score(draft_clean.reshape(-1, 1), melt_clean)
+    except:
+        r2 = 0.0
+    
+    # Check if relationship is meaningful
+    is_meaningful = (abs(correlation) >= min_corr) and (r2 >= min_r2) and (p_value < 0.05)
+    
+    return is_meaningful, correlation, r2
+
+def find_changepoint_threshold_ruptures(draft_vals, melt_vals, n_bins=50, min_points_per_bin=5,
+                                       method='pelt', penalty=1.0):
+    """Find draft threshold using ruptures changepoint detection."""
+    # Remove NaN values
+    mask = ~np.isnan(draft_vals) & ~np.isnan(melt_vals)
+    if np.sum(mask) < 20:
+        return np.nan, np.nan, np.nan, np.nan
+    
+    draft_clean = draft_vals[mask]
+    melt_clean = melt_vals[mask]
+    
+    # Sort by draft
+    sort_idx = np.argsort(draft_clean)
+    draft_sorted = draft_clean[sort_idx]
+    melt_sorted = melt_clean[sort_idx]
+    
+    # Bin the data
+    bins = np.linspace(draft_sorted.min(), draft_sorted.max(), n_bins + 1)
+    bin_indices = np.digitize(draft_sorted, bins) - 1
+    
+    # Calculate binned statistics
+    binned_melt = []
+    binned_draft = []
+    
+    for i in range(n_bins):
+        bin_mask = bin_indices == i
+        if np.sum(bin_mask) >= min_points_per_bin:
+            binned_melt.append(np.mean(melt_sorted[bin_mask]))
+            binned_draft.append(np.mean(draft_sorted[bin_mask]))
+    
+    if len(binned_melt) < 10:
+        return np.nan, np.nan, np.nan, np.nan
+    
+    binned_melt = np.array(binned_melt)
+    binned_draft = np.array(binned_draft)
+    
+    # Use ruptures for changepoint detection
+    try:
+        if method == 'pelt':
+            algo = rpt.Pelt(model="rbf", min_size=2).fit(binned_melt.reshape(-1, 1))
+            result = algo.predict(pen=penalty)
+        elif method == 'binseg':
+            algo = rpt.Binseg(model="l2", min_size=2).fit(binned_melt.reshape(-1, 1))
+            result = algo.predict(n_bkps=1)
+        elif method == 'window':
+            algo = rpt.Window(width=5, model="l2").fit(binned_melt.reshape(-1, 1))
+            result = algo.predict(n_bkps=1)
+        else:
+            raise ValueError(f"Unknown method: {method}")
+        
+        if len(result) > 1:  # ruptures returns end points, so take first changepoint
+            cp_idx = result[0] - 1  # Convert to 0-based index
+            if 0 <= cp_idx < len(binned_draft):
+                threshold_draft = binned_draft[cp_idx]
+            else:
+                threshold_draft = np.median(binned_draft)
+        else:
+            threshold_draft = np.median(binned_draft)
+            
+    except Exception as e:
+        print(f"ruptures failed: {e}, using median")
+        threshold_draft = np.median(binned_draft)
+    
+    return threshold_draft, binned_draft, binned_melt, (draft_clean, melt_clean)
+
+def fit_piecewise_models(draft_vals, melt_vals, threshold, weights=None):
+    """Fit multiple piecewise linear models with different shallow behaviors."""
+    mask = ~np.isnan(draft_vals) & ~np.isnan(melt_vals)
+    draft_clean = draft_vals[mask]
+    melt_clean = melt_vals[mask]
+    
+    if weights is not None:
+        weights_clean = weights[mask]
+    else:
+        weights_clean = None
+    
+    # Points deeper than threshold (for linear regression)
+    deep_mask = draft_clean >= threshold
+    shallow_mask = draft_clean < threshold
+    
+    # Calculate shallow statistics
+    if np.sum(shallow_mask) >= 5:
+        if weights_clean is not None:
+            shallow_weights = weights_clean[shallow_mask]
+            shallow_mean = np.average(melt_clean[shallow_mask], weights=shallow_weights)
+        else:
+            shallow_mean = np.mean(melt_clean[shallow_mask])
+    else:
+        if weights_clean is not None:
+            shallow_mean = np.average(melt_clean, weights=weights_clean)
+        else:
+            shallow_mean = np.mean(melt_clean)  # Fallback to overall mean
+    
+    # Fit linear regression to deep points
+    if np.sum(deep_mask) >= 5:
+        X_deep = draft_clean[deep_mask].reshape(-1, 1)
+        y_deep = melt_clean[deep_mask]
+        
+        reg = LinearRegression()
+        if weights_clean is not None:
+            deep_weights = weights_clean[deep_mask]
+            reg.fit(X_deep, y_deep, sample_weight=deep_weights)
+        else:
+            reg.fit(X_deep, y_deep)
+        slope = reg.coef_[0]
+        deep_intercept = reg.intercept_
+    else:
+        # Not enough deep points, use all data
+        X_all = draft_clean.reshape(-1, 1)
+        y_all = melt_clean
+        reg = LinearRegression()
+        if weights_clean is not None:
+            reg.fit(X_all, y_all, sample_weight=weights_clean)
+        else:
+            reg.fit(X_all, y_all)
+        slope = reg.coef_[0]
+        deep_intercept = reg.intercept_
+        
+    return slope, shallow_mean, deep_intercept
+
+def predict_piecewise_multiple(draft_vals, threshold, slope, shallow_mean, deep_intercept):
+    """Predict melt using multiple piecewise models."""
+    predictions = {}
+    valid_mask = ~np.isnan(draft_vals)
+    shallow_mask = valid_mask & (draft_vals < threshold)
+    deep_mask = valid_mask & (draft_vals >= threshold)
+    
+    # Model 1: Zero shallow
+    pred_zero = np.full_like(draft_vals, np.nan)
+    pred_zero[shallow_mask] = 0.0
+    pred_zero[deep_mask] = slope * draft_vals[deep_mask] + deep_intercept
+    predictions['zero_shallow'] = pred_zero
+    
+    # Model 2: Mean shallow
+    pred_mean = np.full_like(draft_vals, np.nan)
+    pred_mean[shallow_mask] = shallow_mean
+    pred_mean[deep_mask] = slope * draft_vals[deep_mask] + deep_intercept
+    predictions['mean_shallow'] = pred_mean
+    
+    # Model 3: Threshold intercept (evaluate deep line at threshold)
+    threshold_melt = slope * threshold + deep_intercept
+    pred_threshold = np.full_like(draft_vals, np.nan)
+    pred_threshold[shallow_mask] = threshold_melt  # Constant value at threshold
+    pred_threshold[deep_mask] = slope * draft_vals[deep_mask] + deep_intercept
+    predictions['threshold_intercept'] = pred_threshold
+    
+    return predictions
+
+def create_fallback_result(shelf_name, melt_vals, draft_vals, noisy_fallback, correlation=0.0, r2=0.0):
+    """Create fallback result for noisy or insufficient data."""
+    if len(melt_vals) == 0 or len(draft_vals) == 0:
+        fallback_pred = np.array([])
+    else:
+        if noisy_fallback == 'zero':
+            fallback_pred = np.zeros_like(melt_vals)
+        else:  # 'mean'
+            fallback_pred = np.full_like(melt_vals, np.mean(melt_vals))
+    
+    # Create predictions dict for consistency
+    predictions = {
+        'zero_shallow': fallback_pred.copy(),
+        'mean_shallow': fallback_pred.copy(),
+        'threshold_intercept': fallback_pred.copy()
+    }
+    
+    return {
+        'shelf_name': shelf_name,
+        'threshold': np.nan,
+        'slope': 0.0,
+        'shallow_mean': 0.0 if noisy_fallback == 'zero' else (np.mean(melt_vals) if len(melt_vals) > 0 else 0.0),
+        'deep_intercept': 0.0,
+        'draft_vals': draft_vals,
+        'melt_vals': melt_vals,
+        'predictions': predictions,
+        'binned_draft': None,
+        'binned_melt': None,
+        'is_meaningful': False,
+        'correlation': correlation,
+        'r2': r2
+    }
+
+def extract_draft_dependence_parameters(result, model_selection='best'):
+    """
+    Extract the five draft dependence parameters from comprehensive analysis results.
+    
+    Args:
+        result (dict): Results from calculate_single_shelf_comprehensive
+        model_selection (str): Which model to use ('best', 'zero_shallow', 'mean_shallow', 'threshold_intercept')
+    
+    Returns:
+        dict: Five draft dependence parameters:
+            - minDraft: threshold draft value (0 for noisy shelves)
+            - constantValue: constant melt rate for shallow areas
+            - paramType: 0 for linear, 1 for constant
+            - alpha0: intercept (0 for noisy shelves)
+            - alpha1: slope (0 for noisy shelves)
+    """
+    if not result['is_meaningful']:
+        # Noisy shelf - return zeros/fallback values
+        return {
+            'minDraft': 0.0,
+            'constantValue': result['shallow_mean'],  # This will be 0 or mean based on noisy_fallback
+            'paramType': 1,  # Use constant parameterization for noisy shelves
+            'alpha0': 0.0,
+            'alpha1': 0.0
+        }
+    
+    # Meaningful relationship - extract parameters
+    threshold = result['threshold']
+    slope = result['slope']
+    shallow_mean = result['shallow_mean']
+    deep_intercept = result['deep_intercept']
+    
+    # Determine best model if requested
+    if model_selection == 'best':
+        # Calculate R² for each model to determine best
+        melt_obs = result['melt_vals']
+        best_r2 = -np.inf
+        best_model = 'zero_shallow'
+        
+        for model_name, predicted in result['predictions'].items():
+            valid_mask = ~np.isnan(melt_obs) & ~np.isnan(predicted)
+            if np.sum(valid_mask) > 0:
+                obs_clean = melt_obs[valid_mask]
+                pred_clean = predicted[valid_mask]
+                r2 = 1 - np.sum((obs_clean - pred_clean)**2) / np.sum((obs_clean - np.mean(obs_clean))**2)
+                if r2 > best_r2:
+                    best_r2 = r2
+                    best_model = model_name
+        
+        model_selection = best_model
+    
+    # Extract parameters based on selected model
+    if model_selection == 'zero_shallow':
+        constant_value = 0.0
+    elif model_selection == 'mean_shallow':
+        constant_value = shallow_mean
+    elif model_selection == 'threshold_intercept':
+        # For threshold intercept, the constant value is the melt at threshold
+        constant_value = slope * threshold + deep_intercept
+    else:
+        # Default to zero shallow
+        constant_value = 0.0
+    
+    return {
+        'minDraft': threshold,
+        'constantValue': constant_value,
+        'paramType': 0,  # Linear parameterization for meaningful relationships
+        'alpha0': deep_intercept,
+        'alpha1': slope
+    }
+
+def save_comprehensive_coefficients(ds_tm, draft_params, catchment_name, save_dir, config, i, icems):
+    """
+    Save comprehensive draft dependence coefficients to NetCDF files.
+    
+    Args:
+        ds_tm (xarray.Dataset): Time-averaged dataset for reference
+        draft_params (dict): Draft dependence parameters
+        catchment_name (str): Name of the catchment
+        save_dir (Path): Directory to save files
+        config: Configuration object
+        i (int): Catchment index
+        icems: Ice shelf geometries
+    """
+    # Get a reference field for spatial structure
+    if config.SATOBS_FLUX_VAR in ds_tm.data_vars:
+        ref_field = ds_tm[config.SATOBS_FLUX_VAR]
+    elif config.SORRM_FLUX_VAR in ds_tm.data_vars:
+        ref_field = ds_tm[config.SORRM_FLUX_VAR]
+    else:
+        # Fallback - use first available data variable
+        ref_field = ds_tm[list(ds_tm.data_vars)[0]]
+    
+    # Create DataArrays for each parameter
+    param_fields = {}
+    
+    # Define parameter mappings (assuming config.DATA_ATTRS has these keys)
+    param_mapping = {
+        'draftDepenBasalMelt_minDraft': draft_params['minDraft'],
+        'draftDepenBasalMelt_constantMeltValue': draft_params['constantValue'], 
+        'draftDepenBasalMelt_paramType': draft_params['paramType'],
+        'draftDepenBasalMeltAlpha0': draft_params['alpha0'],
+        'draftDepenBasalMeltAlpha1': draft_params['alpha1']
+    }
+    
+    for param_name, param_value in param_mapping.items():
+        if param_name in config.DATA_ATTRS:
+            param_ds = setup_draft_depen_field(ref_field, param_value, param_name, i, icems)
+            param_fields[param_name] = param_ds
+    
+    # Save individual parameter files
+    for param_name, param_ds in param_fields.items():
+        filename = save_dir / f'{param_name}_{catchment_name}.nc'
+        param_ds.to_netcdf(filename)
+        print(f'{catchment_name} {param_name} saved: {filename}')
+    
+    # Save combined file
+    if param_fields:
+        combined_ds = xr.Dataset(param_fields)
+        combined_filename = save_dir / f'draftDepenBasalMelt_comprehensive_{catchment_name}.nc'
+        combined_ds.to_netcdf(combined_filename)
+        print(f'{catchment_name} comprehensive coefficients saved: {combined_filename}')
+
+def save_comprehensive_predictions(result, catchment_name, save_dir, draft_reference):
+    """
+    Save comprehensive predictions from multiple models.
+    
+    Args:
+        result (dict): Results from comprehensive analysis
+        catchment_name (str): Name of the catchment
+        save_dir (Path): Directory to save files
+        draft_reference (xarray.DataArray): Reference draft array for coordinates
+    """
+    predictions = result['predictions']
+    
+    for model_name, pred_values in predictions.items():
+        # Create DataArray with same structure as draft_reference
+        pred_flat = pred_values.flatten()
+        
+        # Create a DataArray matching the spatial structure
+        if hasattr(draft_reference, 'Time'):
+            # Take time mean if draft has time dimension
+            spatial_ref = draft_reference.mean(dim='Time')
+        else:
+            spatial_ref = draft_reference
+            
+        # Create prediction field
+        pred_array = spatial_ref.copy()
+        pred_array.values = pred_flat.reshape(spatial_ref.shape)
+        pred_array.name = f'predicted_melt_{model_name}'
+        pred_array.attrs['long_name'] = f'Predicted melt rate using {model_name} model'
+        pred_array.attrs['units'] = 'm/yr'
+        
+        # Save to file
+        filename = save_dir / f'draftDepenModelPred_{model_name}_{catchment_name}.nc'
+        pred_array.to_netcdf(filename)
+        print(f'{catchment_name} {model_name} prediction saved: {filename}')
 
 def extrapolate_catchment(data, i, icems):
     """
@@ -242,7 +800,7 @@ def detrend_segmented(arr, time, breakpoints, deg=1):
         arr (numpy.ndarray): 1D array of input data.
         time (numpy.ndarray): 1D array of time values.
         breakpoints (list): List of breakpoint indices.
-        deg (int): Degree of the polynomial fit (default is 1 for linear).
+        deg (int): The degree of the polynomial fit (default is 1 for linear).
 
     Returns:
         numpy.ndarray: Detrended array.

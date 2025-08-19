@@ -83,6 +83,18 @@ class Config:
             "long_name": "Basal melt rate draft dependency coefficient (alpha1 or slope)",
             "units": "m/yr/m",
         },
+        "draftDepenBasalMelt_minDraft": {
+            "long_name": "Minimum draft threshold for piecewise linear basal melt parameterization",
+            "units": "m",
+        },
+        "draftDepenBasalMelt_constantMeltValue": {
+            "long_name": "Constant basal melt rate for shallow areas (draft < minDraft)",
+            "units": "m/yr",
+        },
+        "draftDepenBasalMelt_paramType": {
+            "long_name": "Parameterization type selector (0=linear, 1=constant)",
+            "units": "dimensionless",
+        },
 
     })
 
