@@ -218,23 +218,86 @@ def merge_comprehensive_parameters(all_draft_params, icems, satobs, config, save
                     param_ds = xr.open_dataset(param_file)
                     param_da = param_ds[config_param_name]
                     
-                    # Since all files are now saved on the full grid, coordinates should match
-                    if param_da.x.equals(ref_grid.x) and param_da.y.equals(ref_grid.y):
-                        # Simple merge - add non-zero values from individual file
-                        overlap_mask = param_da != 0  # Use non-zero values as mask
-                        if overlap_mask.any():
-                            merged_datasets[config_param_name][config_param_name] = xr.where(
-                                overlap_mask, 
-                                param_da, 
-                                merged_datasets[config_param_name][config_param_name]
-                            )
-                            merged_count += 1
-                            print(f"  Successfully merged {shelf_name} {config_param_name}")
-                        else:
-                            print(f"  No non-zero data found for {shelf_name} {config_param_name}")
-                    else:
+                    # Check if the coordinates match
+                    if not (param_da.x.equals(ref_grid.x) and param_da.y.equals(ref_grid.y)):
                         print(f"Warning: Coordinate mismatch for {shelf_name} {config_param_name}")
-                        print(f"  File shape: {param_da.shape}, Reference shape: {ref_grid.shape}")
+                        print(f"  Ice shelf shape: {param_da.shape}, Full grid shape: {ref_grid.shape}")
+                        print(f"  Ice shelf x range: [{param_da.x.min().values:.1f}, {param_da.x.max().values:.1f}]")
+                        print(f"  Ice shelf y range: [{param_da.y.min().values:.1f}, {param_da.y.max().values:.1f}]")
+                        print(f"  Full grid x range: [{ref_grid.x.min().values:.1f}, {ref_grid.x.max().values:.1f}]")
+                        print(f"  Full grid y range: [{ref_grid.y.min().values:.1f}, {ref_grid.y.max().values:.1f}]")
+                        
+                        # Try to align the data by interpolating to the full grid coordinates
+                        try:
+                            # First, ensure we have proper coordinate alignment
+                            param_da_aligned = param_da.interp(
+                                x=ref_grid.x, 
+                                y=ref_grid.y, 
+                                method='nearest',
+                                kwargs={'fill_value': 0}  # Fill outside interpolation range with 0
+                            )
+                            
+                            # Ensure the aligned data has the same shape as ref_grid
+                            if param_da_aligned.shape != ref_grid.shape:
+                                print(f"  Shape mismatch after interpolation: {param_da_aligned.shape} vs {ref_grid.shape}")
+                                continue
+                            
+                            # Create a mask for non-zero values (ice shelf regions)
+                            valid_mask = (param_da_aligned != 0) & (~param_da_aligned.isnull())
+                            
+                            if valid_mask.any():
+                                # Get the current merged grid
+                                current_grid = merged_datasets[config_param_name][config_param_name]
+                                
+                                # Ensure shapes match before merging
+                                if current_grid.shape != param_da_aligned.shape:
+                                    print(f"  Grid shape mismatch: {current_grid.shape} vs {param_da_aligned.shape}")
+                                    continue
+                                
+                                # Update only where we have valid ice shelf data
+                                updated_grid = current_grid.where(~valid_mask, param_da_aligned)
+                                merged_datasets[config_param_name][config_param_name] = updated_grid
+                                
+                                merged_count += 1
+                                valid_points = valid_mask.sum().values
+                                print(f"  Successfully interpolated and merged {shelf_name} {config_param_name} ({valid_points} points)")
+                            else:
+                                print(f"  No valid data after interpolation for {shelf_name} {config_param_name}")
+                                
+                        except Exception as interp_error:
+                            print(f"  Failed to interpolate {shelf_name} {config_param_name}: {interp_error}")
+                            import traceback
+                            traceback.print_exc()
+                            continue
+                    else:
+                        # Coordinates match, can directly merge
+                        try:
+                            # Use non-null and non-zero values as the mask
+                            overlap_mask = (~param_da.isnull()) & (param_da != 0)
+                            
+                            if overlap_mask.any():
+                                # Get current grid and ensure shapes match
+                                current_grid = merged_datasets[config_param_name][config_param_name]
+                                
+                                if current_grid.shape != param_da.shape:
+                                    print(f"  Direct merge shape mismatch: {current_grid.shape} vs {param_da.shape}")
+                                    continue
+                                
+                                # Update grid where ice shelf data exists
+                                updated_grid = current_grid.where(~overlap_mask, param_da)
+                                merged_datasets[config_param_name][config_param_name] = updated_grid
+                                
+                                merged_count += 1
+                                valid_points = overlap_mask.sum().values
+                                print(f"  Successfully merged {shelf_name} {config_param_name} ({valid_points} points)")
+                            else:
+                                print(f"  No valid data for direct merge of {shelf_name} {config_param_name}")
+                                
+                        except Exception as merge_error:
+                            print(f"  Failed to directly merge {shelf_name} {config_param_name}: {merge_error}")
+                            import traceback
+                            traceback.print_exc()
+                            continue
                         
                 else:
                     print(f"Warning: File not found: {param_file}")
@@ -258,13 +321,6 @@ def merge_comprehensive_parameters(all_draft_params, icems, satobs, config, save
     combined_ds = xr.Dataset()
     for config_param_name, merged_ds in merged_datasets.items():
         combined_ds = xr.merge([combined_ds, merged_ds])
-    
-    # Save combined file
-    combined_file = config.DIR_PROCESSED / f"draft_dependence_changepoint" / f"ruptures_draftDepenBasalMelt_comprehensive_all.nc"
-    combined_ds.to_netcdf(combined_file)
-    print(f"Saved combined parameters to {combined_file}")
-    
-    return merged_datasets
     
     # Save combined file
     combined_file = config.DIR_PROCESSED / "draft_dependence_changepoint" / "ruptures_draftDepenBasalMelt_parameters.nc"
@@ -292,7 +348,7 @@ if __name__ == "__main__":
         ruptures_method='pelt',
         ruptures_penalty=1.0,
         min_r2_threshold=0.1,
-        min_correlation=0.3,
+        min_correlation=0.2,
         noisy_fallback='zero',
         model_selection='best',
         ice_shelf_range=config.ICE_SHELF_REGIONS  # This starts from 33 (Abbott)
