@@ -218,36 +218,10 @@ def merge_comprehensive_parameters(all_draft_params, icems, satobs, config, save
                     param_ds = xr.open_dataset(param_file)
                     param_da = param_ds[config_param_name]
                     
-                    # Check if the coordinates match
-                    if not (param_da.x.equals(ref_grid.x) and param_da.y.equals(ref_grid.y)):
-                        print(f"Warning: Coordinate mismatch for {shelf_name} {config_param_name}")
-                        print(f"  Ice shelf shape: {param_da.shape}, Full grid shape: {ref_grid.shape}")
-                        print(f"  Ice shelf x range: [{param_da.x.min().values:.1f}, {param_da.x.max().values:.1f}]")
-                        print(f"  Ice shelf y range: [{param_da.y.min().values:.1f}, {param_da.y.max().values:.1f}]")
-                        print(f"  Full grid x range: [{ref_grid.x.min().values:.1f}, {ref_grid.x.max().values:.1f}]")
-                        print(f"  Full grid y range: [{ref_grid.y.min().values:.1f}, {ref_grid.y.max().values:.1f}]")
-                        
-                        # Try to align the data by interpolating to the full grid coordinates
-                        try:
-                            param_da_aligned = param_da.interp(x=ref_grid.x, y=ref_grid.y, method='nearest')
-                            # Update the full grid where we have valid data
-                            valid_mask = ~param_da_aligned.isnull()
-                            if valid_mask.any():
-                                merged_datasets[config_param_name][config_param_name] = xr.where(
-                                    valid_mask,
-                                    param_da_aligned,
-                                    merged_datasets[config_param_name][config_param_name]
-                                )
-                                merged_count += 1
-                                print(f"  Successfully interpolated and merged {shelf_name} {config_param_name}")
-                            else:
-                                print(f"  No valid data after interpolation for {shelf_name} {config_param_name}")
-                        except Exception as interp_error:
-                            print(f"  Failed to interpolate {shelf_name} {config_param_name}: {interp_error}")
-                            continue
-                    else:
-                        # Coordinates match, can directly merge
-                        overlap_mask = ~param_da.isnull()
+                    # Since all files are now saved on the full grid, coordinates should match
+                    if param_da.x.equals(ref_grid.x) and param_da.y.equals(ref_grid.y):
+                        # Simple merge - add non-zero values from individual file
+                        overlap_mask = param_da != 0  # Use non-zero values as mask
                         if overlap_mask.any():
                             merged_datasets[config_param_name][config_param_name] = xr.where(
                                 overlap_mask, 
@@ -255,6 +229,12 @@ def merge_comprehensive_parameters(all_draft_params, icems, satobs, config, save
                                 merged_datasets[config_param_name][config_param_name]
                             )
                             merged_count += 1
+                            print(f"  Successfully merged {shelf_name} {config_param_name}")
+                        else:
+                            print(f"  No non-zero data found for {shelf_name} {config_param_name}")
+                    else:
+                        print(f"Warning: Coordinate mismatch for {shelf_name} {config_param_name}")
+                        print(f"  File shape: {param_da.shape}, Reference shape: {ref_grid.shape}")
                         
                 else:
                     print(f"Warning: File not found: {param_file}")
@@ -278,6 +258,13 @@ def merge_comprehensive_parameters(all_draft_params, icems, satobs, config, save
     combined_ds = xr.Dataset()
     for config_param_name, merged_ds in merged_datasets.items():
         combined_ds = xr.merge([combined_ds, merged_ds])
+    
+    # Save combined file
+    combined_file = config.DIR_PROCESSED / f"draft_dependence_changepoint" / f"ruptures_draftDepenBasalMelt_comprehensive_all.nc"
+    combined_ds.to_netcdf(combined_file)
+    print(f"Saved combined parameters to {combined_file}")
+    
+    return merged_datasets
     
     # Save combined file
     combined_file = config.DIR_PROCESSED / "draft_dependence_changepoint" / "ruptures_draftDepenBasalMelt_parameters.nc"

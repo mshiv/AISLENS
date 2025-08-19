@@ -114,6 +114,90 @@ def setup_draft_depen_field(param_ref, param_data, param_name, i, icems):
     param_ds = clip_data(param_ds, i, icems)
     return param_ds
 
+def setup_draft_depen_field_fullgrid(param_ref, param_data, param_name, i, icems):
+    """
+    Set up a DataArray for draft dependence parameter field on the full grid.
+    This function creates the parameter field on the full spatial grid and sets
+    values only within the ice shelf mask to the parameter value, leaving the
+    rest as zeros/NaN.
+
+    Args:
+        param_ref (xarray.DataArray): Reference field for full grid coordinates and shape
+        param_data (float): Parameter value calculated by dedraft
+        param_name (str): Name of the parameter
+        i (int): Ice shelf index
+        icems: Ice shelf geometries
+
+    Returns:
+        xarray.Dataset: Dataset containing the parameter field on full grid
+    """
+    # Initialize parameter field on full grid with zeros
+    param_ds = xr.zeros_like(param_ref)
+    param_ds.name = param_name
+    param_ds.attrs["long_name"] = config.DATA_ATTRS[param_name]['long_name']
+    param_ds.attrs["units"] = config.DATA_ATTRS[param_name]['units']
+    write_crs(param_ds)
+    
+    # Create mask for this ice shelf
+    ice_shelf_mask = get_ice_shelf_mask(param_ref, i, icems)
+    
+    # Set parameter value only within the ice shelf mask
+    param_ds = param_ds.where(~ice_shelf_mask, param_data)
+    
+    # Return as Dataset for consistency with original function
+    return xr.Dataset({param_name: param_ds})
+
+def get_ice_shelf_mask(reference_field, i, icems):
+    """
+    Create a boolean mask for a specific ice shelf on the full grid.
+    
+    Args:
+        reference_field (xarray.DataArray): Reference field for coordinates
+        i (int): Ice shelf index
+        icems: Ice shelf geometries
+        
+    Returns:
+        xarray.DataArray: Boolean mask (True where ice shelf exists)
+    """
+    from rasterio.features import rasterize
+    from rasterio.transform import from_bounds
+    import numpy as np
+    
+    # Get the geometry for this ice shelf
+    geom = icems.geometry.iloc[i]
+    
+    # Get coordinate arrays
+    x_coords = reference_field.x.values
+    y_coords = reference_field.y.values
+    
+    # Create transform for rasterization
+    x_res = x_coords[1] - x_coords[0]
+    y_res = y_coords[1] - y_coords[0]
+    transform = from_bounds(
+        x_coords[0] - x_res/2, y_coords[0] - y_res/2,
+        x_coords[-1] + x_res/2, y_coords[-1] + y_res/2,
+        len(x_coords), len(y_coords)
+    )
+    
+    # Rasterize the geometry
+    mask_array = rasterize(
+        [geom], 
+        out_shape=(len(y_coords), len(x_coords)),
+        transform=transform,
+        fill=0,
+        default_value=1,
+        dtype=np.uint8
+    )
+    
+    # Create DataArray
+    mask_da = xr.DataArray(
+        mask_array.astype(bool),
+        dims=['y', 'x'],
+        coords={'x': x_coords, 'y': y_coords}
+    )
+    
+    return mask_da
+
 def dedraft_catchment(
     i, icems, data, config, 
     save_dir, 
@@ -223,9 +307,12 @@ def dedraft_catchment_comprehensive(
     catchment_name = icems.name.values[i]
     print(f'Processing catchment {catchment_name} with comprehensive analysis')
     
-    # Clip data to catchment
+    # Clip data to catchment for processing
     ds = clip_data(data, i, icems)
     ds_tm = ds.mean(dim=config.TIME_DIM)
+    
+    # Keep reference to full grid for saving parameters
+    data_tm_full = data.mean(dim=config.TIME_DIM)
     
     # Choose the correct variable names based on the data type
     if config.SORRM_FLUX_VAR in ds.data_vars:
@@ -261,7 +348,7 @@ def dedraft_catchment_comprehensive(
     # Save results if requested
     if save_coefs:
         save_comprehensive_coefficients(
-            ds_tm, draft_params, catchment_name, save_dir, config, i, icems
+            data_tm_full, draft_params, catchment_name, save_dir, config, i, icems
         )
     
     if save_pred:
@@ -648,9 +735,10 @@ def extract_draft_dependence_parameters(result, model_selection='best'):
 def save_comprehensive_coefficients(ds_tm, draft_params, catchment_name, save_dir, config, i, icems):
     """
     Save comprehensive draft dependence coefficients to NetCDF files.
+    Note: This function now receives a full grid reference from the calling script.
     
     Args:
-        ds_tm (xarray.Dataset): Time-averaged dataset for reference
+        ds_tm (xarray.Dataset): Time-averaged dataset for reference (should be full grid)
         draft_params (dict): Draft dependence parameters
         catchment_name (str): Name of the catchment
         save_dir (Path): Directory to save files
@@ -667,7 +755,7 @@ def save_comprehensive_coefficients(ds_tm, draft_params, catchment_name, save_di
         # Fallback - use first available data variable
         ref_field = ds_tm[list(ds_tm.data_vars)[0]]
     
-    # Create DataArrays for each parameter
+    # Create DataArrays for each parameter ON THE FULL GRID
     param_fields = {}
     
     # Define parameter mappings (assuming config.DATA_ATTRS has these keys)
@@ -681,7 +769,8 @@ def save_comprehensive_coefficients(ds_tm, draft_params, catchment_name, save_di
     
     for param_name, param_value in param_mapping.items():
         if param_name in config.DATA_ATTRS:
-            param_ds = setup_draft_depen_field(ref_field, param_value, param_name, i, icems)
+            # Create parameter field on full grid, then mask to ice shelf
+            param_ds = setup_draft_depen_field_fullgrid(ref_field, param_value, param_name, i, icems)
             param_fields[param_name] = param_ds
     
     # Save individual parameter files
