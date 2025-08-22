@@ -48,7 +48,16 @@ export AISLENS_DATA_DIR=$HOME/scratch/AISLENS
 
 ## Workflow
 
-Refer docs.
+The main scripts to generate initial conditions and forcing files to run the ice sheet model, [MALI](https://github.com/MALI-Dev/E3SM) can be found in the `src/` directory:
+
+```Shell
+/AISLENS/
+├── src/
+    ├── aislens/    # project source code (Python)
+    ├── MPAS-Tools/ # Custom scripts to regrid/viz. on the MALI mesh
+    ├── scripts/    # main workflow scripts that utilize project source
+    ├── R/          # R scripts for select data analyses & viz.
+```
 
 ## References
 
@@ -57,3 +66,9 @@ S. Muruganandham, A. A. Robel, M. J. Hoffman and S. F. Price, "[Statistical Gene
 
 <a id="2">[2]</a>
 Hoffman, M. J., Perego, M., Price, S. F., Lipscomb, W. H., Zhang, T., Jacobsen, D., Tezaur, I., Salinger, A. G., Tuminaro, R., and Bertagna, L.: [MPAS-Albany Land Ice (MALI): a variable-resolution ice sheet model for Earth system modeling using Voronoi grids](https://doi.org/10.5194/gmd-11-3747-2018), Geosci. Model Dev., 11, 3747–3780, 2018, doi: 10.5194/gmd-11-3747-2018.
+
+## Further Information
+
+[GT Ice & Climate - AISLENS](https://iceclimate.eas.gatech.edu/research/antarctic-ice-sheet-large-ensemble-project-aislens/)
+
+Contact: smurugan9@gatech.edu / alex.robel@eas.gatech.edu
