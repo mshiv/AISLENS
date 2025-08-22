@@ -9,6 +9,13 @@ from matplotlib.colors import Normalize, TwoSlopeNorm
 import glob
 import os
 
+# This script plots variables from MPAS output files on a map.
+# It can handle multiple runs and multiple variables, plotting each variable
+# at specified time levels.
+# TODO: Modify to make saving figures optional.
+# TODO: Add options to invoke with different types of files, specifically, including defaults of: output_flux_all_timesteps_*.nc, output_state_*.nc, and user-defined file names.
+
+
 print("** Gathering information.  (Invoke with --help for more details. All arguments are optional)")
 
 parser = argparse.ArgumentParser(description=__doc__)
