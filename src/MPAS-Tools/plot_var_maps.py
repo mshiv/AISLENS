@@ -231,8 +231,8 @@ for ii, run in enumerate(sorted(glob.glob(runs+"output_flux_all_timesteps_*.nc")
                  label=f'{colorbar_label_prefix}{variable} (${units}$)'))
 
     figs[run].tight_layout()
-    figs[run].savefig(f'{runs}{variables[0]}_{ii+2000}.png', dpi=400, bbox_inches='tight')
-    print("saved fig for {}".format(ii+2000))
+    #figs[run].savefig(f'{runs}{variables[0]}_{ii+2000}.png', dpi=400, bbox_inches='tight')
+    #print("saved fig for {}".format(ii+2000))
     f.close()
 
 plt.show()
