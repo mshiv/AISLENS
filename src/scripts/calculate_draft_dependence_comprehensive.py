@@ -339,6 +339,9 @@ def merge_comprehensive_parameters(all_draft_params, icems, satobs, config, save
     Uses the simple and effective approach from the original calculate_draft_dependence.py:
     Just use xr.merge() to combine all the individual NetCDF files that were saved
     by dedraft_catchment_comprehensive().
+    
+    The order of merging matters for overlapping spatial points - the last ice shelf
+    merged takes priority for all parameters at that location.
     """
     print("Merging comprehensive draft dependence parameters...")
     
@@ -350,6 +353,100 @@ def merge_comprehensive_parameters(all_draft_params, icems, satobs, config, save
         'draftDepenBasalMeltAlpha0',
         'draftDepenBasalMeltAlpha1'
     ]
+    
+    # PRIORITY ORDERING OPTIONS FOR MERGING
+    # The order determines which ice shelf takes priority at overlapping spatial points.
+    # Choose one of the following approaches:
+    
+    # Option 1: Manual priority list (currently active)
+    # Specify ice shelves in order of priority (first = lowest priority, last = highest priority)
+    manual_priority_shelves = [
+        # Add specific ice shelf names here if you want manual control
+        # Example (uncomment and modify as needed):
+        # 'Abbot Ice Shelf',              # Low priority
+        # 'George VI Ice Shelf',
+        # 'Larsen C Ice Shelf', 
+        # 'Amery Ice Shelf',
+        # 'Filchner Ice Shelf',
+        # 'Ronne Ice Shelf',
+        # 'Ross Ice Shelf',               # High priority
+        # Currently empty - will use alphabetical order as fallback
+    ]
+    
+    # Option 2: Size-based priority (commented out)
+    # Larger ice shelves get higher priority (merged last)
+    # Uncomment the following code block to use size-based ordering:
+    """
+    size_priority_shelves = []
+    for shelf_name in all_draft_params.keys():
+        try:
+            shelf_match = icems[icems.name == shelf_name]
+            if len(shelf_match) > 0:
+                area = shelf_match.iloc[0].geometry.area
+                size_priority_shelves.append((shelf_name, area))
+            else:
+                # If shelf not found in icems, assign small area (low priority)
+                size_priority_shelves.append((shelf_name, 0))
+                print(f"  Warning: {shelf_name} not found in icems, assigned low priority")
+        except Exception as e:
+            print(f"  Warning: Could not get area for {shelf_name}: {e}")
+            size_priority_shelves.append((shelf_name, 0))
+    
+    # Sort by area (smallest first = lowest priority, largest last = highest priority)
+    size_priority_shelves.sort(key=lambda x: x[1])
+    merge_order = [shelf[0] for shelf in size_priority_shelves]
+    print(f"Size-based merge order - largest shelves have highest priority")
+    """
+    
+    # Option 3: Distance-based priority (commented out) 
+    # Ice shelves closer to a reference point get higher priority
+    # Uncomment and modify the reference point as needed:
+    """
+    from shapely.geometry import Point
+    reference_point = Point(-1500000, 0)  # Example: Antarctic center in projected coords
+    distance_priority_shelves = []
+    
+    for shelf_name in all_draft_params.keys():
+        try:
+            shelf_match = icems[icems.name == shelf_name]
+            if len(shelf_match) > 0:
+                centroid = shelf_match.iloc[0].geometry.centroid
+                distance = reference_point.distance(centroid)
+                distance_priority_shelves.append((shelf_name, distance))
+            else:
+                # If shelf not found, assign large distance (low priority)
+                distance_priority_shelves.append((shelf_name, float('inf')))
+                print(f"  Warning: {shelf_name} not found in icems, assigned low priority")
+        except Exception as e:
+            print(f"  Warning: Could not calculate distance for {shelf_name}: {e}")
+            distance_priority_shelves.append((shelf_name, float('inf')))
+    
+    # Sort by distance (farthest first = lowest priority, closest last = highest priority)
+    distance_priority_shelves.sort(key=lambda x: x[1], reverse=True)
+    merge_order = [shelf[0] for shelf in distance_priority_shelves]
+    print(f"Distance-based merge order - closer shelves have highest priority")
+    """
+    
+    # Determine final merge order
+    if manual_priority_shelves:
+        # Use manual priority list, with any unlisted shelves added alphabetically at the end
+        unlisted_shelves = [s for s in all_draft_params.keys() if s not in manual_priority_shelves]
+        merge_order = manual_priority_shelves + sorted(unlisted_shelves)
+        print(f"Using manual priority order: {len(manual_priority_shelves)} prioritized + {len(unlisted_shelves)} alphabetical")
+    # Note: If you uncomment size-based or distance-based options above, 
+    # they will set merge_order directly and override this logic
+    else:
+        # Fallback to alphabetical order
+        merge_order = sorted(all_draft_params.keys())
+        print(f"Using alphabetical order for {len(merge_order)} ice shelves")
+    
+    print(f"Merge order (first=lowest priority, last=highest priority):")
+    for i, shelf in enumerate(merge_order[:5]):  # Show first 5
+        print(f"  {i+1:2d}. {shelf}")
+    if len(merge_order) > 5:
+        print(f"  ... and {len(merge_order)-5} more shelves")
+        print(f"  Last: {merge_order[-1]} (highest priority)")
+    print()
 
     # Create merged datasets for each parameter using the simple approach
     for config_param_name in config_param_names:
@@ -359,15 +456,22 @@ def merge_comprehensive_parameters(all_draft_params, icems, satobs, config, save
         merged_dataset = xr.Dataset()
         files_merged = 0
         
-        # Loop through ice shelves and merge their individual files
-        for shelf_name in all_draft_params.keys():
+        # Loop through ice shelves in determined merge order (priority matters!)
+        for shelf_name in merge_order:
             param_file = save_dir / f"{config_param_name}_{shelf_name}.nc"
             
             if param_file.exists():
                 try:
-                    # Load and merge - simple approach like original script
+                    # Load and merge - use compat='override' to handle overlapping values
                     shelf_ds = xr.open_dataset(param_file)
-                    merged_dataset = xr.merge([merged_dataset, shelf_ds])
+                    
+                    if len(merged_dataset.data_vars) == 0:
+                        # First file - no conflicts possible
+                        merged_dataset = shelf_ds.copy()
+                    else:
+                        # Subsequent files - use override to handle spatial overlaps
+                        merged_dataset = xr.merge([merged_dataset, shelf_ds], compat='override')
+                    
                     files_merged += 1
                     
                 except Exception as e:
@@ -395,7 +499,14 @@ def merge_comprehensive_parameters(all_draft_params, icems, satobs, config, save
         if individual_file.exists():
             try:
                 param_ds = xr.open_dataset(individual_file)
-                combined_dataset = xr.merge([combined_dataset, param_ds])
+                
+                if len(combined_dataset.data_vars) == 0:
+                    # First parameter dataset
+                    combined_dataset = param_ds.copy()
+                else:
+                    # Subsequent datasets - use override for any conflicts
+                    combined_dataset = xr.merge([combined_dataset, param_ds], compat='override')
+                    
             except Exception as e:
                 print(f"Warning: Could not add {config_param_name} to combined dataset: {e}")
 
@@ -426,16 +537,17 @@ if __name__ == "__main__":
 
     # Run comprehensive analysis
     # Note: Now processes ice shelves sequentially starting from index 33 (Abbott Ice Shelf)
+    # PERMISSIVE SETTINGS: Lower thresholds to get linear relationships for more ice shelves
     all_results, all_draft_params = calculate_draft_dependence_comprehensive(
         icems, satobs, config,
-        n_bins=50,
-        min_points_per_bin=5,
-        ruptures_method='pelt',
-        ruptures_penalty=1.0,
-        min_r2_threshold=0.1,
-        min_correlation=0.2,
-        noisy_fallback='zero',
-        model_selection='best'
+        n_bins=25,                    # Fewer bins = less noise, easier to detect patterns
+        min_points_per_bin=3,         # Lower minimum = more bins kept for analysis
+        ruptures_method='pelt',       # Keep PELT - good for detecting changepoints
+        ruptures_penalty=0.5,         # LOWER penalty = more changepoints detected (was 1.0)
+        min_r2_threshold=0.005,        # LOWER R² threshold = accept weaker relationships (was 0.1)
+        min_correlation=-0.7,        # Accept both positive AND negative correlations ≥|0.7| (was 0.05)
+        noisy_fallback='mean',        # Use mean melt rate for noisy shelves (was 'zero')
+        model_selection='best'        # Keep 'best' to choose optimal model
     )
 
     print(f"\nProcessing complete! Processed {len(all_results)} ice shelves.")
