@@ -533,7 +533,7 @@ if __name__ == "__main__":
 
     print("Loading ice shelf masks...")
     icems = gpd.read_file(config.FILE_ICESHELFMASKS)
-    icems = icems.to_crs({'init': config.CRS_TARGET})
+    icems = icems.to_crs(config.CRS_TARGET)
 
     # Run comprehensive analysis
     # Note: Now processes ice shelves sequentially starting from index 33 (Abbott Ice Shelf)

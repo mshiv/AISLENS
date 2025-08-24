@@ -597,7 +597,7 @@ def extract_draft_dependence_parameters(result, model_selection='best'):
         return {
             'minDraft': 0.0,
             'constantValue': result['shallow_mean'],  # This will be 0 or mean based on noisy_fallback
-            'paramType': 1,  # Use constant parameterization for noisy shelves
+            'paramType': 1.0,  # Use constant parameterization for noisy shelves (float for NaN compatibility)
             'alpha0': 0.0,
             'alpha1': 0.0
         }
@@ -642,7 +642,7 @@ def extract_draft_dependence_parameters(result, model_selection='best'):
     return {
         'minDraft': threshold,
         'constantValue': constant_value,
-        'paramType': 0,  # Linear parameterization for meaningful relationships
+        'paramType': 0.0,  # Linear parameterization for meaningful relationships (float for NaN compatibility)
         'alpha0': deep_intercept,
         'alpha1': slope
     }
@@ -742,8 +742,13 @@ def save_comprehensive_predictions(result, catchment_name, save_dir, draft_refer
                   f"Predictions: {len(pred_values)}, Valid points: {np.sum(valid_mask)}")
             if len(pred_values) > 0:
                 # Use the mean prediction value for the entire ice shelf
-                mean_pred = np.nanmean(pred_values)
-                pred_array.values = np.where(~np.isnan(spatial_ref.values), mean_pred, np.nan)
+                # Check for empty array after removing NaNs to avoid warning
+                valid_pred_values = pred_values[~np.isnan(pred_values)]
+                if len(valid_pred_values) > 0:
+                    mean_pred = np.nanmean(pred_values)
+                    if not np.isnan(mean_pred):
+                        pred_array.values = np.where(~np.isnan(spatial_ref.values), mean_pred, np.nan)
+                # Otherwise leave as all NaN if no valid values
             # Otherwise leave as all NaN
         
         pred_array.name = f'predicted_melt_{model_name}'
