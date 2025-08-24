@@ -287,7 +287,8 @@ def merge_comprehensive_parameters(all_draft_params, icems, satobs, config, save
     merged_datasets = {}
     for config_param_name in config_param_names:
         # Initialize with zeros to match original behavior
-        full_grid = xr.zeros_like(ref_grid)
+        #full_grid = xr.zeros_like(ref_grid)
+        full_grid = xr.full_like(ref_grid, np.nan)
         full_grid.name = config_param_name
         full_grid.attrs = config.DATA_ATTRS[config_param_name]
         merged_datasets[config_param_name] = xr.Dataset({config_param_name: full_grid})
