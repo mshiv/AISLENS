@@ -320,9 +320,11 @@ def merge_comprehensive_parameters(all_draft_params, icems, satobs, config, save
                             param_da_aligned = param_da.interp(
                                 x=ref_grid.x,
                                 y=ref_grid.y,
-                                method='nearest',
-                                fill_value=0  # Fill outside interpolation range with 0
+                                method='nearest'
                             )
+                            
+                            # Fill NaN values with 0 after interpolation
+                            param_da_aligned = param_da_aligned.fillna(0)
 
                             # Ensure the aligned data has the same shape as ref_grid
                             if param_da_aligned.shape != ref_grid.shape:
