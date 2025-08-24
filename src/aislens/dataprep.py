@@ -711,10 +711,11 @@ def save_comprehensive_predictions(result, catchment_name, save_dir, draft_refer
     """
     predictions = result['predictions']
     
+    # Get the original draft and melt data to understand the spatial mapping
+    draft_vals = result['draft_vals']  # These are the clean, non-NaN values
+    melt_vals = result['melt_vals']    # These are the clean, non-NaN values
+    
     for model_name, pred_values in predictions.items():
-        # Create DataArray with same structure as draft_reference
-        pred_flat = pred_values.flatten()
-        
         # Create a DataArray matching the spatial structure
         if hasattr(draft_reference, 'Time'):
             # Take time mean if draft has time dimension
@@ -722,9 +723,29 @@ def save_comprehensive_predictions(result, catchment_name, save_dir, draft_refer
         else:
             spatial_ref = draft_reference
             
-        # Create prediction field
+        # Create prediction field initialized with NaN
         pred_array = spatial_ref.copy()
-        pred_array.values = pred_flat.reshape(spatial_ref.shape)
+        pred_array.values = np.full_like(spatial_ref.values, np.nan)
+        
+        # Map predictions back to their correct spatial locations
+        # We need to find where the valid (non-NaN) draft values were in the original grid
+        spatial_flat = spatial_ref.values.flatten()
+        valid_mask = ~np.isnan(spatial_flat)
+        
+        if len(pred_values) == np.sum(valid_mask):
+            # Direct mapping: predictions correspond to valid grid points
+            spatial_flat[valid_mask] = pred_values
+            pred_array.values = spatial_flat.reshape(spatial_ref.shape)
+        else:
+            # Fallback: if sizes don't match, create a uniform field
+            print(f"Warning: Size mismatch for {catchment_name} {model_name}. "
+                  f"Predictions: {len(pred_values)}, Valid points: {np.sum(valid_mask)}")
+            if len(pred_values) > 0:
+                # Use the mean prediction value for the entire ice shelf
+                mean_pred = np.nanmean(pred_values)
+                pred_array.values = np.where(~np.isnan(spatial_ref.values), mean_pred, np.nan)
+            # Otherwise leave as all NaN
+        
         pred_array.name = f'predicted_melt_{model_name}'
         pred_array.attrs['long_name'] = f'Predicted melt rate using {model_name} model'
         pred_array.attrs['units'] = 'm/yr'
