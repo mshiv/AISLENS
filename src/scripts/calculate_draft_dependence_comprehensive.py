@@ -546,8 +546,8 @@ if __name__ == "__main__":
         ruptures_penalty=0.5,         # LOWER penalty = more changepoints detected (was 1.0)
         min_r2_threshold=0.005,        # LOWER R² threshold = accept weaker relationships (was 0.1)
         min_correlation=-0.7,        # Accept both positive AND negative correlations ≥|0.7| (was 0.05)
-        noisy_fallback='mean',        # Use mean melt rate for noisy shelves (was 'zero')
-        model_selection='best'        # Keep 'best' to choose optimal model
+        noisy_fallback='mean',        # Use mean melt rate for noisy shelves (other options: 'zero')
+        model_selection='threshold_intercept'  # Force true piecewise function (other options: 'mean_shallow', 'zero_shallow', 'best')
     )
 
     print(f"\nProcessing complete! Processed {len(all_results)} ice shelves.")
