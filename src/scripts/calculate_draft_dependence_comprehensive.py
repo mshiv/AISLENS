@@ -359,91 +359,9 @@ def merge_comprehensive_parameters(all_draft_params, icems, satobs, config, save
         'draftDepenBasalMeltAlpha1'
     ]
     
-    # PRIORITY ORDERING OPTIONS FOR MERGING
-    # The order determines which ice shelf takes priority at overlapping spatial points.
-    # Choose one of the following approaches:
-    
-    # Option 1: Manual priority list (currently active)
-    # Specify ice shelves in order of priority (first = lowest priority, last = highest priority)
-    manual_priority_shelves = [
-        # Add specific ice shelf names here if you want manual control
-        # Example (uncomment and modify as needed):
-        # 'Abbot Ice Shelf',              # Low priority
-        # 'George VI Ice Shelf',
-        # 'Larsen C Ice Shelf', 
-        # 'Amery Ice Shelf',
-        # 'Filchner Ice Shelf',
-        # 'Ronne Ice Shelf',
-        # 'Ross Ice Shelf',               # High priority
-        # Currently empty - will use alphabetical order as fallback
-    ]
-    
-    # Option 2: Size-based priority (commented out)
-    # Larger ice shelves get higher priority (merged last)
-    # Uncomment the following code block to use size-based ordering:
-    """
-    size_priority_shelves = []
-    for shelf_name in all_draft_params.keys():
-        try:
-            shelf_match = icems[icems.name == shelf_name]
-            if len(shelf_match) > 0:
-                area = shelf_match.iloc[0].geometry.area
-                size_priority_shelves.append((shelf_name, area))
-            else:
-                # If shelf not found in icems, assign small area (low priority)
-                size_priority_shelves.append((shelf_name, 0))
-                print(f"  Warning: {shelf_name} not found in icems, assigned low priority")
-        except Exception as e:
-            print(f"  Warning: Could not get area for {shelf_name}: {e}")
-            size_priority_shelves.append((shelf_name, 0))
-    
-    # Sort by area (smallest first = lowest priority, largest last = highest priority)
-    size_priority_shelves.sort(key=lambda x: x[1])
-    merge_order = [shelf[0] for shelf in size_priority_shelves]
-    print(f"Size-based merge order - largest shelves have highest priority")
-    """
-    
-    # Option 3: Distance-based priority (commented out) 
-    # Ice shelves closer to a reference point get higher priority
-    # Uncomment and modify the reference point as needed:
-    """
-    from shapely.geometry import Point
-    reference_point = Point(-1500000, 0)  # Example: Antarctic center in projected coords
-    distance_priority_shelves = []
-    
-    for shelf_name in all_draft_params.keys():
-        try:
-            shelf_match = icems[icems.name == shelf_name]
-            if len(shelf_match) > 0:
-                centroid = shelf_match.iloc[0].geometry.centroid
-                distance = reference_point.distance(centroid)
-                distance_priority_shelves.append((shelf_name, distance))
-            else:
-                # If shelf not found, assign large distance (low priority)
-                distance_priority_shelves.append((shelf_name, float('inf')))
-                print(f"  Warning: {shelf_name} not found in icems, assigned low priority")
-        except Exception as e:
-            print(f"  Warning: Could not calculate distance for {shelf_name}: {e}")
-            distance_priority_shelves.append((shelf_name, float('inf')))
-    
-    # Sort by distance (farthest first = lowest priority, closest last = highest priority)
-    distance_priority_shelves.sort(key=lambda x: x[1], reverse=True)
-    merge_order = [shelf[0] for shelf in distance_priority_shelves]
-    print(f"Distance-based merge order - closer shelves have highest priority")
-    """
-    
-    # Determine final merge order
-    if manual_priority_shelves:
-        # Use manual priority list, with any unlisted shelves added alphabetically at the end
-        unlisted_shelves = [s for s in all_draft_params.keys() if s not in manual_priority_shelves]
-        merge_order = manual_priority_shelves + sorted(unlisted_shelves)
-        print(f"Using manual priority order: {len(manual_priority_shelves)} prioritized + {len(unlisted_shelves)} alphabetical")
-    # Note: If you uncomment size-based or distance-based options above, 
-    # they will set merge_order directly and override this logic
-    else:
-        # Fallback to alphabetical order
-        merge_order = sorted(all_draft_params.keys())
-        print(f"Using alphabetical order for {len(merge_order)} ice shelves")
+    # Use alphabetical order for simple merging
+    merge_order = sorted(all_draft_params.keys())
+    print(f"Using alphabetical order for {len(merge_order)} ice shelves")
     
     print(f"Merge order (first=lowest priority, last=highest priority):")
     for i, shelf in enumerate(merge_order[:5]):  # Show first 5
@@ -484,21 +402,6 @@ def merge_comprehensive_parameters(all_draft_params, icems, satobs, config, save
                     
                     files_merged += 1
                     
-                    # Debug: Check how much data we have after each merge
-                    if hasattr(merged_dataset, 'data_vars') and len(merged_dataset.data_vars) > 0:
-                        var_name = list(merged_dataset.data_vars.keys())[0]
-                        valid_points = (~merged_dataset[var_name].isnull()).sum().item()
-                        print(f"    After merging {shelf_name}: {valid_points} valid points")
-                        
-                        # Additional debug: Check individual shelf file data
-                        shelf_valid_points = (~shelf_ds[var_name].isnull()).sum().item()
-                        print(f"      - {shelf_name} file had: {shelf_valid_points} valid points")
-                        print(f"      - Total grid size: {shelf_ds[var_name].size}")
-                        
-                        # Check if this is the expected behavior (only 1 point per ice shelf)
-                        if shelf_valid_points == 1:
-                            print(f"      - WARNING: {shelf_name} has only 1 valid point - check ice shelf processing!")
-                    
                 except Exception as e:
                     print(f"  Warning: Could not merge {shelf_name} for {config_param_name}: {e}")
             else:
@@ -515,7 +418,7 @@ def merge_comprehensive_parameters(all_draft_params, icems, satobs, config, save
         else:
             print(f"  Warning: No data to save for {config_param_name}")
 
-    # Create combined dataset with all parameters (like original script)
+    # Create combined dataset with all parameters
     print("Creating combined parameter dataset...")
     combined_dataset = xr.Dataset()
     
