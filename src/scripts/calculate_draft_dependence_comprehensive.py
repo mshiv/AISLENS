@@ -462,17 +462,23 @@ def merge_comprehensive_parameters(all_draft_params, icems, satobs, config, save
             
             if param_file.exists():
                 try:
-                    # Load and merge - use compat='override' to handle overlapping values
+                    # Load and merge - use default merge behavior
                     shelf_ds = xr.open_dataset(param_file)
                     
                     if len(merged_dataset.data_vars) == 0:
                         # First file - no conflicts possible
                         merged_dataset = shelf_ds.copy()
                     else:
-                        # Subsequent files - use override to handle spatial overlaps
-                        merged_dataset = xr.merge([merged_dataset, shelf_ds], compat='override')
+                        # Subsequent files - use default merge (no compat specified)
+                        merged_dataset = xr.merge([merged_dataset, shelf_ds])
                     
                     files_merged += 1
+                    
+                    # Debug: Check how much data we have after each merge
+                    if hasattr(merged_dataset, 'data_vars') and len(merged_dataset.data_vars) > 0:
+                        var_name = list(merged_dataset.data_vars.keys())[0]
+                        valid_points = (~merged_dataset[var_name].isnull()).sum().item()
+                        print(f"    After merging {shelf_name}: {valid_points} valid points")
                     
                 except Exception as e:
                     print(f"  Warning: Could not merge {shelf_name} for {config_param_name}: {e}")
@@ -504,8 +510,8 @@ def merge_comprehensive_parameters(all_draft_params, icems, satobs, config, save
                     # First parameter dataset
                     combined_dataset = param_ds.copy()
                 else:
-                    # Subsequent datasets - use override for any conflicts
-                    combined_dataset = xr.merge([combined_dataset, param_ds], compat='override')
+                    # Subsequent datasets - use default merge
+                    combined_dataset = xr.merge([combined_dataset, param_ds])
                     
             except Exception as e:
                 print(f"Warning: Could not add {config_param_name} to combined dataset: {e}")
