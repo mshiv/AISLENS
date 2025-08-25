@@ -479,6 +479,16 @@ def merge_comprehensive_parameters(all_draft_params, icems, satobs, config, save
                         var_name = list(merged_dataset.data_vars.keys())[0]
                         valid_points = (~merged_dataset[var_name].isnull()).sum().item()
                         print(f"    After merging {shelf_name}: {valid_points} valid points")
+                        
+                        # Additional debug: Check individual shelf file data
+                        shelf_valid_points = (~shelf_ds[var_name].isnull()).sum().item()
+                        print(f"      - {shelf_name} file had: {shelf_valid_points} valid points")
+                        print(f"      - Total grid size: {shelf_ds[var_name].size}")
+                        
+                        # Check if this is the expected behavior (only 1 point per ice shelf)
+                        if shelf_valid_points == 1:
+                            print(f"      - WARNING: {shelf_name} has only 1 valid point - check ice shelf processing!")
+                    
                     
                 except Exception as e:
                     print(f"  Warning: Could not merge {shelf_name} for {config_param_name}: {e}")
