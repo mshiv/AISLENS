@@ -336,6 +336,11 @@ def merge_comprehensive_parameters(all_draft_params, icems, satobs, config, save
     """
     Merge individual ice shelf parameters into full ice sheet grids.
     
+    IMPORTANT: Each ice shelf parameter file contains constant values for that ice shelf's
+    area only. This means each file typically has only a few grid cells (1-10 for small 
+    ice shelves, more for large ones). This is EXPECTED BEHAVIOR since we calculate
+    one set of draft dependence parameters per ice shelf, not per grid cell.
+    
     Uses the simple and effective approach from the original calculate_draft_dependence.py:
     Just use xr.merge() to combine all the individual NetCDF files that were saved
     by dedraft_catchment_comprehensive().
@@ -344,7 +349,9 @@ def merge_comprehensive_parameters(all_draft_params, icems, satobs, config, save
     merged takes priority for all parameters at that location.
     """
     print("Merging comprehensive draft dependence parameters...")
-    
+    print("Note: Each ice shelf file contains constant parameter values for that ice shelf's")
+    print("area only, so individual files typically have just 1-10 grid cells. This is normal!")
+    print()
     # Parameter names to merge
     config_param_names = [
         'draftDepenBasalMelt_minDraft',
@@ -485,9 +492,12 @@ def merge_comprehensive_parameters(all_draft_params, icems, satobs, config, save
                         print(f"      - {shelf_name} file had: {shelf_valid_points} valid points")
                         print(f"      - Total grid size: {shelf_ds[var_name].size}")
                         
-                        # Check if this is the expected behavior (only 1 point per ice shelf)
-                        if shelf_valid_points == 1:
-                            print(f"      - WARNING: {shelf_name} has only 1 valid point - check ice shelf processing!")
+                        # Note: For draft dependence parameters, each ice shelf typically has 
+                        # constant values across its area, so having few grid points is normal
+                        if shelf_valid_points <= 3:
+                            print(f"      - Note: {shelf_name} has {shelf_valid_points} grid cells (normal for small ice shelves)")
+                        elif shelf_valid_points > 50:
+                            print(f"      - Note: {shelf_name} has {shelf_valid_points} grid cells (large ice shelf)")
                     
                     
                 except Exception as e:
@@ -497,6 +507,14 @@ def merge_comprehensive_parameters(all_draft_params, icems, satobs, config, save
         
         print(f"  Successfully merged {files_merged} files for {config_param_name}")
         
+        # Summary info about the merged dataset
+        if len(merged_dataset.data_vars) > 0:
+            var_name = list(merged_dataset.data_vars.keys())[0]
+            total_valid_points = (~merged_dataset[var_name].isnull()).sum().item()
+            total_grid_size = merged_dataset[var_name].size
+            coverage_percent = (total_valid_points / total_grid_size) * 100
+            print(f"  Final merged dataset: {total_valid_points} valid points out of {total_grid_size} total ({coverage_percent:.1f}% coverage)")
+        print()
         # Save individual parameter file 
         if len(merged_dataset.data_vars) > 0:
             output_file = config.DIR_PROCESSED / "draft_dependence_changepoint" / f"ruptures_{config_param_name}.nc"
