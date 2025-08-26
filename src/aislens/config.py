@@ -77,11 +77,11 @@ class Config:
     DATA_ATTRS: dict = field(default_factory=lambda: {
         "draftDepenBasalMeltAlpha0": {
             "long_name": "Basal melt rate draft dependency coefficient (alpha0 or intercept)",
-            "units": "m/yr",
+            "units": "kg m^-2 s^-1",
         },
         "draftDepenBasalMeltAlpha1": {
             "long_name": "Basal melt rate draft dependency coefficient (alpha1 or slope)",
-            "units": "m/yr/m",
+            "units": "kg m^-3 s^-1",
         },
         "draftDepenBasalMelt_minDraft": {
             "long_name": "Minimum draft threshold for piecewise linear basal melt parameterization",
@@ -89,7 +89,7 @@ class Config:
         },
         "draftDepenBasalMelt_constantMeltValue": {
             "long_name": "Constant basal melt rate for shallow areas (draft < minDraft)",
-            "units": "m/yr",
+            "units": "kg m^-2 s^-1",
         },
         "draftDepenBasalMelt_paramType": {
             "long_name": "Parameterization type selector (0=linear, 1=constant)",

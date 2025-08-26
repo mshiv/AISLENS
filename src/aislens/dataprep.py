@@ -312,11 +312,11 @@ def calculate_single_shelf_comprehensive(melt_data, draft_data, shelf_name,
     
     # Remove NaN values
     mask = ~np.isnan(melt_vals) & ~np.isnan(draft_vals)
-    if np.sum(mask) < 20:
-        return create_fallback_result(shelf_name, melt_vals, draft_vals, noisy_fallback)
-    
     melt_clean = melt_vals[mask]
     draft_clean = draft_vals[mask]
+    
+    if len(melt_clean) < 20:
+        return create_fallback_result(shelf_name, melt_clean, draft_clean, noisy_fallback)
     
     # Apply weights if provided
     if weights is not None:
@@ -547,11 +547,22 @@ def create_fallback_result(shelf_name, melt_vals, draft_vals, noisy_fallback, co
     """Create fallback result for noisy or insufficient data."""
     if len(melt_vals) == 0 or len(draft_vals) == 0:
         fallback_pred = np.array([])
+        shallow_mean_value = 0.0
     else:
+        # Calculate shallow mean for fallback, handling NaN values properly
+        valid_melt = melt_vals[~np.isnan(melt_vals)] if len(melt_vals) > 0 else np.array([])
+        
         if noisy_fallback == 'zero':
             fallback_pred = np.zeros_like(melt_vals)
+            shallow_mean_value = 0.0
         else:  # 'mean'
-            fallback_pred = np.full_like(melt_vals, np.mean(melt_vals))
+            if len(valid_melt) > 0:
+                mean_val = np.mean(valid_melt)
+                fallback_pred = np.full_like(melt_vals, mean_val)
+                shallow_mean_value = mean_val
+            else:
+                fallback_pred = np.zeros_like(melt_vals)
+                shallow_mean_value = 0.0
     
     # Create predictions dict for consistency
     predictions = {
@@ -564,7 +575,7 @@ def create_fallback_result(shelf_name, melt_vals, draft_vals, noisy_fallback, co
         'shelf_name': shelf_name,
         'threshold': np.nan,
         'slope': 0.0,
-        'shallow_mean': 0.0 if noisy_fallback == 'zero' else (np.mean(melt_vals) if len(melt_vals) > 0 else 0.0),
+        'shallow_mean': shallow_mean_value,
         'deep_intercept': 0.0,
         'draft_vals': draft_vals,
         'melt_vals': melt_vals,

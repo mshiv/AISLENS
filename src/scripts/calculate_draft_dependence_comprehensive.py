@@ -517,6 +517,9 @@ def merge_comprehensive_parameters(all_draft_params, icems, satobs, config, save
         print()
         # Save individual parameter file 
         if len(merged_dataset.data_vars) > 0:
+            # Ensure CRS is set on the merged dataset
+            merged_dataset = write_crs(merged_dataset, config.CRS_TARGET)
+            
             output_file = config.DIR_PROCESSED / "draft_dependence_changepoint" / f"ruptures_{config_param_name}.nc"
             output_file.parent.mkdir(parents=True, exist_ok=True)
             merged_dataset.to_netcdf(output_file)
@@ -546,6 +549,9 @@ def merge_comprehensive_parameters(all_draft_params, icems, satobs, config, save
 
     # Save combined file
     if len(combined_dataset.data_vars) > 0:
+        # Ensure CRS is set on the combined dataset
+        combined_dataset = write_crs(combined_dataset, config.CRS_TARGET)
+        
         combined_file = config.DIR_PROCESSED / "draft_dependence_changepoint" / "ruptures_draftDepenBasalMelt_parameters.nc"
         combined_dataset.to_netcdf(combined_file)
         print(f"Saved combined parameters to {combined_file}")
@@ -563,6 +569,17 @@ if __name__ == "__main__":
     # Load data
     print("Loading satellite observation data...")
     satobs = xr.open_dataset(config.FILE_PAOLO23_SATOBS_PREPARED)
+    # TEMPORARY FIX: ENSURE DATA IS IN SI UNITS
+    # Convert satobs.melt from m/yr to kg/m2/s
+    if config.SATOBS_FLUX_VAR in satobs:
+        if satobs.attrs.get('units', '') == 'm of ice per year':
+            print("  Converting satellite melt from m/yr to kg/m2/s...")
+            satobs[config.SATOBS_FLUX_VAR] = satobs[config.SATOBS_FLUX_VAR] * (910.0 / (365.0*24*3600))
+            satobs[config.SATOBS_FLUX_VAR].attrs['units'] = 'kg m^-2 s^-1'
+            satobs[config.SATOBS_DRAFT_VAR].attrs['units'] = 'm'
+            print("  Conversion of satellite data melt rates to SI units complete.")
+        else:
+            print(f"  Satellite melt units: {satobs[config.SATOBS_FLUX_VAR].attrs.get('units', 'unknown')}")
     satobs = write_crs(satobs, config.CRS_TARGET)
 
     print("Loading ice shelf masks...")
