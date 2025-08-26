@@ -472,6 +472,21 @@ def merge_comprehensive_parameters(all_draft_params, icems, satobs, config, save
                     # Load and merge - use default merge behavior
                     shelf_ds = xr.open_dataset(param_file)
                     
+                    # Clean up potential encoding conflicts before merging
+                    for var_name in shelf_ds.data_vars:
+                        # Remove problematic encoding attributes that can cause conflicts
+                        if 'grid_mapping' in shelf_ds[var_name].attrs:
+                            del shelf_ds[var_name].attrs['grid_mapping']
+                        if 'grid_mapping' in shelf_ds[var_name].encoding:
+                            del shelf_ds[var_name].encoding['grid_mapping']
+                    
+                    # Also clean coordinate variables
+                    for coord_name in shelf_ds.coords:
+                        if 'grid_mapping' in shelf_ds[coord_name].attrs:
+                            del shelf_ds[coord_name].attrs['grid_mapping']
+                        if 'grid_mapping' in shelf_ds[coord_name].encoding:
+                            del shelf_ds[coord_name].encoding['grid_mapping']
+                    
                     if len(merged_dataset.data_vars) == 0:
                         # First file - no conflicts possible
                         merged_dataset = shelf_ds.copy()
@@ -517,6 +532,18 @@ def merge_comprehensive_parameters(all_draft_params, icems, satobs, config, save
         print()
         # Save individual parameter file 
         if len(merged_dataset.data_vars) > 0:
+            # Clean up encoding issues before saving
+            for var_name in merged_dataset.data_vars:
+                # Remove problematic encoding attributes that can cause conflicts
+                if hasattr(merged_dataset[var_name], 'encoding'):
+                    merged_dataset[var_name].encoding.pop('grid_mapping', None)
+                merged_dataset[var_name].attrs.pop('grid_mapping', None)
+            
+            for coord_name in merged_dataset.coords:
+                if hasattr(merged_dataset[coord_name], 'encoding'):
+                    merged_dataset[coord_name].encoding.pop('grid_mapping', None)
+                merged_dataset[coord_name].attrs.pop('grid_mapping', None)
+            
             # Ensure CRS is set on the merged dataset
             merged_dataset = write_crs(merged_dataset, config.CRS_TARGET)
             
@@ -537,6 +564,21 @@ def merge_comprehensive_parameters(all_draft_params, icems, satobs, config, save
             try:
                 param_ds = xr.open_dataset(individual_file)
                 
+                # Clean up potential encoding conflicts before merging
+                for var_name in param_ds.data_vars:
+                    # Remove problematic encoding attributes that can cause conflicts
+                    if 'grid_mapping' in param_ds[var_name].attrs:
+                        del param_ds[var_name].attrs['grid_mapping']
+                    if 'grid_mapping' in param_ds[var_name].encoding:
+                        del param_ds[var_name].encoding['grid_mapping']
+                
+                # Also clean coordinate variables
+                for coord_name in param_ds.coords:
+                    if 'grid_mapping' in param_ds[coord_name].attrs:
+                        del param_ds[coord_name].attrs['grid_mapping']
+                    if 'grid_mapping' in param_ds[coord_name].encoding:
+                        del param_ds[coord_name].encoding['grid_mapping']
+                
                 if len(combined_dataset.data_vars) == 0:
                     # First parameter dataset
                     combined_dataset = param_ds.copy()
@@ -552,6 +594,14 @@ def merge_comprehensive_parameters(all_draft_params, icems, satobs, config, save
         # Ensure CRS is set on the combined dataset
         combined_dataset = write_crs(combined_dataset, config.CRS_TARGET)
         
+        # Clean up grid_mapping attributes to prevent NetCDF encoding errors
+        for var_name in combined_dataset.data_vars:
+            combined_dataset[var_name].encoding.pop('grid_mapping', None)
+            combined_dataset[var_name].attrs.pop('grid_mapping', None)
+        for coord_name in combined_dataset.coords:
+            combined_dataset[coord_name].encoding.pop('grid_mapping', None)
+            combined_dataset[coord_name].attrs.pop('grid_mapping', None)
+        
         combined_file = config.DIR_PROCESSED / "draft_dependence_changepoint" / "ruptures_draftDepenBasalMelt_parameters.nc"
         combined_dataset.to_netcdf(combined_file)
         print(f"Saved combined parameters to {combined_file}")
@@ -559,9 +609,46 @@ def merge_comprehensive_parameters(all_draft_params, icems, satobs, config, save
         
         # Fill NaN values with 0 for compatibility (like original script)
         combined_dataset_filled = combined_dataset.fillna(0)
+        
+        # Clean up grid_mapping attributes for filled dataset too
+        for var_name in combined_dataset_filled.data_vars:
+            combined_dataset_filled[var_name].encoding.pop('grid_mapping', None)
+            combined_dataset_filled[var_name].attrs.pop('grid_mapping', None)
+        for coord_name in combined_dataset_filled.coords:
+            combined_dataset_filled[coord_name].encoding.pop('grid_mapping', None)
+            combined_dataset_filled[coord_name].attrs.pop('grid_mapping', None)
+        
         combined_file_filled = config.DIR_PROCESSED / "draft_dependence_changepoint" / "ruptures_draftDepenBasalMelt_parameters_filled.nc"
         combined_dataset_filled.to_netcdf(combined_file_filled)
         print(f"Saved filled parameters to {combined_file_filled}")
+        
+        # Create interpolation-prepped version with x1/y1 coordinates
+        combined_dataset_prepped = combined_dataset_filled.copy()
+        
+        # Rename x and y coordinates to x1 and y1 for interpolation compatibility
+        coord_rename_mapping = {}
+        if 'x' in combined_dataset_prepped.coords:
+            coord_rename_mapping['x'] = 'x1'
+        if 'y' in combined_dataset_prepped.coords:
+            coord_rename_mapping['y'] = 'y1'
+        
+        if coord_rename_mapping:
+            combined_dataset_prepped = combined_dataset_prepped.rename(coord_rename_mapping)
+            print(f"Renamed coordinates: {coord_rename_mapping}")
+            
+            # Clean up grid_mapping attributes for prepped dataset too
+            for var_name in combined_dataset_prepped.data_vars:
+                combined_dataset_prepped[var_name].encoding.pop('grid_mapping', None)
+                combined_dataset_prepped[var_name].attrs.pop('grid_mapping', None)
+            for coord_name in combined_dataset_prepped.coords:
+                combined_dataset_prepped[coord_name].encoding.pop('grid_mapping', None)
+                combined_dataset_prepped[coord_name].attrs.pop('grid_mapping', None)
+            
+            combined_file_prepped = config.DIR_PROCESSED / "draft_dependence_changepoint" / "ruptures_draftDepenBasalMelt_parameters_filled_prepped.nc"
+            combined_dataset_prepped.to_netcdf(combined_file_prepped)
+            print(f"Saved interpolation-prepped parameters to {combined_file_prepped}")
+        else:
+            print("Warning: No x/y coordinates found to rename for interpolation prep")
     else:
         print("Warning: No combined data to save")
 
