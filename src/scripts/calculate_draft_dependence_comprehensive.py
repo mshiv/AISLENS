@@ -547,6 +547,14 @@ def merge_comprehensive_parameters(all_draft_params, icems, satobs, config, save
             # Ensure CRS is set on the merged dataset
             merged_dataset = write_crs(merged_dataset, config.CRS_TARGET)
             
+            # Final cleanup after write_crs (which may re-add grid_mapping)
+            for var_name in merged_dataset.data_vars:
+                merged_dataset[var_name].encoding.pop('grid_mapping', None)
+                merged_dataset[var_name].attrs.pop('grid_mapping', None)
+            for coord_name in merged_dataset.coords:
+                merged_dataset[coord_name].encoding.pop('grid_mapping', None)
+                merged_dataset[coord_name].attrs.pop('grid_mapping', None)
+            
             output_file = config.DIR_PROCESSED / "draft_dependence_changepoint" / f"ruptures_{config_param_name}.nc"
             output_file.parent.mkdir(parents=True, exist_ok=True)
             merged_dataset.to_netcdf(output_file)
