@@ -1,21 +1,18 @@
 #!/usr/bin/env python3
 """
-Draft Dependence Map Visualization Script
+Draft Dependence Map Visualization
 
-Creates a large Antarctica ice sheet map with colored ice shelf regions and 
+Creates a massive Antarctica ice sheet map with colored ice shelf regions and 
 scatter plot insets positioned near their corresponding ice shelves showing 
 observed vs predicted melt rates from draft dependence parameterization.
 
-Usage:
-    python visualize_draft_dependence_map.py --parameter_set original
-    python visualize_draft_dependence_map.py --parameter_set permissive --output_dir /path/to/output
-
 Shiva Muruganandham
-August 28, 2025
+August 2025
 """
 
 import argparse
 import json
+import pickle
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
@@ -26,32 +23,17 @@ import xarray as xr
 import geopandas as gpd
 from pathlib import Path
 import warnings
+from shapely.geometry import mapping
+from sklearn.linear_model import LinearRegression
 warnings.filterwarnings('ignore')
 
 # Import your AISLENS modules
 from aislens.config import config
 from aislens.utils import write_crs
 
-# Try to import scipy for mode calculation
-try:
-    from scipy.stats import mode
-    SCIPY_AVAILABLE = True
-except ImportError:
-    SCIPY_AVAILABLE = False
-    print("Warning: scipy not available, using mean instead of mode for parameter extraction")
-
 def load_ice_shelf_data(ice_shelf_index, icems, satobs, config):
     """
     Load observational data for a specific ice shelf.
-    
-    Args:
-        ice_shelf_index: Index of ice shelf in icems dataframe
-        icems: GeoDataFrame with ice shelf masks
-        satobs: xarray Dataset with satellite observations
-        config: Configuration object
-        
-    Returns:
-        dict with 'draft', 'melt', 'shelf_name' keys, or None if no data
     """
     try:
         # Get ice shelf geometry and name
@@ -62,8 +44,11 @@ def load_ice_shelf_data(ice_shelf_index, icems, satobs, config):
             print(f"  {shelf_name}: Empty geometry")
             return None
             
+        # Create mask for ice shelf using the same method as notebook
+        ice_shelf_mask = icems.loc[[ice_shelf_index], 'geometry'].apply(mapping)
+        
         # Clip satellite data to ice shelf region
-        satobs_clipped = satobs.rio.clip([ice_shelf_geom], crs=config.CRS_TARGET, drop=False)
+        satobs_clipped = satobs.rio.clip(ice_shelf_mask, icems.crs)
         
         # Extract draft and melt rate data
         draft_var = config.SATOBS_DRAFT_VAR
@@ -109,12 +94,12 @@ def load_ice_shelf_data(ice_shelf_index, icems, satobs, config):
         print(f"Warning: Could not load data for ice shelf {ice_shelf_index}: {e}")
         return None
 
-def load_predicted_data(shelf_name, ice_shelf_geom, parameter_set_dir, config):
+def load_predicted_data(shelf_name, ice_shelf_index, icems, parameter_set_dir, config):
     """
-    Load predicted melt rates for an ice shelf from merged parameter grid files.
+    Load predicted melt rates using the same approach as the notebook.
     """
     try:
-        # Use the combined parameter file
+        # Use the combined parameter file (similar to notebook approach)
         combined_file = parameter_set_dir / "ruptures_draftDepenBasalMelt_parameters_filled.nc"
         
         if not combined_file.exists():
@@ -128,11 +113,13 @@ def load_predicted_data(shelf_name, ice_shelf_geom, parameter_set_dir, config):
         if not hasattr(ds, 'rio') or ds.rio.crs is None:
             ds = ds.rio.write_crs(config.CRS_TARGET)
         
-        # Try to clip to ice shelf geometry
+        # Create mask using same method as notebook
+        ice_shelf_mask = icems.loc[[ice_shelf_index], 'geometry'].apply(mapping)
+        
         try:
-            clipped = ds.rio.clip([ice_shelf_geom], crs=config.CRS_TARGET, drop=False)
+            clipped = ds.rio.clip(ice_shelf_mask, icems.crs)
             
-            # Extract parameter values
+            # Extract parameter values using notebook approach
             params = {}
             param_vars = {
                 'minDraft': 'draftDepenBasalMelt_minDraft',
@@ -157,7 +144,7 @@ def load_predicted_data(shelf_name, ice_shelf_geom, parameter_set_dir, config):
             return params
             
         except Exception as clip_error:
-            print(f"  Clipping failed for {shelf_name}, trying fallback method: {clip_error}")
+            print(f"  Clipping failed for {shelf_name}: {clip_error}")
             return None
         
     except Exception as e:
@@ -190,16 +177,9 @@ def create_draft_melt_prediction(draft_range, params):
         
     return predicted_melt
 
-def get_ice_shelf_centroid(ice_shelf_geom, target_crs='EPSG:3031'):
+def get_ice_shelf_centroid(ice_shelf_geom):
     """
-    Get the centroid of an ice shelf geometry in target CRS coordinates.
-    
-    Args:
-        ice_shelf_geom: Shapely geometry of ice shelf
-        target_crs: Target coordinate reference system
-        
-    Returns:
-        (x, y) coordinates of centroid
+    Get the centroid of an ice shelf geometry.
     """
     try:
         centroid = ice_shelf_geom.centroid
@@ -208,54 +188,53 @@ def get_ice_shelf_centroid(ice_shelf_geom, target_crs='EPSG:3031'):
         print(f"Error getting centroid: {e}")
         return 0, 0
 
-def calculate_inset_position(centroid_x, centroid_y, map_bounds, inset_size=0.08):
+def calculate_inset_positions(ice_shelf_centroids, n_shelves):
     """
-    Calculate inset position as fraction of figure coordinates.
+    Calculate smart inset positions to avoid overlaps.
+    Uses a combination of geographic position and grid layout.
+    """
+    positions = []
     
-    Args:
-        centroid_x, centroid_y: Ice shelf centroid in map coordinates
-        map_bounds: (xmin, xmax, ymin, ymax) of map extent
-        inset_size: Size of inset as fraction of figure
+    # Define regions of Antarctica and their preferred inset locations
+    # This is a simplified approach - you could make this more sophisticated
+    
+    # Create a grid of potential positions
+    n_cols = 6
+    n_rows = int(np.ceil(n_shelves / n_cols))
+    
+    # Start positions around the edges of the figure
+    left_start = 0.02
+    bottom_start = 0.02
+    width_spacing = 0.15
+    height_spacing = 0.12
+    inset_size = 0.08
+    
+    for i in range(n_shelves):
+        row = i // n_cols
+        col = i % n_cols
         
-    Returns:
-        (left, bottom, width, height) in figure coordinates
-    """
-    xmin, xmax, ymin, ymax = map_bounds
+        left = left_start + col * width_spacing
+        bottom = bottom_start + row * height_spacing
+        
+        # Ensure we don't go off the figure
+        if left + inset_size > 0.98:
+            left = 0.98 - inset_size
+        if bottom + inset_size > 0.98:
+            bottom = 0.98 - inset_size
+            
+        positions.append((left, bottom, inset_size, inset_size))
     
-    # Convert to normalized coordinates (0-1)
-    norm_x = (centroid_x - xmin) / (xmax - xmin)
-    norm_y = (centroid_y - ymin) / (ymax - ymin)
-    
-    # Offset to position inset near but not exactly on centroid
-    offset_x = 0.02  # Small offset to avoid overlap
-    offset_y = 0.02
-    
-    # Calculate inset position (centered on offset location)
-    left = norm_x + offset_x - inset_size/2
-    bottom = norm_y + offset_y - inset_size/2
-    
-    # Keep insets within figure bounds
-    left = max(0.01, min(0.99 - inset_size, left))
-    bottom = max(0.01, min(0.99 - inset_size, bottom))
-    
-    return left, bottom, inset_size, inset_size
+    return positions
 
 def plot_ice_shelf_inset(obs_data, pred_params, shelf_name, color, inset_ax):
     """
-    Create scatter plot inset for a single ice shelf.
-    
-    Args:
-        obs_data: Observational data dict with 'draft' and 'melt' keys
-        pred_params: Prediction parameters dict, or None if no predictions
-        shelf_name: Name of ice shelf
-        color: Color for ice shelf (for title and border)
-        inset_ax: Matplotlib axis for the inset
+    Create scatter plot inset for a single ice shelf (similar to notebook approach).
     """
     
     # Plot observational data if available
     if obs_data is not None and len(obs_data['draft']) > 0:
         # Subsample for plotting if too many points
-        n_plot = min(500, len(obs_data['draft']))  # Smaller for insets
+        n_plot = min(500, len(obs_data['draft']))
         if len(obs_data['draft']) > n_plot:
             plot_idx = np.random.choice(len(obs_data['draft']), n_plot, replace=False)
             plot_draft = obs_data['draft'][plot_idx]
@@ -264,25 +243,21 @@ def plot_ice_shelf_inset(obs_data, pred_params, shelf_name, color, inset_ax):
             plot_draft = obs_data['draft']
             plot_melt = obs_data['melt']
         
-        # Convert melt units if needed
+        # Convert melt units if needed (similar to notebook)
         melt_units = 'kg/m²/s'
         if np.abs(plot_melt).max() < 0.01:
             plot_melt = plot_melt * 31536000 / 917  # Convert to m/yr
             melt_units = 'm/yr'
         
-        # Plot observed data with very small points for insets
-        inset_ax.scatter(plot_melt, plot_draft, c='black', s=0.5, alpha=0.6)
+        # Plot observed data with small points for insets
+        inset_ax.scatter(plot_melt, plot_draft, c='black', s=1, alpha=0.6, marker='x')
         
         # Plot predictions if available
         if pred_params is not None:
             pred_melt = create_draft_melt_prediction(plot_draft, pred_params)
             
-            # Determine if relationship is meaningful
-            is_meaningful = True  # Could add logic here
-            pred_color = 'orange' if is_meaningful else 'red'
-            
             # Plot predicted data
-            inset_ax.scatter(pred_melt, plot_draft, c=pred_color, s=0.5, alpha=0.8)
+            inset_ax.scatter(pred_melt, plot_draft, c=color, s=1, alpha=0.8)
             
             # Add threshold line if linear parameterization
             param_type = pred_params['paramType']
@@ -290,26 +265,18 @@ def plot_ice_shelf_inset(obs_data, pred_params, shelf_name, color, inset_ax):
                 inset_ax.axhline(pred_params['minDraft'], color='red', 
                                linestyle='--', linewidth=0.8, alpha=0.8)
         
-        # Set axis limits with padding
+        # Set axis limits with padding (similar to notebook approach)
         if len(plot_melt) > 0 and len(plot_draft) > 0:
+            # Set y-axis from deepest to shallowest (invert)
+            inset_ax.set_ylim(plot_draft.max() * 1.1, 0)
+            
+            # Set x-axis limits
             melt_min, melt_max = plot_melt.min(), plot_melt.max()
-            draft_min, draft_max = plot_draft.min(), plot_draft.max()
-            
             melt_range = melt_max - melt_min
-            draft_range = draft_max - draft_min
-            
             if melt_range > 0:
                 x_min = melt_min - 0.1*melt_range
                 x_max = melt_max + 0.1*melt_range
                 inset_ax.set_xlim(x_min, x_max)
-            
-            if draft_range > 0:
-                y_min = draft_min - 0.1*draft_range
-                y_max = draft_max + 0.1*draft_range
-                inset_ax.set_ylim(y_min, y_max)
-            
-            # Invert Y-axis (deeper drafts at bottom)
-            inset_ax.invert_yaxis()
         
         # Add title with ice shelf color
         inset_ax.set_title(shelf_name, fontsize=6, color=color, fontweight='bold')
@@ -331,178 +298,225 @@ def plot_ice_shelf_inset(obs_data, pred_params, shelf_name, color, inset_ax):
         inset_ax.set_ylim(0, 1)
         inset_ax.set_title(shelf_name, fontsize=6, color=color, fontweight='bold')
 
+def process_and_cache_data(parameter_set_name, parameter_test_dir, cache_file, 
+                          max_shelves=None, start_index=33):
+    """
+    Process all ice shelf data and cache results for faster subsequent runs.
+    """
+    print(f"Processing data for parameter set: {parameter_set_name}")
+    
+    # Set up directories
+    if parameter_test_dir is None:
+        parameter_test_dir = config.DIR_PROCESSED / "draft_dependence_changepoint"
+    parameter_test_dir = Path(parameter_test_dir)
+    
+    # Load data
+    print("Loading satellite observation data...")
+    satobs = xr.open_dataset(config.FILE_PAOLO23_SATOBS_PREPARED)
+    satobs = write_crs(satobs, config.CRS_TARGET)
+    
+    print("Loading ice shelf masks...")
+    icems = gpd.read_file(config.FILE_ICESHELFMASKS)
+    icems = icems.to_crs(config.CRS_TARGET)
+    
+    # Parameter set directory
+    param_set_dir = parameter_test_dir
+    
+    # Get ice shelf subset (ice shelves from index 33 onwards, like in notebook)
+    ice_shelf_indices = list(range(start_index, len(icems)))
+    if max_shelves is not None:
+        ice_shelf_indices = ice_shelf_indices[:max_shelves]
+    
+    print(f"Processing {len(ice_shelf_indices)} ice shelves starting from index {start_index}")
+    
+    # Process each ice shelf
+    processed_data = {
+        'ice_shelves': [],
+        'obs_data': [],
+        'pred_params': [],
+        'geometries': [],
+        'centroids': []
+    }
+    
+    for ice_shelf_idx in ice_shelf_indices:
+        shelf_name = icems.iloc[ice_shelf_idx].name
+        ice_shelf_geom = icems.iloc[ice_shelf_idx].geometry
+        
+        print(f"Processing {shelf_name}...")
+        
+        try:
+            # Load observational and prediction data
+            obs_data = load_ice_shelf_data(ice_shelf_idx, icems, satobs, config)
+            pred_params = load_predicted_data(shelf_name, ice_shelf_idx, icems, param_set_dir, config)
+            
+            # Get centroid
+            centroid_x, centroid_y = get_ice_shelf_centroid(ice_shelf_geom)
+            
+            # Store data
+            processed_data['ice_shelves'].append(shelf_name)
+            processed_data['obs_data'].append(obs_data)
+            processed_data['pred_params'].append(pred_params)
+            processed_data['geometries'].append(ice_shelf_geom)
+            processed_data['centroids'].append((centroid_x, centroid_y))
+            
+        except Exception as e:
+            print(f"Error processing {shelf_name}: {e}")
+            continue
+    
+    # Cache the processed data
+    print(f"Caching processed data to: {cache_file}")
+    with open(cache_file, 'wb') as f:
+        pickle.dump(processed_data, f)
+    
+    return processed_data
+
+def load_cached_data(cache_file):
+    """
+    Load previously processed and cached data.
+    """
+    print(f"Loading cached data from: {cache_file}")
+    with open(cache_file, 'rb') as f:
+        return pickle.load(f)
+
 def create_draft_dependence_map_visualization(parameter_set_name, parameter_test_dir=None, 
-                                            output_dir=None, max_shelves=None, start_index=33):
+                                            output_dir=None, max_shelves=None, start_index=33,
+                                            use_cache=False, cache_file=None):
     """
     Create Antarctica map with colored ice shelf regions and scatter plot insets.
-    
-    Args:
-        parameter_set_name: Name of parameter set to visualize
-        parameter_test_dir: Directory containing parameter test results
-        output_dir: Directory to save plots  
-        max_shelves: Maximum number of shelves to plot (for testing)
-        start_index: Starting index for ice shelves (default: 33)
     """
     
     print(f"Creating draft dependence map visualization for parameter set: {parameter_set_name}")
     
-    try:
-        # Set up directories
-        if parameter_test_dir is None:
-            parameter_test_dir = config.DIR_PROCESSED / "draft_dependence_changepoint"
-        parameter_test_dir = Path(parameter_test_dir)
-        
-        if output_dir is None:
-            output_dir = parameter_test_dir.parent / "visualizations"
-        output_dir = Path(output_dir)
-        output_dir.mkdir(parents=True, exist_ok=True)
-        
-        # Load data
-        print("Loading satellite observation data...")
-        satobs = xr.open_dataset(config.FILE_PAOLO23_SATOBS_PREPARED)
-        satobs = write_crs(satobs, config.CRS_TARGET)
-        
-        print("Loading ice shelf masks...")
-        icems = gpd.read_file(config.FILE_ICESHELFMASKS)
-        icems = icems.to_crs(config.CRS_TARGET)
-        
-        # Parameter set directory
-        param_set_dir = parameter_test_dir
-        if not param_set_dir.exists():
-            print(f"Error: Parameter set directory not found: {param_set_dir}")
-            return
-        
-        # Get ice shelf subset
-        ice_shelf_indices = list(range(start_index, len(icems)))
-        if max_shelves is not None:
-            ice_shelf_indices = ice_shelf_indices[:max_shelves]
-        
-        print(f"Processing {len(ice_shelf_indices)} ice shelves starting from index {start_index}")
-        
-        # Create color map for ice shelves
-        n_shelves = len(ice_shelf_indices)
-        colors = plt.cm.tab20(np.linspace(0, 1, n_shelves))
+    # Set up directories
+    if parameter_test_dir is None:
+        parameter_test_dir = config.DIR_PROCESSED / "draft_dependence_changepoint"
+    parameter_test_dir = Path(parameter_test_dir)
+    
+    if output_dir is None:
+        output_dir = parameter_test_dir.parent / "visualizations"
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Set cache file
+    if cache_file is None:
+        cache_file = output_dir / f"processed_data_{parameter_set_name}.pkl"
+    
+    # Load or process data
+    if use_cache and Path(cache_file).exists():
+        processed_data = load_cached_data(cache_file)
+    else:
+        processed_data = process_and_cache_data(
+            parameter_set_name, parameter_test_dir, cache_file, max_shelves, start_index
+        )
+    
+    # Load ice shelf masks for plotting
+    icems = gpd.read_file(config.FILE_ICESHELFMASKS)
+    icems = icems.to_crs(config.CRS_TARGET)
+    
+    # Filter to ice shelves we have data for
+    n_shelves = len(processed_data['ice_shelves'])
+    print(f"Creating visualization for {n_shelves} ice shelves")
+    
+    # Create color map for ice shelves (use distinctive colors like in notebook)
+    if n_shelves <= 5:
+        colors = ['r', 'b', 'g', 'y', 'm'][:n_shelves]
+    else:
+        # Use colormap for more ice shelves
+        colors = plt.cm.tab20(np.linspace(0, 1, min(20, n_shelves)))
         if n_shelves > 20:
-            # Use multiple colormaps if more than 20 shelves
-            colors1 = plt.cm.tab20(np.linspace(0, 1, 20))
             colors2 = plt.cm.Set3(np.linspace(0, 1, n_shelves - 20))
-            colors = np.vstack([colors1, colors2])
+            colors = np.vstack([colors[:20], colors2])
+    
+    # Create main figure with Antarctica map
+    fig = plt.figure(figsize=(20, 16))
+    
+    # Main map axis with South Polar Stereographic projection
+    ax_map = fig.add_subplot(1, 1, 1, projection=ccrs.SouthPolarStereo())
+    
+    # Set map extent for Antarctica
+    ax_map.set_extent([-180, 180, -60, -90], ccrs.PlateCarree())
+    
+    # Plot base ice shelf regions (like in notebook)
+    icems[start_index:start_index+100].plot(ax=ax_map, color='aliceblue', linewidth=0, zorder=1,
+                                           transform=ccrs.PlateCarree())
+    icems[start_index:start_index+100].boundary.plot(ax=ax_map, linewidth=0.3, color='lightsteelblue',
+                                                    transform=ccrs.PlateCarree(), zorder=2)
+    
+    # Add coastlines
+    ax_map.coastlines(resolution='10m', linewidth=0.5)
+    
+    # Find indices of our ice shelves in the full icems dataframe
+    ice_shelf_indices = []
+    for shelf_name in processed_data['ice_shelves']:
+        try:
+            idx = icems[icems['name'] == shelf_name].index[0]
+            ice_shelf_indices.append(idx)
+        except:
+            print(f"Warning: Could not find index for {shelf_name}")
+            ice_shelf_indices.append(None)
+    
+    # Plot colored ice shelves on main map (like in notebook)
+    for i, (shelf_name, idx) in enumerate(zip(processed_data['ice_shelves'], ice_shelf_indices)):
+        if idx is not None:
+            shelf_color = colors[i] if isinstance(colors[0], str) else colors[i]
+            icems.loc[[idx]].plot(ax=ax_map, color=shelf_color, linewidth=0.4, 
+                                transform=ccrs.PlateCarree(), zorder=3)
+    
+    # Calculate inset positions
+    inset_positions = calculate_inset_positions(processed_data['centroids'], n_shelves)
+    
+    # Create inset scatter plots
+    processed_count = 0
+    for i, (shelf_name, obs_data, pred_params, position) in enumerate(
+        zip(processed_data['ice_shelves'], processed_data['obs_data'], 
+            processed_data['pred_params'], inset_positions)
+    ):
         
-        # Create main figure with Antarctica map
-        fig = plt.figure(figsize=(16, 16))
+        if obs_data is None:
+            print(f"  {shelf_name}: Skipping inset - no observational data")
+            continue
         
-        # Main map axis with South Polar Stereographic projection
-        ax_map = fig.add_subplot(1, 1, 1, projection=ccrs.SouthPolarStereo())
+        shelf_color = colors[i] if isinstance(colors[0], str) else colors[i]
         
-        # Set map extent for Antarctica
-        ax_map.set_extent([-180, 180, -60, -90], ccrs.PlateCarree())
+        # Create inset axes
+        left, bottom, width, height = position
+        inset_ax = fig.add_axes([left, bottom, width, height])
         
-        # Add map features
-        ax_map.add_feature(cfeature.LAND, color='lightgray', alpha=0.5)
-        ax_map.add_feature(cfeature.OCEAN, color='lightblue', alpha=0.3)
-        ax_map.coastlines(resolution='10m', linewidth=0.5)
-        ax_map.gridlines(draw_labels=False, alpha=0.3)
+        # Plot scatter plot in inset
+        plot_ice_shelf_inset(obs_data, pred_params, shelf_name, shelf_color, inset_ax)
         
-        # Plot all ice shelf boundaries first (background)
-        ice_shelf_subset = icems.iloc[start_index:start_index+len(ice_shelf_indices)]
-        ice_shelf_subset.boundary.plot(ax=ax_map, linewidth=0.3, color='lightsteelblue', 
-                                     transform=ccrs.PlateCarree())
-        
-        # Get map bounds for inset positioning
-        ax_map_bounds = ax_map.get_extent()
-        
-        # Process each ice shelf and create insets
-        processed_count = 0
-        for i, ice_shelf_idx in enumerate(ice_shelf_indices):
-            shelf_name = icems.iloc[ice_shelf_idx].name
-            ice_shelf_geom = icems.iloc[ice_shelf_idx].geometry
-            shelf_color = colors[i]
-            
-            print(f"Processing {shelf_name} ({i+1}/{len(ice_shelf_indices)})...")
-            
-            try:
-                # Plot colored ice shelf on main map
-                icems.iloc[[ice_shelf_idx]].plot(ax=ax_map, color=shelf_color, 
-                                               linewidth=0.4, transform=ccrs.PlateCarree())
-                
-                # Load observational and prediction data
-                obs_data = load_ice_shelf_data(ice_shelf_idx, icems, satobs, config)
-                pred_params = load_predicted_data(shelf_name, ice_shelf_geom, param_set_dir, config)
-                
-                # Skip inset if no observational data
-                if obs_data is None:
-                    print(f"  {shelf_name}: Skipping inset - no observational data")
-                    continue
-                
-                # Get ice shelf centroid for inset positioning
-                centroid_x, centroid_y = get_ice_shelf_centroid(ice_shelf_geom)
-                
-                # Convert centroid to figure coordinates for inset positioning
-                # This is simplified - in practice you might need more sophisticated positioning
-                # to avoid overlaps and place insets optimally
-                
-                # Calculate inset position (this is a simplified approach)
-                # You may want to manually adjust positions for better layout
-                inset_size = 0.06  # Size of each inset
-                
-                # Simple grid-like positioning with offset based on index
-                row = i // 8  # 8 insets per row
-                col = i % 8
-                left = 0.05 + col * 0.12
-                bottom = 0.85 - row * 0.15
-                
-                # Ensure insets stay within figure bounds
-                if bottom < 0.05:
-                    bottom = 0.05 + (row % 5) * 0.15  # Wrap to avoid going off figure
-                
-                # Create inset axes
-                inset_ax = fig.add_axes([left, bottom, inset_size, inset_size])
-                
-                # Plot scatter plot in inset
-                plot_ice_shelf_inset(obs_data, pred_params, shelf_name, shelf_color, inset_ax)
-                
-                processed_count += 1
-                
-            except Exception as shelf_error:
-                print(f"  Error processing {shelf_name}: {shelf_error}")
-                continue
-        
-        # Add title and labels
-        ax_map.set_title(f'Draft Dependence Analysis: {parameter_set_name}\n'
-                        f'Antarctica Ice Shelves with Melt Rate vs Draft Depth Insets\n'
-                        f'Black: Observed, Orange: Predicted', 
-                        fontsize=14, pad=20)
-        
-        # Add a small legend explaining the inset plots
-        legend_text = ('Inset plots show melt rate (x-axis) vs draft depth (y-axis)\n'
-                      'Black dots: Observed data\n'
-                      'Orange dots: Predicted data\n'
-                      'Red dashed line: Draft threshold (if applicable)')
-        
-        fig.text(0.02, 0.02, legend_text, fontsize=10, 
-                bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
-        
-        # Save plot
-        output_file = output_dir / f"draft_dependence_map_{parameter_set_name}.png"
-        print(f"Saving plot to: {output_file}")
-        plt.savefig(output_file, dpi=200, bbox_inches='tight')
-        print(f"Map visualization saved to: {output_file}")
-        
-        # Save high-res version  
-        output_file_hires = output_dir / f"draft_dependence_map_{parameter_set_name}_hires.png"
-        plt.savefig(output_file_hires, dpi=300, bbox_inches='tight')
-        
-        plt.close()
-        
-        print(f"Processed {processed_count} ice shelves with data out of {len(ice_shelf_indices)} total")
-        
-        return output_file
-        
-    except Exception as e:
-        print(f"Error in create_draft_dependence_map_visualization: {e}")
-        import traceback
-        traceback.print_exc()
-        return None
+        processed_count += 1
+    
+    # Add title and labels
+    ax_map.set_title(f'Draft Dependence Analysis: {parameter_set_name}\n'
+                    f'Antarctica Ice Shelves with Melt Rate vs Draft Depth Insets\n'
+                    f'Black crosses: Observed, Colored dots: Predicted', 
+                    fontsize=16, pad=20)
+    
+    # Add a legend explaining the inset plots
+    legend_text = ('Inset plots show melt rate (x-axis) vs draft depth (y-axis)\n'
+                  'Black crosses: Observed data\n'
+                  'Colored dots: Predicted data\n'
+                  'Red dashed line: Draft threshold (if applicable)')
+    
+    fig.text(0.02, 0.02, legend_text, fontsize=12, 
+            bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+    
+    # Save plot
+    output_file = output_dir / f"draft_dependence_map_{parameter_set_name}.png"
+    print(f"Saving plot to: {output_file}")
+    plt.savefig(output_file, dpi=200, bbox_inches='tight')
+    print(f"Map visualization saved to: {output_file}")
+    
+    # Save high-res version  
+    output_file_hires = output_dir / f"draft_dependence_map_{parameter_set_name}_hires.png"
+    plt.savefig(output_file_hires, dpi=300, bbox_inches='tight')
+    
+    plt.show()
+    
+    print(f"Processed {processed_count} ice shelves with data out of {n_shelves} total")
+    
+    return output_file
 
 def main():
     """Main function with command line interface."""
@@ -518,6 +532,10 @@ def main():
                         help='Maximum number of shelves to plot (for testing)')
     parser.add_argument('--start_index', type=int, default=33,
                         help='Starting index for ice shelves (default: 33)')
+    parser.add_argument('--use_cache', action='store_true',
+                        help='Use cached processed data if available')
+    parser.add_argument('--cache_file', type=str, default=None,
+                        help='Path to cache file for processed data')
     
     args = parser.parse_args()
     
@@ -530,7 +548,9 @@ def main():
         parameter_test_dir=args.parameter_test_dir,
         output_dir=args.output_dir,
         max_shelves=args.max_shelves,
-        start_index=args.start_index
+        start_index=args.start_index,
+        use_cache=args.use_cache,
+        cache_file=args.cache_file
     )
     
     print("Map visualization complete!")
