@@ -59,7 +59,7 @@ parser.add_argument("-m", dest="mesh", default=None, metavar="FILENAME",
                           to be applied to all run files, or one mesh file per \
                           run file (list separated by commas; no spaces)")
 parser.add_argument("-m2", dest="mesh2", default=None, metavar="FILENAME",
-                    help="Second input file containing mesh variables for year 2300.")
+                    help="Second input file containing mesh variables for end year.")
 parser.add_argument("-s", dest="saveNames", default=None, metavar="FILENAME",
                     help="filename for saving. If empty or None, will plot \
                           to screen instead of saving.")
@@ -112,6 +112,16 @@ else:
 
 if args.mesh2 is not None:
     m2 = Dataset(args.mesh2, 'r')
+    # Extract end year from mesh2 filename
+    import re
+    mesh2_filename = args.mesh2
+    year_match = re.search(r'(\d{4})', mesh2_filename)
+    if year_match:
+        end_year = year_match.group(1)
+        print(f"Detected end year from filename: {end_year}")
+    else:
+        end_year = "2300"  # fallback
+        print("Could not detect year from filename, using default: 2300")
 else:
     print("Error: Second mesh file (-m2) is required.")
     exit(1)
@@ -287,31 +297,30 @@ for ii, run in enumerate(runs):
         if 'cellMask' in m.variables.keys() and 'cellMask' in m2.variables.keys():
             calc_mask = True
             cellMask_2000 = m.variables["cellMask"][:]
-            cellMask_2300 = m2.variables["cellMask"][:]
-            # Print unique values of cellMask_2000 and cellMask_2300
+            cellMask_end = m2.variables["cellMask"][:]
+            # Print unique values of cellMask_2000 and cellMask_end
             unique_values_2000 = np.unique(cellMask_2000)
             print(f"Unique values in cellMask_2000: {unique_values_2000}")
 
-            unique_values_2300 = np.unique(cellMask_2300)
-            print(f"Unique values in cellMask_2300: {unique_values_2300}")
+            unique_values_end = np.unique(cellMask_end)
+            print(f"Unique values in cellMask_{end_year}: {unique_values_end}")
 
-            mask = (cellMask_2000 == 1) | ((cellMask_2000 & floatValue) == 0) & ((cellMask_2300 & floatValue) == floatValue)
+            mask = (cellMask_2000 == 1) | ((cellMask_2000 & floatValue) == 0) & ((cellMask_end & floatValue) == floatValue)
             mask = mask.astype(bool)
             unique_values_mask = np.unique(mask)
             print(f"Unique values in mask: {unique_values_mask}")
 
             # Create masks for grounded ice and floating ice
             grounded_2000 = (cellMask_2000 & floatValue) == 0
-            grounded_2300 = (cellMask_2300 & floatValue) == 0
+            grounded_end = (cellMask_end & floatValue) == 0
             floating_2000 = (cellMask_2000 & floatValue) == floatValue
-            floating_2300 = (cellMask_2300 & floatValue) == floatValue
+            floating_end = (cellMask_end & floatValue) == floatValue
 
-            # Create a mask for areas to plot: grounded ice in 2300 or newly formed floating ice
-            plot_mask = grounded_2300 | (floating_2300 & ~floating_2000)
-            #plot_mask = floating_2300 & ~floating_2000
+            # Create a mask for areas to plot: grounded ice in end year or newly formed floating ice
+            plot_mask = grounded_end | (floating_end & ~floating_2000)
 
             groundingLineMask_2000 = (cellMask_2000 & groundingLineValue) // groundingLineValue
-            groundingLineMask_2300 = (cellMask_2300 & groundingLineValue) // groundingLineValue
+            groundingLineMask_end = (cellMask_end & groundingLineValue) // groundingLineValue
             initialExtentMask = (cellMask_2000 & initialExtentValue) // initialExtentValue
 
         else:
@@ -334,7 +343,7 @@ for ii, run in enumerate(runs):
                 gl_2000 = axs[index].tricontour(triang, groundingLineMask_2000[timeLev, :],
                                               levels=[0.9999], colors='darkgreen',
                                               linestyles='solid', linewidths=0.9)
-                gl_2300 = axs[index].tricontour(triang, groundingLineMask_2300[timeLev, :],
+                gl_end = axs[index].tricontour(triang, groundingLineMask_end[timeLev, :],
                                               levels=[0.9999], colors='darkviolet',
                                               linestyles='solid', linewidths=0.9)
                 axs[index].tricontour(triang, initialExtentMask[timeLev, :],
@@ -422,8 +431,8 @@ for ii, run in enumerate(runs):
         #cbars.append(Colorbar(ax=cbar_ax, mappable=floating_ice, orientation='vertical', label='floating ice'))
 
         legend_elements = [
-            plt.Line2D([0], [0], color='green', lw=1.5, label='2000 GL'),
-            plt.Line2D([0], [0], color='purple', lw=1.5, label='2300 GL')
+            plt.Line2D([0], [0], color='darkgreen', lw=1.5, label='2000 GL'),
+            plt.Line2D([0], [0], color='darkviolet', lw=1.5, label=f'{end_year} GL')
             ]
     
         # Add legend to the last subplot of each row
