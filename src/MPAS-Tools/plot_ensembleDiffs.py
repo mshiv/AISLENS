@@ -4,6 +4,7 @@ Enhanced MALI ensemble difference plotting script.
 - Supports arbitrary variables (default: thickness, dhdt)
 - Computes pairwise differences, ensemble min/max/range/mean/stddev
 - Overlays 2000 and target year grounding lines for each run
+- Ensures all mask arrays are 1D before plotting
 - Saves one PNG per variable/year/comparison
 """
 
@@ -45,6 +46,8 @@ def load_mesh_vars(mesh_path):
     if len(yCell.shape) > 1: yCell = yCell[0]
     if len(dcEdge.shape) > 1: dcEdge = dcEdge[0]
     cellMask = m.variables["cellMask"][:] if "cellMask" in m.variables else None
+    if cellMask is not None and cellMask.ndim == 2:
+        cellMask = cellMask[0]
     m.close()
     return xCell, yCell, dcEdge, cellMask
 
@@ -52,7 +55,16 @@ floatValue = 4
 groundingLineValue = 256
 
 def plot_grounding_lines(ax, xCell, yCell, cellMask_2000, cellMask_end, color_2000, color_end, label_2000, label_end):
+    # Ensure 1D mask arrays for contour plotting
     if cellMask_2000 is not None and cellMask_end is not None:
+        if cellMask_2000.ndim == 2:
+            cellMask_2000 = cellMask_2000[0]
+        if cellMask_end.ndim == 2:
+            cellMask_end = cellMask_end[0]
+        if len(cellMask_2000) != len(xCell):
+            raise ValueError(f"cellMask_2000 shape {cellMask_2000.shape} does not match xCell shape {xCell.shape}")
+        if len(cellMask_end) != len(xCell):
+            raise ValueError(f"cellMask_end shape {cellMask_end.shape} does not match xCell shape {xCell.shape}")
         gl_mask_2000 = (cellMask_2000 & groundingLineValue) // groundingLineValue
         gl_mask_end = (cellMask_end & groundingLineValue) // groundingLineValue
         triang = tri.Triangulation(xCell, yCell)
@@ -84,6 +96,10 @@ for i, (run_path, mesh_path, mesh2000_path) in enumerate(zip(run_files, mesh_fil
         f.close()
     except Exception as e:
         print(f"Failed to load {variable} from {run_path}: {e}")
+
+if len(data) == 0:
+    print("No valid data loaded. Exiting.")
+    exit(1)
 
 data = np.array(data)  # Shape: (n_runs, n_cells)
 
