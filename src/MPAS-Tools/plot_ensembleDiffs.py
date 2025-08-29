@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Multi-panel snapshot maps for MALI ensemble.
-Rows: variables (thickness, surfaceSpeed, dhdt)
-Columns: years at 25-year increments
-Handles dhdt as dedicated file if available.
+Ensemble snapshot map plotting for MALI.
+Plots min, max, mean, std, range for specified variables at specified years.
+Overlays grounding lines for all runs in ensemble.
 """
+
 import numpy as np
 from netCDF4 import Dataset
 import argparse
@@ -15,145 +15,114 @@ import matplotlib.gridspec as gridspec
 from matplotlib.colorbar import Colorbar
 from matplotlib.colors import Normalize, TwoSlopeNorm, LinearSegmentedColormap
 
-parser = argparse.ArgumentParser(description="Snapshot map plotter for MALI ensemble.")
-parser.add_argument("-r", dest="run_files", required=True, help="Comma-separated list of .nc files for each year.")
-parser.add_argument("-d", dest="dhdt_files", required=False, default=None, help="Comma-separated list of dhdt files (use '' if not present).")
-parser.add_argument("-v", dest="variables", required=True, help="Comma-separated variable list (thickness,surfaceSpeed,dhdt).")
-parser.add_argument("--years", dest="years", required=True, help="Comma-separated list of years.")
-parser.add_argument("-m", dest="meshes", required=True, help="Comma-separated mesh files (one per run file).")
-parser.add_argument("-s", dest="save_base", required=False, default=None, help="Base filename for saving figures.")
+parser = argparse.ArgumentParser(description="Ensemble map plots for MALI.")
+parser.add_argument("--ensemble_files", required=True, help="Comma-separated ensemble stats NetCDF files (one per year).")
+parser.add_argument("--years", required=True, help="Comma-separated years.")
+parser.add_argument("--variables", required=True, help="Comma-separated variables.")
+parser.add_argument("--mesh_files", required=True, help="Comma-separated mesh files for GL overlays (one per run, start year).")
+parser.add_argument("--run_names", required=True, help="Comma-separated run names (for legend).")
+parser.add_argument("--save_base", required=True, help="Base filename for saving figures.")
 
 args = parser.parse_args()
-
-run_files = args.run_files.split(',')
-dhdt_files = args.dhdt_files.split(',') if args.dhdt_files else [''] * len(run_files)
+ensemble_files = args.ensemble_files.split(',')
+years = [int(y) for y in args.years.split(',')]
 variables = args.variables.split(',')
-years = args.years.split(',')
-meshes = args.meshes.split(',')
+mesh_files = args.mesh_files.split(',')
+run_names = args.run_names.split(',')
 save_base = args.save_base
 
-nRows = len(variables)
-nCols = len(run_files)
-
+stat_types = ["mean", "min", "max", "range", "std"]
 defaultColors = {'thickness': 'Blues', 'surfaceSpeed': 'plasma', 'dhdt': 'RdBu'}
 sec_per_year = 60. * 60. * 24. * 365.
 
+# Load mesh info for GL overlays
+grounding_lines = []
+for mesh_fn in mesh_files:
+    m = Dataset(mesh_fn, 'r')
+    xCell = m.variables["xCell"][0] if m.variables["xCell"].ndim > 1 else m.variables["xCell"][:]
+    yCell = m.variables["yCell"][0] if m.variables["yCell"].ndim > 1 else m.variables["yCell"][:]
+    cellMask = m.variables["cellMask"][:] if "cellMask" in m.variables else None
+    groundingLineValue = 256
+    gl_mask = (cellMask & groundingLineValue) // groundingLineValue if cellMask is not None else None
+    grounding_lines.append({'x': xCell, 'y': yCell, 'mask': gl_mask})
+    m.close()
+
 def dist(i1, i2, xCell, yCell):
-    return ((xCell[i1]-xCell[i2])**2 + (yCell[i1]-yCell[i2])**2)**0.5
+    return ((xCell[i1]-xCell[i2])**2 + (yCell[i2]-yCell[i1])**2)**0.5
 
-fig = plt.figure(figsize=(4*nCols, 4*nRows))
-gs = gridspec.GridSpec(nRows, nCols+1, height_ratios=[1]*nRows, width_ratios=[1]*nCols+[0.12])
-axs = []
-cbar_axs = []
-for row in range(nRows):
-    cbar_axs.append(plt.subplot(gs[row,-1]))
-    for col in range(nCols):
-        axs.append(plt.subplot(gs[row, col]))
+for variable in variables:
+    for stat in stat_types:
+        # Create figure for this variable/stat across all years
+        fig = plt.figure(figsize=(5*len(years), 7))
+        gs = gridspec.GridSpec(1, len(years), width_ratios=[1]*len(years))
+        axs = []
+        vdata = []
+        units = "unknown"
+        for i, (stats_file, year) in enumerate(zip(ensemble_files, years)):
+            f = Dataset(stats_file, 'r')
+            varname = f"{variable}_{stat}"
+            if varname not in f.variables:
+                print(f"Skipping {varname} in {stats_file}")
+                vdata.append(None)
+                axs.append(plt.subplot(gs[i]))
+                continue
+            arr = f.variables[varname][:]
+            units = f.variables[varname].units if 'units' in f.variables[varname].ncattrs() else "unknown"
+            if arr.ndim == 1:
+                arr = arr.reshape((1, np.shape(arr)[0]))
+            vdata.append(arr[0,:])
+            axs.append(plt.subplot(gs[i]))
+            f.close()
 
-for row, variable in enumerate(variables):
-    all_data = []
-    # Collect all data for colorbar scaling
-    for col, (run_file, mesh_file, dhdt_file) in enumerate(zip(run_files, meshes, dhdt_files)):
-        if variable == 'dhdt' and dhdt_file and dhdt_file != '':
-            try:
-                f = Dataset(dhdt_file, 'r')
-                arr = f.variables['dhdt'][:]
-                f.close()
-            except Exception as e:
-                print(f"Error reading dhdt file {dhdt_file}: {e}")
-                arr = np.nan * np.ones_like(arr)
+        # Determine colormap and normalization
+        all_flat = np.concatenate([a for a in vdata if a is not None])
+        vmin = np.nanquantile(all_flat, 0.01)
+        vmax = np.nanquantile(all_flat, 0.99)
+        if variable == 'dhdt' or stat == 'range':
+            norm = TwoSlopeNorm(vmin=vmin, vcenter=0., vmax=vmax)
+            cmap = LinearSegmentedColormap.from_list("custom", ['Navajowhite', 'Darkorange', 'Darkred','white','Lightsteelblue', 'Royalblue', 'Navy'], N=200)
+        elif variable == 'surfaceSpeed':
+            norm = Normalize(vmin=vmin, vmax=vmax)
+            cmap = plt.get_cmap('plasma')
         else:
-            try:
-                f = Dataset(run_file, 'r')
-                arr = f.variables[variable][:]
-                if variable == 'surfaceSpeed':
-                    arr *= sec_per_year
-                f.close()
-            except Exception as e:
-                print(f"Error reading {variable} from {run_file}: {e}")
-                arr = np.nan * np.ones_like(arr)
-        if arr.ndim == 1:
-            arr = arr.reshape((1, np.shape(arr)[0]))
-        all_data.append(arr[0,:])
-    # Colorbar limits: 1st/99th percentile
-    vmin = np.nanquantile(np.concatenate(all_data), 0.01)
-    vmax = np.nanquantile(np.concatenate(all_data), 0.99)
-    # Colormap/norm
-    if variable == 'dhdt':
-        norm = TwoSlopeNorm(vmin=vmin, vcenter=0., vmax=vmax)
-        cmap = LinearSegmentedColormap.from_list("custom", ['Navajowhite', 'Darkorange', 'Darkred','white','Lightsteelblue', 'Royalblue', 'Navy'], N=200)
-    elif variable == 'surfaceSpeed':
-        norm = Normalize(vmin=vmin, vmax=vmax)
-        cmap = plt.get_cmap('plasma')
-    else:
-        norm = Normalize(vmin=vmin, vmax=vmax)
-        cmap = plt.get_cmap('Blues')
+            norm = Normalize(vmin=vmin, vmax=vmax)
+            cmap = plt.get_cmap('Blues')
 
-    # Plot each year/column
-    for col, (run_file, mesh_file, dhdt_file, year) in enumerate(zip(run_files, meshes, dhdt_files, years)):
-        index = row * nCols + col
-        try:
-            m = Dataset(mesh_file, 'r')
+        # Plot panels for each year
+        for i, (arr, ax, year) in enumerate(zip(vdata, axs, years)):
+            if arr is None: continue
+            m = Dataset(ensemble_files[i], 'r')
             xCell = m.variables["xCell"][0] if m.variables["xCell"].ndim > 1 else m.variables["xCell"][:]
             yCell = m.variables["yCell"][0] if m.variables["yCell"].ndim > 1 else m.variables["yCell"][:]
             dcEdge = m.variables["dcEdge"][0] if m.variables["dcEdge"].ndim > 1 else m.variables["dcEdge"][:]
-            cellMask = m.variables["cellMask"][:] if "cellMask" in m.variables else None
+            triang = tri.Triangulation(xCell, yCell)
+            triMask = np.zeros(len(triang.triangles), dtype=bool)
+            maxDist = np.max(dcEdge) * 2.0
+            for t in range(len(triang.triangles)):
+                thisTri = triang.triangles[t, :]
+                if dist(thisTri[0], thisTri[1], xCell, yCell) > maxDist:
+                    triMask[t] = True
+                if dist(thisTri[1], thisTri[2], xCell, yCell) > maxDist:
+                    triMask[t] = True
+                if dist(thisTri[0], thisTri[2], xCell, yCell) > maxDist:
+                    triMask[t] = True
+            triang.set_mask(triMask)
+            h = ax.tripcolor(triang, arr, cmap=cmap, shading='flat', norm=norm)
+            ax.set_title(f"{variable} [{stat}] Year {year}")
+            ax.set_aspect('equal')
+            # Overlay GLs for all runs
+            for gl, name in zip(grounding_lines, run_names):
+                if gl['mask'] is not None:
+                    ax.tricontour(triang, gl['mask'], levels=[0.9999], colors='darkviolet', linestyles='solid', linewidths=1.2, label=f'GL {name}')
             m.close()
-        except Exception as e:
-            print(f"Error reading mesh file {mesh_file}: {e}")
-            continue
+        # Colorbar and legend
+        cbar = fig.colorbar(h, ax=axs, orientation='vertical', fraction=0.025, pad=0.03, label=f"{variable} [{stat}] ({units})")
+        legend_elements = [plt.Line2D([0], [0], color='darkviolet', lw=1.2, label=f'GL {name}') for name in run_names]
+        axs[-1].legend(handles=legend_elements, loc='lower right', fontsize='small')
+        fig.suptitle(f"MALI Ensemble: {variable} [{stat}]")
+        fig.tight_layout()
+        out_png = f"{save_base}_{variable}_{stat}.png"
+        fig.savefig(out_png, dpi=400, bbox_inches='tight')
+        print(f"Saved {out_png}")
 
-        triang = tri.Triangulation(xCell, yCell)
-        triMask = np.zeros(len(triang.triangles), dtype=bool)
-        maxDist = np.max(dcEdge) * 2.0
-        for t in range(len(triang.triangles)):
-            thisTri = triang.triangles[t, :]
-            if dist(thisTri[0], thisTri[1], xCell, yCell) > maxDist:
-                triMask[t] = True
-            if dist(thisTri[1], thisTri[2], xCell, yCell) > maxDist:
-                triMask[t] = True
-            if dist(thisTri[0], thisTri[2], xCell, yCell) > maxDist:
-                triMask[t] = True
-        triang.set_mask(triMask)
-
-        # Read variable
-        if variable == 'dhdt' and dhdt_file and dhdt_file != '':
-            try:
-                f = Dataset(dhdt_file, 'r')
-                arr = f.variables['dhdt'][:]
-                units = f.variables['dhdt'].units if 'units' in f.variables['dhdt'].ncattrs() else 'm/yr'
-                f.close()
-            except Exception as e:
-                print(f"Error reading dhdt file {dhdt_file}: {e}")
-                arr = np.nan * np.ones_like(xCell)
-                units = 'm/yr'
-        else:
-            try:
-                f = Dataset(run_file, 'r')
-                arr = f.variables[variable][:]
-                if variable == 'surfaceSpeed':
-                    arr *= sec_per_year
-                    units = 'm/yr'
-                else:
-                    units = f.variables[variable].units if 'units' in f.variables[variable].ncattrs() else 'unknown'
-                f.close()
-            except Exception as e:
-                print(f"Error reading {variable} from {run_file}: {e}")
-                arr = np.nan * np.ones_like(xCell)
-                units = 'unknown'
-        if arr.ndim == 1:
-            arr = arr.reshape((1, np.shape(arr)[0]))
-
-        h = axs[index].tripcolor(triang, arr[0, :], cmap=cmap, shading='flat', norm=norm)
-        axs[index].set_title(f"{variable} year={year}")
-        axs[index].set_aspect('equal')
-
-    # Add colorbar for this variable
-    Colorbar(ax=cbar_axs[row], mappable=h, orientation='vertical', label=f'{variable} ({units})')
-
-fig.tight_layout()
-if save_base:
-    fig.savefig(f'{save_base}_panel.png', dpi=400, bbox_inches='tight')
-    print(f"Saved {save_base}_panel.png")
-else:
-    plt.show()
+print("All ensemble plots complete.")
