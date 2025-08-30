@@ -4,6 +4,7 @@
 Ensemble snapshot map plotting for MALI.
 Plots min, max, mean, std, range for specified variables and years.
 Overlays grounding lines for all runs in ensemble, with adjustable line thickness.
+For each plotted year, grounding lines are extracted from that same year's data for each run.
 Saves one figure per (variable, stat, year).
 """
 
@@ -17,11 +18,11 @@ from matplotlib.colorbar import Colorbar
 from matplotlib.colors import Normalize, TwoSlopeNorm, LinearSegmentedColormap
 import matplotlib.cm as cm
 
-parser = argparse.ArgumentParser(description="Ensemble map plots for MALI.")
+parser = argparse.ArgumentParser(description="Ensemble map plots for MALI with year-specific grounding lines.")
 parser.add_argument("--ensemble_files", required=True, help="Comma-separated ensemble stats NetCDF files (one per year).")
 parser.add_argument("--years", required=True, help="Comma-separated years.")
 parser.add_argument("--variables", required=True, help="Comma-separated variables.")
-parser.add_argument("--mesh_files", required=True, help="Comma-separated mesh files for GL overlays (one per run, start year).")
+parser.add_argument("--run_dirs", required=True, help="Comma-separated run output directories.")
 parser.add_argument("--run_names", required=True, help="Comma-separated run names (for legend).")
 parser.add_argument("--save_base", required=False, default=None, help="Path to directory for saving figures (if not provided, figures are not saved).")
 parser.add_argument("--gl_linewidth", required=False, default=0.7, type=float, help="Linewidth for grounding lines (default: 0.7)")
@@ -30,14 +31,14 @@ args = parser.parse_args()
 ensemble_files = args.ensemble_files.split(',')
 years = [int(y) for y in args.years.split(',')]
 variables = args.variables.split(',')
-mesh_files = args.mesh_files.split(',')
+run_dirs = args.run_dirs.split(',')
 run_names = args.run_names.split(',')
 save_base = args.save_base
 gl_linewidth = args.gl_linewidth
 
 print(f"Processing {len(ensemble_files)} ensemble files for years: {years}")
 print(f"Variables: {variables}")
-print(f"Using {len(mesh_files)} mesh files for grounding line overlays")
+print(f"Using {len(run_dirs)} run directories for year-specific grounding line overlays")
 print(f"Grounding line linewidth: {gl_linewidth}")
 
 stat_types = ["mean", "min", "max", "range", "std"]
@@ -59,52 +60,65 @@ def create_custom_colormap():
               'Lightsteelblue', 'Royalblue', 'Navy']
     return LinearSegmentedColormap.from_list("custom", colors, N=200)
 
+def load_grounding_lines_for_year(run_dirs, run_names, target_year):
+    """Load grounding line information for a specific year from all runs"""
+    grounding_lines = []
+    gl_colors = cm.tab10(np.linspace(0, 1, len(run_dirs)))  # Generate colors for each run
+    
+    print(f"Loading grounding lines for year {target_year}...")
+    
+    for i, run_dir in enumerate(run_dirs):
+        if not run_dir.strip():
+            continue
+        
+        # Construct the mesh file path for this specific year
+        mesh_file = os.path.join(run_dir, f"output_flux_all_timesteps_{target_year}_tAvg.nc")
+        
+        try:
+            print(f"  Loading mesh file: {mesh_file}")
+            if not os.path.exists(mesh_file):
+                print(f"  WARNING: Mesh file does not exist: {mesh_file}")
+                continue
+                
+            m = Dataset(mesh_file, 'r')
+            
+            # Handle different dimension structures
+            xCell = m.variables["xCell"][0] if m.variables["xCell"].ndim > 1 else m.variables["xCell"][:]
+            yCell = m.variables["yCell"][0] if m.variables["yCell"].ndim > 1 else m.variables["yCell"][:]
+            
+            if "cellMask" in m.variables:
+                cellMask = m.variables["cellMask"][:]
+                if cellMask.ndim > 1:
+                    cellMask = cellMask[0]  # Take first time step
+                gl_mask = (cellMask & groundingLineValue) // groundingLineValue
+                initial_extent_mask = (cellMask & initialExtentValue) // initialExtentValue
+            else:
+                gl_mask = None
+                initial_extent_mask = None
+                print(f"  WARNING: No cellMask found in {mesh_file}")
+            
+            grounding_lines.append({
+                'x': xCell, 
+                'y': yCell, 
+                'gl_mask': gl_mask,
+                'extent_mask': initial_extent_mask,
+                'color': gl_colors[i],
+                'run_name': run_names[i] if i < len(run_names) else f'Run_{i+1}',
+                'year': target_year
+            })
+            m.close()
+            print(f"  Successfully loaded GL for {run_names[i] if i < len(run_names) else f'Run_{i+1}'}")
+            
+        except Exception as e:
+            print(f"  ERROR loading {mesh_file}: {e}")
+            continue
+    
+    print(f"Successfully loaded {len(grounding_lines)} grounding line datasets for year {target_year}")
+    return grounding_lines
+
 # Ensure save_base directory exists if provided
 if save_base is not None and save_base != "":
     os.makedirs(save_base, exist_ok=True)
-
-# Load mesh info and grounding lines for GL overlays
-print("Loading grounding line information...")
-grounding_lines = []
-gl_colors = cm.tab10(np.linspace(0, 1, len(mesh_files)))  # Generate colors for each run
-
-for i, mesh_fn in enumerate(mesh_files):
-    if not mesh_fn.strip():
-        continue
-    try:
-        print(f"Loading mesh file: {mesh_fn}")
-        m = Dataset(mesh_fn, 'r')
-        
-        # Handle different dimension structures
-        xCell = m.variables["xCell"][0] if m.variables["xCell"].ndim > 1 else m.variables["xCell"][:]
-        yCell = m.variables["yCell"][0] if m.variables["yCell"].ndim > 1 else m.variables["yCell"][:]
-        
-        if "cellMask" in m.variables:
-            cellMask = m.variables["cellMask"][:]
-            if cellMask.ndim > 1:
-                cellMask = cellMask[0]  # Take first time step
-            gl_mask = (cellMask & groundingLineValue) // groundingLineValue
-            initial_extent_mask = (cellMask & initialExtentValue) // initialExtentValue
-        else:
-            gl_mask = None
-            initial_extent_mask = None
-            print(f"WARNING: No cellMask found in {mesh_fn}")
-        
-        grounding_lines.append({
-            'x': xCell, 
-            'y': yCell, 
-            'gl_mask': gl_mask,
-            'extent_mask': initial_extent_mask,
-            'color': gl_colors[i],
-            'run_name': run_names[i] if i < len(run_names) else f'Run_{i+1}'
-        })
-        m.close()
-        
-    except Exception as e:
-        print(f"ERROR loading {mesh_fn}: {e}")
-        continue
-
-print(f"Successfully loaded {len(grounding_lines)} grounding line datasets")
 
 # Main plotting loop: one file per variable/stat/year
 for variable in variables:
@@ -187,6 +201,9 @@ for variable in variables:
                 cmap = plt.get_cmap(defaultColors.get(variable, 'viridis'))
             print(f"      Color range: {vmin:.3f} to {vmax:.3f}")
 
+            # REVISED: Load year-specific grounding lines for this year
+            grounding_lines = load_grounding_lines_for_year(run_dirs, run_names, year)
+
             # Setup figure for this year
             fig = plt.figure(figsize=(7, 7))
             ax = fig.add_subplot(111)
@@ -196,7 +213,7 @@ for variable in variables:
             ax.set_xlabel('x (m)')
             ax.set_ylabel('y (m)')
 
-            # Overlay grounding lines for all runs
+            # Overlay grounding lines for all runs FOR THIS SPECIFIC YEAR
             legend_elements = []
             for gl_info in grounding_lines:
                 if gl_info['gl_mask'] is not None:
@@ -216,7 +233,7 @@ for variable in variables:
                                       linestyles='solid',
                                       linewidths=gl_linewidth)
                         legend_elements.append(plt.Line2D([0], [0], color=gl_info['color'],
-                                                          lw=gl_linewidth, label=f"GL {gl_info['run_name']}"))
+                                                          lw=gl_linewidth, label=f"GL {gl_info['run_name']} ({year})"))
                     except Exception as e:
                         print(f"      WARNING: Could not plot grounding line for {gl_info['run_name']}: {e}")
 
