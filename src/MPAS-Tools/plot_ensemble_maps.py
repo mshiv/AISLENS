@@ -6,6 +6,7 @@ Plots min, max, mean, std, range for specified variables at specified years.
 Overlays grounding lines for all runs in ensemble.
 """
 
+import os
 import numpy as np
 from netCDF4 import Dataset
 import argparse
@@ -22,7 +23,7 @@ parser.add_argument("--years", required=True, help="Comma-separated years.")
 parser.add_argument("--variables", required=True, help="Comma-separated variables.")
 parser.add_argument("--mesh_files", required=True, help="Comma-separated mesh files for GL overlays (one per run, start year).")
 parser.add_argument("--run_names", required=True, help="Comma-separated run names (for legend).")
-parser.add_argument("--save_base", required=True, help="Base filename for saving figures.")
+parser.add_argument("--save_base", required=False, default=None, help="Path to directory for saving figures (if not provided, figures are not saved).")
 
 args = parser.parse_args()
 ensemble_files = args.ensemble_files.split(',')
@@ -54,6 +55,10 @@ def create_custom_colormap():
     colors = ['Navajowhite', 'Darkorange', 'Darkred', 'white', 
               'Lightsteelblue', 'Royalblue', 'Navy']
     return LinearSegmentedColormap.from_list("custom", colors, N=200)
+
+# Ensure save_base directory exists if provided
+if save_base is not None and save_base != "":
+    os.makedirs(save_base, exist_ok=True)
 
 # Load mesh info and grounding lines for GL overlays
 print("Loading grounding line information...")
@@ -301,3 +306,14 @@ for variable in variables:
             for gl_info in grounding_lines:
                 legend_elements.append(plt.Line2D([0], [0], color=gl_info['color'], 
                                            lw=1.5, label=f"GL {gl_info['run_name']}"))
+            axs[-1].legend(handles=legend_elements, loc='lower right', fontsize='small')
+
+        fig.tight_layout()
+        # Save the figure if save_base provided
+        if save_base is not None and save_base != "":
+            out_png = os.path.join(save_base, f"ensemble_{variable}_{stat}.png")
+            fig.savefig(out_png, dpi=400, bbox_inches='tight')
+            print(f"Saved {out_png}")
+        plt.close(fig)
+
+print("All ensemble plots complete.")
