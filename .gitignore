@@ -11,6 +11,9 @@
 # exclude data from source control by default
 /data/
 
+# exclude custom HPC job scripts from source control by default
+/src/hpc_jobs/
+
 # exclude scratch space notebooks
 /notebooks/SCRATCH.ipynb
 
