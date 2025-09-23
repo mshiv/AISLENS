@@ -275,19 +275,48 @@ def plot_ice_shelf_comparison(obs_data, pred_params, shelf_name, ax):
     if pred_params is not None:
         ax.legend(fontsize=7, loc='upper right')
 
-def process_ice_shelf(args):
+def process_and_plot_ice_shelf(args):
     """
-    Process a single ice shelf for visualization.
-    Used for parallel processing.
+    Process a single ice shelf for visualization AND create the plot immediately.
+    Used for parallel processing - each worker handles both analysis and plotting.
     """
-    ice_shelf_index, shelf_name, icems, satobs, param_set_dir, config = args
+    ice_shelf_index, shelf_name, icems, satobs, param_set_dir, config, individual_plots_dir, parameter_set_name = args
     try:
         ice_shelf_geom = icems.iloc[ice_shelf_index].geometry
+        
+        # Analyze the ice shelf data
         obs_data = load_ice_shelf_data(ice_shelf_index, icems, satobs, config)
         pred_params = load_predicted_data(shelf_name, ice_shelf_geom, param_set_dir, config)
-        return (shelf_name, obs_data, pred_params)
-    except Exception:
-        return (shelf_name, None, None)
+        
+        # Create plot immediately after analysis
+        fig, ax = plt.subplots(1, 1, figsize=(8, 6))
+        
+        if obs_data is not None:
+            plot_ice_shelf_comparison(obs_data, pred_params, shelf_name, ax)
+            has_data = True
+        else:
+            ax.text(0.5, 0.5, f"{shelf_name}\nNo data", 
+                    transform=ax.transAxes, ha='center', va='center', fontsize=12)
+            ax.set_xlim(0, 1)
+            ax.set_ylim(0, 1)
+            has_data = False
+        
+        # Save plot immediately
+        safe_shelf_name = shelf_name.replace(" ", "_").replace("/", "_")
+        output_file = individual_plots_dir / f"{safe_shelf_name}_{parameter_set_name}.png"
+        plt.savefig(output_file, dpi=150, bbox_inches='tight')
+        
+        # Save high-res version
+        output_file_hires = individual_plots_dir / f"{safe_shelf_name}_{parameter_set_name}_hires.png"
+        plt.savefig(output_file_hires, dpi=300, bbox_inches='tight')
+        
+        plt.close()  # Important: close the figure to free memory
+        
+        return (shelf_name, output_file, has_data)
+        
+    except Exception as e:
+        # Return error info if something goes wrong
+        return (shelf_name, None, False)
 
 def create_draft_dependence_visualization(parameter_set_name, parameter_test_dir=None, output_dir=None, max_shelves=None, start_index=33):
     """
@@ -316,43 +345,25 @@ def create_draft_dependence_visualization(parameter_set_name, parameter_test_dir
         shelf_names = shelf_names[:max_shelves]
 
     n_shelves = len(shelf_names)
-    args_list = [(i + start_index, shelf_name, icems, satobs, parameter_test_dir, config) for i, shelf_name in enumerate(shelf_names)]
+    args_list = [(i + start_index, shelf_name, icems, satobs, parameter_test_dir, config, individual_plots_dir, parameter_set_name) for i, shelf_name in enumerate(shelf_names)]
 
     # Use parallel processing with optimized worker count
     max_workers = min(mp.cpu_count(), 8, n_shelves)  # Don't use more workers than shelves
     print(f"Using {max_workers} parallel workers")
+    print(f"Processing and plotting {n_shelves} ice shelves...")
     
     with ProcessPoolExecutor(max_workers=max_workers) as executor:
-        results = list(executor.map(process_ice_shelf, args_list))
+        results = list(executor.map(process_and_plot_ice_shelf, args_list))
 
-    # Create individual plots for each ice shelf
+    # Count successful processing and collect output files
     processed_count = 0
     output_files = []
     
-    for shelf_name, obs_data, pred_params in results:
-        # Create individual figure for each ice shelf
-        fig, ax = plt.subplots(1, 1, figsize=(8, 6))
-        
-        if obs_data is not None:
-            plot_ice_shelf_comparison(obs_data, pred_params, shelf_name, ax)
+    for shelf_name, output_file, has_data in results:
+        if has_data:
             processed_count += 1
-        else:
-            ax.text(0.5, 0.5, f"{shelf_name}\nNo data", 
-                    transform=ax.transAxes, ha='center', va='center', fontsize=12)
-            ax.set_xlim(0, 1)
-            ax.set_ylim(0, 1)
-        
-        # Save individual plot
-        safe_shelf_name = shelf_name.replace(" ", "_").replace("/", "_")
-        output_file = individual_plots_dir / f"{safe_shelf_name}_{parameter_set_name}.png"
-        plt.savefig(output_file, dpi=150, bbox_inches='tight')
-        
-        # Save high-res version
-        output_file_hires = individual_plots_dir / f"{safe_shelf_name}_{parameter_set_name}_hires.png"
-        plt.savefig(output_file_hires, dpi=300, bbox_inches='tight')
-        
-        plt.close()
-        output_files.append(output_file)
+        if output_file is not None:
+            output_files.append(output_file)
     
     print(f"Processed {processed_count} ice shelves with data out of {len(shelf_names)} total")
     print(f"Individual plots saved to: {individual_plots_dir}")
