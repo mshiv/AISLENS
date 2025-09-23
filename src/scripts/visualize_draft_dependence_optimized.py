@@ -204,8 +204,8 @@ def plot_ice_shelf_comparison(obs_data, pred_params, shelf_name, ax):
         print(f"    DEBUG {shelf_name}: Observed melt range (after conversion) [{plot_melt.min():.6f}, {plot_melt.max():.6f}]")
         
         # Check if we need to convert predicted melt rates to match observed units
-        if melt_units == 'm/yr' and np.abs(pred_melt).max() < 0.01:
-            # If observed data was converted to m/yr but predictions are still in kg/m²/s
+        if melt_units == 'm/yr':
+            # If observed data was converted to m/yr, convert predictions too
             print(f"    DEBUG {shelf_name}: Converting predicted melt from kg/m²/s to m/yr")
             pred_melt = pred_melt * 31536000 / 917
             print(f"    DEBUG {shelf_name}: Predicted melt range (after conversion) [{pred_melt.min():.6f}, {pred_melt.max():.6f}]")
