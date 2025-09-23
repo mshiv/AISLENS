@@ -291,7 +291,7 @@ def process_ice_shelf(args):
 
 def create_draft_dependence_visualization(parameter_set_name, parameter_test_dir=None, output_dir=None, max_shelves=None, start_index=33):
     """
-    Create grid of scatter plots comparing observations and predictions for all ice shelves.
+    Create individual scatter plots for each ice shelf comparing observations and predictions.
     Optimized with parallel processing.
     """
     if parameter_test_dir is None:
@@ -302,6 +302,10 @@ def create_draft_dependence_visualization(parameter_set_name, parameter_test_dir
         output_dir = parameter_test_dir.parent / "visualizations"
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Create subdirectory for individual ice shelf plots
+    individual_plots_dir = output_dir / f"individual_plots_{parameter_set_name}"
+    individual_plots_dir.mkdir(parents=True, exist_ok=True)
 
     satobs = xr.open_dataset(config.FILE_PAOLO23_SATOBS_PREPARED)
     satobs = write_crs(satobs, config.CRS_TARGET)
@@ -312,13 +316,6 @@ def create_draft_dependence_visualization(parameter_set_name, parameter_test_dir
         shelf_names = shelf_names[:max_shelves]
 
     n_shelves = len(shelf_names)
-    n_cols = min(6, n_shelves)
-    n_rows = int(np.ceil(n_shelves / n_cols))
-
-    fig, axes = plt.subplots(n_rows, n_cols, figsize=(n_cols * 3, n_rows * 3))
-    fig.subplots_adjust(hspace=0.4, wspace=0.3)
-    axes = np.array(axes).flatten()
-
     args_list = [(i + start_index, shelf_name, icems, satobs, parameter_test_dir, config) for i, shelf_name in enumerate(shelf_names)]
 
     # Use parallel processing with optimized worker count
@@ -328,33 +325,39 @@ def create_draft_dependence_visualization(parameter_set_name, parameter_test_dir
     with ProcessPoolExecutor(max_workers=max_workers) as executor:
         results = list(executor.map(process_ice_shelf, args_list))
 
-    for i, (shelf_name, obs_data, pred_params) in enumerate(results):
-        ax = axes[i]
+    # Create individual plots for each ice shelf
+    processed_count = 0
+    output_files = []
+    
+    for shelf_name, obs_data, pred_params in results:
+        # Create individual figure for each ice shelf
+        fig, ax = plt.subplots(1, 1, figsize=(8, 6))
+        
         if obs_data is not None:
             plot_ice_shelf_comparison(obs_data, pred_params, shelf_name, ax)
+            processed_count += 1
         else:
-            ax.text(0.5, 0.5, f"{shelf_name}\nNo data", transform=ax.transAxes, ha='center', va='center', fontsize=8)
+            ax.text(0.5, 0.5, f"{shelf_name}\nNo data", 
+                    transform=ax.transAxes, ha='center', va='center', fontsize=12)
             ax.set_xlim(0, 1)
             ax.set_ylim(0, 1)
-
-    for i in range(n_shelves, len(axes)):
-        axes[i].set_visible(False)
-
-    output_file = output_dir / f"draft_dependence_comparison_{parameter_set_name}.png"
-    print(f"Saving plot to: {output_file}")
-    plt.savefig(output_file, dpi=150, bbox_inches='tight')
+        
+        # Save individual plot
+        safe_shelf_name = shelf_name.replace(" ", "_").replace("/", "_")
+        output_file = individual_plots_dir / f"{safe_shelf_name}_{parameter_set_name}.png"
+        plt.savefig(output_file, dpi=150, bbox_inches='tight')
+        
+        # Save high-res version
+        output_file_hires = individual_plots_dir / f"{safe_shelf_name}_{parameter_set_name}_hires.png"
+        plt.savefig(output_file_hires, dpi=300, bbox_inches='tight')
+        
+        plt.close()
+        output_files.append(output_file)
     
-    # Save high-res version  
-    output_file_hires = output_dir / f"draft_dependence_comparison_{parameter_set_name}_hires.png"
-    plt.savefig(output_file_hires, dpi=300, bbox_inches='tight')
-    
-    plt.close()
-    
-    processed_count = sum(1 for _, obs_data, _ in results if obs_data is not None)
     print(f"Processed {processed_count} ice shelves with data out of {len(shelf_names)} total")
-    print(f"Visualization saved to: {output_file}")
+    print(f"Individual plots saved to: {individual_plots_dir}")
     
-    return output_file
+    return output_files
 
 def create_summary_comparison(parameter_test_dir=None, output_dir=None):
     """
