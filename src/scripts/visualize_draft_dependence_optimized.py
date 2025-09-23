@@ -307,8 +307,8 @@ def process_and_plot_ice_shelf(args):
         plt.savefig(output_file, dpi=150, bbox_inches='tight')
         
         # Save high-res version
-        output_file_hires = individual_plots_dir / f"{safe_shelf_name}_{parameter_set_name}_hires.png"
-        plt.savefig(output_file_hires, dpi=300, bbox_inches='tight')
+        #output_file_hires = individual_plots_dir / f"{safe_shelf_name}_{parameter_set_name}_hires.png"
+        #plt.savefig(output_file_hires, dpi=300, bbox_inches='tight')
         
         plt.close()  # Important: close the figure to free memory
         
