@@ -184,12 +184,11 @@ def plot_ice_shelf_comparison(obs_data, pred_params, shelf_name, ax):
         plot_draft = obs_data['draft']
         plot_melt = obs_data['melt']
     
-    # Unit conversion for consistent plotting
-    # Both observed and predicted data are in kg/m²/s (SI units)
-    # Convert both to m/yr for better visualization
-    melt_units = 'm/yr'
-    plot_melt = plot_melt * 31536000 / 917  # Convert from kg/m²/s to m/yr
-    
+    # Keep observed data in original units for now
+    # We'll only convert predicted data to match
+    melt_units = 'kg/m²/s'  # Original units
+    # plot_melt stays as-is (no conversion)
+
     # Plot observed data
     ax.scatter(plot_melt, plot_draft, c='black', s=2, alpha=0.6, label='Observed')
     
@@ -203,10 +202,13 @@ def plot_ice_shelf_comparison(obs_data, pred_params, shelf_name, ax):
         print(f"    DEBUG {shelf_name}: Predicted melt range (raw) [{pred_melt.min():.6f}, {pred_melt.max():.6f}]")
         print(f"    DEBUG {shelf_name}: Observed melt range (after conversion) [{plot_melt.min():.6f}, {plot_melt.max():.6f}]")
         
-        # Convert predicted melt rates to match observed units (both should be in m/yr)
-        print(f"    DEBUG {shelf_name}: Converting predicted melt from kg/m²/s to m/yr")
+        # Convert ONLY predicted melt rates for better visualization
+        # Keep observed data in original kg/m²/s units
+        # Convert predicted data from kg/m²/s to m/yr for comparison
+        print(f"    DEBUG {shelf_name}: Converting ONLY predicted melt from kg/m²/s to m/yr")
         pred_melt = pred_melt * 31536000 / 917
-        print(f"    DEBUG {shelf_name}: Predicted melt range (after conversion) [{pred_melt.min():.6f}, {pred_melt.max():.6f}]")
+        print(f"    DEBUG {shelf_name}: Predicted melt range (after conversion to m/yr) [{pred_melt.min():.6f}, {pred_melt.max():.6f}]")
+        print(f"    DEBUG {shelf_name}: Observed melt range (kept in kg/m²/s) [{plot_melt.min():.6f}, {plot_melt.max():.6f}]")
         
         # Determine colors and calculate metrics vectorized
         is_meaningful = True  # Could add correlation-based logic here
