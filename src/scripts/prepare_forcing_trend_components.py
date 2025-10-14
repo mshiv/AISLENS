@@ -49,8 +49,15 @@ def detrend_forcing_trend_components_ts(forcing_file_path):
     # Detrend each variable in the dataset
     ds = xr.open_dataset(forcing_file_path)#, chunks={config.TIME_DIM: 36})
     ds[config.MALI_FLOATINGBMB_VAR] = (ds[config.MALI_FLOATINGBMB_VAR].isel(Time=0) - ds[config.MALI_FLOATINGBMB_VAR])
-    #ds_ts = ds.mean(dim=config.TIME_DIM)  # Calculate the mean across the time dimension
-    detrended_data = detrend_with_breakpoints_ts(ds[config.MALI_FLOATINGBMB_VAR].mean(dim=config.TIME_DIM),
+    
+    # Fix: Take spatial mean (average over x,y dimensions) to create time series
+    # Get all spatial dimensions (everything except Time)
+    spatial_dims = [dim for dim in ds[config.MALI_FLOATINGBMB_VAR].dims if dim != 'Time']
+    
+    # Create spatially-averaged time series
+    spatial_mean_ts = ds[config.MALI_FLOATINGBMB_VAR].mean(dim=spatial_dims)
+    
+    detrended_data = detrend_with_breakpoints_ts(spatial_mean_ts,
                                                   dim="Time",        # Specify the dimension to detrend
                                                   deg=1,             # Degree of polynomial (e.g., 1 for linear detrending)
                                                   model="rbf",        # Cost model for ruptures
