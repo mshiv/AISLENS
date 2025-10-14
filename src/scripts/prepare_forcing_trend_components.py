@@ -73,4 +73,4 @@ if __name__ == "__main__":
     # Define the path to the forcing file
     forcing_file_path = config.FILE_ISMIP6_SSP585_FORCING
     # Call the detrend function
-    detrend_forcing_trend_components_ts(forcing_file_path)
+    detrend_forcing_trend_components(forcing_file_path)
