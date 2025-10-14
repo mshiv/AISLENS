@@ -58,8 +58,8 @@ class Config:
     FILE_FORCING: Path = DIR_PROCESSED / "sorrm_forcing.nc"
     FILE_FORCING_OG: Path = DIR_FORCINGS / "forcing_realization_OG.nc"
 
-    FILE_ISMIP6_SSP585_FORCING: Path = DIR_MALI / "ISMIP6/SSP585/output/floatingBMB/floatingBasalMassBalApplied_SSP585_Trend_2000-2094.nc"
-    FILE_ISMIP6_SSP126_FORCING: Path = DIR_MALI / "ISMIP6/SSP126/output/floatingBMB/floatingBasalMassBalApplied_SSP126_Trend_2000-2076.nc"
+    FILE_ISMIP6_SSP585_FORCING: Path = DIR_MALI / "ISMIP6/SSP585/output/floatingBMB/floatingBasalMassBalApplied_SSP585_Trend_2015-2300.nc"
+    FILE_ISMIP6_SSP126_FORCING: Path = DIR_MALI / "ISMIP6/SSP126/output/floatingBMB/floatingBasalMassBalApplied_SSP126_Trend_2015-2300.nc"
 
     # Constants
     TIME_DIM: str = "Time"
