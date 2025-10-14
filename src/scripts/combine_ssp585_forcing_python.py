@@ -62,15 +62,18 @@ def combine_ssp585_forcing_xarray(trend_file_path, forcing_file_path, output_fil
     # Add the variables (equivalent to ncbo --op_typ=add)
     print("Adding floatingBasalMassBalAdjustment variables...")
     
-    # Ensure both datasets have the same time coordinate for addition
-    # Align time coordinates - use trend file time coordinates
-    forcing_subset_aligned = forcing_subset.assign_coords(Time=trend_subset.Time)
+    # Create new time coordinate for alignment - use simple integer indices
+    new_time_coord = np.arange(len(trend_subset.Time))
+    
+    # Align both datasets to use the same time coordinate
+    trend_subset_aligned = trend_subset.assign_coords(Time=new_time_coord)
+    forcing_subset_aligned = forcing_subset.assign_coords(Time=new_time_coord)
     
     # Add the variables
     combined_subset = forcing_subset_aligned.copy()
     combined_subset["floatingBasalMassBalAdjustment"] = (
         forcing_subset_aligned["floatingBasalMassBalAdjustment"] + 
-        trend_subset["floatingBasalMassBalAdjustment"]
+        trend_subset_aligned["floatingBasalMassBalAdjustment"]
     )
     
     print("  Variables added successfully")
@@ -82,8 +85,63 @@ def combine_ssp585_forcing_xarray(trend_file_path, forcing_file_path, output_fil
     early_period = forcing_ds.isel(Time=slice(0, 168))  # 0-167 inclusive
     print(f"  Extracted early period: {len(early_period.Time)} timesteps")
     
+    # Create consistent time coordinates for concatenation
+    # Early period: keep original time coordinates (0-167)
+    # Combined period: continue from 168 onwards
+    early_time_coord = np.arange(len(early_period.Time))
+    combined_time_coord = np.arange(len(early_period.Time), len(early_period.Time) + len(combined_subset.Time))
+    
+    # Assign consistent time coordinates
+    early_period_aligned = early_period.assign_coords(Time=early_time_coord)
+    combined_subset_aligned = combined_subset.assign_coords(Time=combined_time_coord)
+    
+    # Ensure both datasets have consistent coordinate attributes
+    # Remove any problematic time coordinate attributes that might cause conflicts
+    for ds in [early_period_aligned, combined_subset_aligned]:
+        if 'Time' in ds.coords:
+            ds.Time.attrs = {}  # Clear all time attributes to avoid conflicts
+            ds.Time.encoding = {}  # Clear encoding as well
+    
     # Concatenate early period with combined period
-    final_ds = xr.concat([early_period, combined_subset], dim="Time")
+    try:
+        final_ds = xr.concat([early_period_aligned, combined_subset_aligned], dim="Time")
+    except Exception as concat_error:
+        print(f"  Warning: Direct concatenation failed ({concat_error}), trying alternative approach...")
+        
+        # Alternative approach: manually combine the data
+        # Create a new dataset structure
+        final_ds = early_period_aligned.copy()
+        
+        # Extend the dataset with combined data
+        for var_name in combined_subset_aligned.data_vars:
+            if var_name in final_ds.data_vars:
+                # Concatenate the variable data manually
+                early_data = final_ds[var_name]
+                combined_data = combined_subset_aligned[var_name]
+                final_data = xr.concat([early_data, combined_data], dim="Time")
+                final_ds[var_name] = final_data
+            else:
+                # Variable only exists in combined data
+                # Create full array with early period filled with appropriate values
+                early_shape = list(early_period_aligned[list(early_period_aligned.data_vars.keys())[0]].shape)
+                combined_shape = list(combined_subset_aligned[var_name].shape)
+                
+                # Create early period data (filled with zeros or NaN as appropriate)
+                early_fill_data = np.zeros(early_shape)
+                early_fill = xr.DataArray(
+                    early_fill_data,
+                    dims=early_period_aligned[list(early_period_aligned.data_vars.keys())[0]].dims,
+                    coords={dim: early_period_aligned.coords[dim] for dim in early_period_aligned[list(early_period_aligned.data_vars.keys())[0]].dims}
+                )
+                
+                # Concatenate with combined data
+                final_data = xr.concat([early_fill, combined_subset_aligned[var_name]], dim="Time")
+                final_ds[var_name] = final_data
+        
+        # Update time coordinate to be continuous
+        final_time_coord = np.arange(len(final_ds.Time))
+        final_ds = final_ds.assign_coords(Time=final_time_coord)
+    
     print(f"  Final file created with concatenated periods")
     
     # Verify final output
