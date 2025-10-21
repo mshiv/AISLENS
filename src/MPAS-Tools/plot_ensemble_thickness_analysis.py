@@ -35,6 +35,9 @@ parser.add_option("--var-name", dest="varName", help="Thickness variable name (d
 parser.add_option("--output-dir", dest="outputDir", help="Output directory for plots", metavar="PATH")
 parser.add_option("-s", "--save", dest="saveFigs", help="Save figures to files", action='store_true', default=False)
 parser.add_option("--dpi", dest="dpi", help="DPI for saved figures (default: 300)", default="300", metavar="N")
+parser.add_option("--file-pattern", dest="filePattern", 
+                  help="File pattern to match (default: output*.nc)", 
+                  default="output*.nc", metavar="PATTERN")
 
 options, args = parser.parse_args()
 
@@ -54,7 +57,7 @@ for exp_name in experiment_names:
     exp_dir = os.path.join(ensemble_base, exp_name)
     
     # Look for output files (adjust pattern as needed for your file naming)
-    output_pattern = os.path.join(exp_dir, "output*.nc")
+    output_pattern = os.path.join(exp_dir, options.filePattern)
     files = sorted(glob.glob(output_pattern))
     
     if not files:
@@ -63,6 +66,20 @@ for exp_name in experiment_names:
     
     # Use the last file or a specific pattern
     experiment_files.append((exp_name, files[-1]))  # Adjust if you need different file selection
+
+    # OPTION 1: If you have specific output file naming pattern
+    # output_pattern = os.path.join(exp_dir, "landice_output*.nc")
+    
+    # OPTION 2: If you have timestamped files
+    # output_pattern = os.path.join(exp_dir, "*_restart.nc")
+    
+    # OPTION 3: If you have a specific output file name
+    # output_file = os.path.join(exp_dir, "output.nc")
+    # if os.path.exists(output_file):
+    #     experiment_files.append((exp_name, output_file))
+    
+    # OPTION 4: If you need a specific time range file
+    # output_pattern = os.path.join(exp_dir, "output.2000-01-01_00.00.00.nc")
 
 if len(experiment_files) != num_experiments:
     print(f"Warning: Only found {len(experiment_files)} of {num_experiments} experiment files")
@@ -346,10 +363,10 @@ if options.saveFigs:
     # Add metadata
     nc_out.ensemble_directory = options.ensembleDir
     nc_out.experiments = ','.join([exp for exp, _ in experiment_files])
-    nc_out.num_experiments = num_experiments
-    nc_out.time_index = time_index
-    nc_out.masking_threshold = threshold
-    
+
+
+
+    nc_out.masking_threshold = threshold    nc_out.time_index = time_index    nc_out.num_experiments = num_experiments    
     nc_out.close()
     print(f"Analysis data saved: {output_nc}")
 
