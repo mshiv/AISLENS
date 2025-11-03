@@ -8,6 +8,7 @@ Usage:
     python combine_ssp585_forcing_python.py --ensemble-dir /path/to/ensembles --trend-file trend.nc
 """
 
+from html import parser
 import xarray as xr
 import numpy as np
 import argparse
@@ -62,17 +63,17 @@ def combine_ssp585_forcing_xarray(trend_file_path, forcing_file_path, output_fil
     # Add the variables (equivalent to ncbo --op_typ=add)
     print("Adding floatingBasalMassBalAdjustment variables...")
     
-    # Create new time coordinate for alignment - use simple integer indices
-    new_time_coord = np.arange(len(trend_subset.Time))
+    # Preserve the original forcing file's time coordinate for the overlapping period
+    # Use the forcing file's time coordinate (168-3599) for alignment
+    forcing_time_coord = forcing_subset.Time
     
-    # Align both datasets to use the same time coordinate
-    trend_subset_aligned = trend_subset.assign_coords(Time=new_time_coord)
-    forcing_subset_aligned = forcing_subset.assign_coords(Time=new_time_coord)
+    # Align trend data to use the forcing file's time coordinate
+    trend_subset_aligned = trend_subset.assign_coords(Time=forcing_time_coord)
     
-    # Add the variables
-    combined_subset = forcing_subset_aligned.copy()
+    # Add the variables (forcing_subset already has the correct time coordinate)
+    combined_subset = forcing_subset.copy()
     combined_subset["floatingBasalMassBalAdjustment"] = (
-        forcing_subset_aligned["floatingBasalMassBalAdjustment"] + 
+        forcing_subset["floatingBasalMassBalAdjustment"] + 
         trend_subset_aligned["floatingBasalMassBalAdjustment"]
     )
     
@@ -85,64 +86,27 @@ def combine_ssp585_forcing_xarray(trend_file_path, forcing_file_path, output_fil
     early_period = forcing_ds.isel(Time=slice(0, 168))  # 0-167 inclusive
     print(f"  Extracted early period: {len(early_period.Time)} timesteps")
     
-    # Create consistent time coordinates for concatenation
-    # Early period: keep original time coordinates (0-167)
-    # Combined period: continue from 168 onwards
-    early_time_coord = np.arange(len(early_period.Time))
-    combined_time_coord = np.arange(len(early_period.Time), len(early_period.Time) + len(combined_subset.Time))
-    
-    # Assign consistent time coordinates
-    early_period_aligned = early_period.assign_coords(Time=early_time_coord)
-    combined_subset_aligned = combined_subset.assign_coords(Time=combined_time_coord)
-    
-    # Ensure both datasets have consistent coordinate attributes
-    # Remove any problematic time coordinate attributes that might cause conflicts
-    for ds in [early_period_aligned, combined_subset_aligned]:
-        if 'Time' in ds.coords:
-            ds.Time.attrs = {}  # Clear all time attributes to avoid conflicts
-            ds.Time.encoding = {}  # Clear encoding as well
-    
     # Concatenate early period with combined period
+    # Both datasets now have their original time coordinates, so concatenation should work
     try:
-        final_ds = xr.concat([early_period_aligned, combined_subset_aligned], dim="Time")
+        final_ds = xr.concat([early_period, combined_subset], dim="Time")
+        print(f"  Final file created with concatenated periods")
     except Exception as concat_error:
-        print(f"  Warning: Direct concatenation failed ({concat_error}), trying alternative approach...")
+        print(f"  Warning: Direct concatenation failed ({concat_error}), trying fallback approach...")
         
-        # Alternative approach: manually combine the data
-        # Create a new dataset structure
-        final_ds = early_period_aligned.copy()
+        # Fallback: Create a copy of the full forcing file and replace the overlapping period
+        final_ds = forcing_ds.copy()
         
-        # Extend the dataset with combined data
-        for var_name in combined_subset_aligned.data_vars:
+        # Replace the overlapping period data (timesteps 168-3599) with combined data
+        for var_name in combined_subset.data_vars:
             if var_name in final_ds.data_vars:
-                # Concatenate the variable data manually
-                early_data = final_ds[var_name]
-                combined_data = combined_subset_aligned[var_name]
-                final_data = xr.concat([early_data, combined_data], dim="Time")
-                final_ds[var_name] = final_data
+                # Replace the overlapping time slice with combined data
+                final_ds[var_name].loc[dict(Time=slice(168, 3599))] = combined_subset[var_name]
             else:
-                # Variable only exists in combined data
-                # Create full array with early period filled with appropriate values
-                early_shape = list(early_period_aligned[list(early_period_aligned.data_vars.keys())[0]].shape)
-                combined_shape = list(combined_subset_aligned[var_name].shape)
-                
-                # Create early period data (filled with zeros or NaN as appropriate)
-                early_fill_data = np.zeros(early_shape)
-                early_fill = xr.DataArray(
-                    early_fill_data,
-                    dims=early_period_aligned[list(early_period_aligned.data_vars.keys())[0]].dims,
-                    coords={dim: early_period_aligned.coords[dim] for dim in early_period_aligned[list(early_period_aligned.data_vars.keys())[0]].dims}
-                )
-                
-                # Concatenate with combined data
-                final_data = xr.concat([early_fill, combined_subset_aligned[var_name]], dim="Time")
-                final_ds[var_name] = final_data
+                # Variable doesn't exist in original forcing - this shouldn't happen
+                print(f"  Warning: Variable {var_name} not found in original forcing file")
         
-        # Update time coordinate to be continuous
-        final_time_coord = np.arange(len(final_ds.Time))
-        final_ds = final_ds.assign_coords(Time=final_time_coord)
-    
-    print(f"  Final file created with concatenated periods")
+        print(f"  Final file created using fallback approach")
     
     # Verify final output
     print("Verifying final output...")
@@ -161,6 +125,10 @@ def combine_ssp585_forcing_xarray(trend_file_path, forcing_file_path, output_fil
         print("  ✗ Error: floatingBasalMassBalAdjustment variable not found in output")
         raise ValueError("Output verification failed - variable missing")
     
+    # Verify time coordinate format is preserved
+    print(f"  Time coordinate type: {type(final_ds.Time.values[0])}")
+    print(f"  Time coordinate range: {final_ds.Time.values[0]} to {final_ds.Time.values[-1]}")
+    
     # Save to output file
     print(f"Saving to: {output_file_path}")
     final_ds.to_netcdf(output_file_path)
@@ -171,6 +139,7 @@ def combine_ssp585_forcing_xarray(trend_file_path, forcing_file_path, output_fil
     print("✓ Time alignment: Trend 2015-2300 added to Forcing 2015-2300 period")
     print(f"✓ Output file: {output_file_path}")
     print(f"✓ Final Time dimension: {final_time_size} timesteps")
+    print("✓ Original time coordinate format preserved")
     print()
     print("Time period breakdown:")
     print("  Years 2000-2014 (months 0-167):   Original forcing values only")
@@ -284,6 +253,37 @@ def main():
                         default=["SSP585-EM1", "SSP585-EM2", "SSP585-EM4", "SSP585-EM6", "SSP585-EM8"],
                         help='List of ensemble member names to process')
     
+    args = parser.parse_args()
+    
+    # Validate arguments
+    if not Path(args.trend_file).exists():
+        raise FileNotFoundError(f"Trend file not found: {args.trend_file}")
+    
+    if args.ensemble_dir:
+        # Multi-ensemble processing
+        if not Path(args.ensemble_dir).exists():
+            raise FileNotFoundError(f"Ensemble directory not found: {args.ensemble_dir}")
+        
+        success = process_all_ensembles(args.ensemble_dir, args.trend_file, args.ensemble_members)
+        exit(0 if success else 1)
+        
+    elif args.forcing_file and args.output_file:
+        # Single file processing
+        if not Path(args.forcing_file).exists():
+            raise FileNotFoundError(f"Forcing file not found: {args.forcing_file}")
+        
+        combine_ssp585_forcing_xarray(args.trend_file, args.forcing_file, args.output_file)
+        
+    else:
+        print("Error: Must specify either:")
+        print("  1. --forcing-file and --output-file for single file processing, OR")
+        print("  2. --ensemble-dir for multi-ensemble processing")
+        parser.print_help()
+        exit(1)
+
+if __name__ == "__main__":
+    main()
+    help='List of ensemble member names to process')
     args = parser.parse_args()
     
     # Validate arguments
