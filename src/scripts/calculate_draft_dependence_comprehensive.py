@@ -76,7 +76,7 @@ def calculate_draft_dependence_comprehensive(icems, satobs, config,
         print(f"  Index {actual_index}: {name}")
 
     if len(icems) <= 40:
-        print(f"⚠️  WARNING: icems only has {len(icems)} rows, so only {max(0, len(icems) - 33)} ice shelves will be processed")
+        print(f" WARNING: icems only has {len(icems)} rows, so only {max(0, len(icems) - 33)} ice shelves will be processed")
     else:
         expected_count = len(icems) - 33
         print(f"Expected to process ~{expected_count} ice shelves (from index 33 to {len(icems)-1})")
@@ -267,7 +267,7 @@ def calculate_draft_dependence_comprehensive(icems, satobs, config,
             print(f"  ... and {len(error_details)-5} more errors")
 
     if processed_count == 0:
-        print(f"\n⚠️  WARNING: No ice shelves were processed successfully!")
+        print(f"\n WARNING: No ice shelves were processed successfully!")
         print(f"   This suggests a systematic issue. Common causes:")
         print(f"   1. Missing dependencies (ruptures library)")
         print(f"   2. Data format/coordinate issues")
