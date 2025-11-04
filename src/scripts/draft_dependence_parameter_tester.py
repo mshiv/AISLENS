@@ -13,15 +13,20 @@ Author: Generated for AISLENS project
 Date: August 2025
 """
 
-from aislens.config import config
-from aislens.utils import write_crs, merge_catchment_data
-import xarray as xr
-import geopandas as gpd
-import numpy as np
+import sys
 from pathlib import Path
 import json
 from datetime import datetime
-from aislens.dataprep import dedraft_catchment_comprehensive
+import numpy as np
+import xarray as xr
+import geopandas as gpd
+
+from aislens.config import config
+from aislens.utils import write_crs
+
+# Import the main calculation function from the scripts directory
+sys.path.insert(0, str(Path(__file__).parent))
+from calculate_draft_dependence_comprehensive import calculate_draft_dependence_comprehensive
 
 
 def define_parameter_sets():
@@ -247,7 +252,7 @@ def main():
     
     print("Loading ice shelf masks...")
     icems = gpd.read_file(config.FILE_ICESHELFMASKS)
-    icems = icems.to_crs({'init': config.CRS_TARGET})
+    icems = icems.to_crs(config.CRS_TARGET)
     
     # Define parameter sets to test
     parameter_sets = define_parameter_sets()

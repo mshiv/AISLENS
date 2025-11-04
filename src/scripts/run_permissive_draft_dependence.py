@@ -18,10 +18,12 @@ from pathlib import Path
 import geopandas as gpd
 import xarray as xr
 
-# Add src to path
-sys.path.append(str(Path(__file__).parent.parent))
-from aislens.config import load_config
-from scripts.calculate_draft_dependence_comprehensive import calculate_draft_dependence_comprehensive
+# Add parent directory to path to import calculate_draft_dependence_comprehensive
+sys.path.insert(0, str(Path(__file__).parent))
+from calculate_draft_dependence_comprehensive import calculate_draft_dependence_comprehensive
+
+# Import config (already instantiated)
+from aislens.config import config
 
 # Parameter sets with increasing permissiveness
 PARAMETER_SETS = {
@@ -133,17 +135,15 @@ def main():
         if key != 'description':
             print(f"  {key}: {value}")
     
-    # Load configuration and data
-    print("\nLoading configuration and data...")
-    config = load_config()
-    
     # Load ice shelf masks
+    print("\nLoading ice shelf masks...")
     icems = gpd.read_file(config.FILE_ICESHELFMASKS)
-    icems = icems.to_crs({'init': config.CRS_TARGET})
+    icems = icems.to_crs(config.CRS_TARGET)
     print(f"Loaded {len(icems)} ice shelf masks")
     
     # Load satellite observations
-    satobs = xr.open_dataset(config.FILE_SATOBS)
+    print("Loading satellite observations...")
+    satobs = xr.open_dataset(config.FILE_PAOLO23_SATOBS_PREPARED)
     print(f"Loaded satellite observations: {list(satobs.data_vars)}")
     
     # Run analysis with selected parameters

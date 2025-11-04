@@ -649,7 +649,7 @@ def main():
         parameter_test_dir=args.parameter_test_dir,
         output_dir=args.output_dir,
         max_shelves=args.max_shelves,
-        start_index=args.stapyrt_index
+        start_index=args.start_index
     )
     
     # Create summary comparison if requested
