@@ -7,10 +7,8 @@ analysis without modifying the original code. It creates multiple output directo
 with different parameter sets so you can compare results.
 
 Usage:
-    python draft_dependence_parameter_tester.py
+    python draft_dependence_parameter_tester.py [--parameter_sets SET1 SET2 ...] [--output_dir PATH]
 
-Author: Generated for AISLENS project
-Date: August 2025
 """
 
 import sys
@@ -20,6 +18,9 @@ from datetime import datetime
 import numpy as np
 import xarray as xr
 import geopandas as gpd
+import argparse
+import logging
+import traceback
 
 from aislens.config import config
 from aislens.utils import write_crs
@@ -27,6 +28,46 @@ from aislens.utils import write_crs
 # Import the main calculation function from the scripts directory
 sys.path.insert(0, str(Path(__file__).parent))
 from calculate_draft_dependence_comprehensive import calculate_draft_dependence_comprehensive
+
+# ===== LOGGING CONFIGURATION =====
+logger = logging.getLogger(__name__)
+
+def setup_logging(output_dir, verbose=False):
+    """
+    Configure logging for the parameter testing framework.
+    
+    Args:
+        output_dir: Directory to save log file
+        verbose: If True, set logging level to DEBUG
+    """
+    log_level = logging.DEBUG if verbose else logging.INFO
+    
+    # Create formatter
+    formatter = logging.Formatter(
+        '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+    
+    # File handler
+    log_file = Path(output_dir) / f'parameter_testing_{datetime.now().strftime("%Y%m%d_%H%M%S")}.log'
+    log_file.parent.mkdir(parents=True, exist_ok=True)
+    
+    file_handler = logging.FileHandler(log_file)
+    file_handler.setLevel(log_level)
+    file_handler.setFormatter(formatter)
+    
+    # Console handler
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(log_level)
+    console_handler.setFormatter(formatter)
+    
+    # Configure logger
+    logger.setLevel(log_level)
+    logger.addHandler(file_handler)
+    logger.addHandler(console_handler)
+    
+    logger.info(f"Logging initialized. Log file: {log_file}")
+    return log_file
 
 
 def define_parameter_sets():
@@ -135,6 +176,9 @@ def run_parameter_tests(icems, satobs, config, parameter_sets, output_base_dir=N
         config: Configuration object
         parameter_sets: Dictionary of parameter combinations to test
         output_base_dir: Base directory for outputs (optional)
+    
+    Returns:
+        Dictionary with results summary for each parameter set
     """
     
     if output_base_dir is None:
@@ -143,19 +187,23 @@ def run_parameter_tests(icems, satobs, config, parameter_sets, output_base_dir=N
     output_base_dir = Path(output_base_dir)
     output_base_dir.mkdir(parents=True, exist_ok=True)
     
+    logger.info(f"Output directory: {output_base_dir}")
+    
     # Save parameter sets for reference
     param_file = output_base_dir / "parameter_sets.json"
     with open(param_file, 'w') as f:
         json.dump(parameter_sets, f, indent=2, default=str)
-    print(f"Parameter sets saved to: {param_file}")
+    logger.info(f"Parameter sets saved to: {param_file}")
     
     results_summary = {}
+    successful_sets = 0
+    failed_sets = 0
     
     for set_name, params in parameter_sets.items():
-        print(f"\n{'='*60}")
-        print(f"TESTING PARAMETER SET: {set_name}")
-        print(f"Description: {params['description']}")
-        print(f"{'='*60}")
+        logger.info("="*60)
+        logger.info(f"TESTING PARAMETER SET: {set_name}")
+        logger.info(f"Description: {params['description']}")
+        logger.info("="*60)
         
         # Create output directory for this parameter set
         set_output_dir = output_base_dir / set_name
@@ -172,6 +220,8 @@ def run_parameter_tests(icems, satobs, config, parameter_sets, output_base_dir=N
         with open(params_file, 'w') as f:
             json.dump(run_info, f, indent=2, default=str)
         
+        logger.debug(f"Parameters saved to: {params_file}")
+        
         try:
             # Temporarily modify config to save to this parameter set's directory
             original_dir = config.DIR_ICESHELF_DEDRAFT_SATOBS
@@ -179,6 +229,8 @@ def run_parameter_tests(icems, satobs, config, parameter_sets, output_base_dir=N
             
             # Extract parameters (remove description as it's not a function parameter)
             function_params = {k: v for k, v in params.items() if k != 'description'}
+            
+            logger.info(f"Running analysis with parameters: {function_params}")
             
             # Run analysis with this parameter set
             all_results, all_draft_params = calculate_draft_dependence_comprehensive(
@@ -202,73 +254,185 @@ def run_parameter_tests(icems, satobs, config, parameter_sets, output_base_dir=N
                 'status': 'completed'
             }
             
-            print(f"✓ Completed {set_name}: {meaningful_count}/{total_count} meaningful relationships")
+            logger.info(f"✓ Completed {set_name}: {meaningful_count}/{total_count} meaningful relationships")
+            logger.info(f"  Linear parameterizations: {results_summary[set_name]['linear_param_count']}")
+            logger.info(f"  Constant parameterizations: {results_summary[set_name]['constant_param_count']}")
+            successful_sets += 1
+            
+        except FileNotFoundError as e:
+            logger.error(f"✗ File not found in parameter set {set_name}: {e}")
+            results_summary[set_name] = {
+                'status': 'failed',
+                'error': f"File not found: {e}",
+                'output_directory': str(set_output_dir)
+            }
+            config.DIR_ICESHELF_DEDRAFT_SATOBS = original_dir
+            failed_sets += 1
+            
+        except ValueError as e:
+            logger.error(f"✗ Invalid value in parameter set {set_name}: {e}")
+            results_summary[set_name] = {
+                'status': 'failed',
+                'error': f"Invalid value: {e}",
+                'output_directory': str(set_output_dir)
+            }
+            config.DIR_ICESHELF_DEDRAFT_SATOBS = original_dir
+            failed_sets += 1
             
         except Exception as e:
-            print(f"✗ Error in parameter set {set_name}: {e}")
+            logger.error(f"✗ Error in parameter set {set_name}: {e}")
+            logger.debug(traceback.format_exc())
             results_summary[set_name] = {
                 'status': 'failed',
                 'error': str(e),
                 'output_directory': str(set_output_dir)
             }
-            
-            # Restore original config in case of error
             config.DIR_ICESHELF_DEDRAFT_SATOBS = original_dir
+            failed_sets += 1
     
     # Save results summary
     summary_file = output_base_dir / "results_summary.json"
     with open(summary_file, 'w') as f:
         json.dump(results_summary, f, indent=2, default=str)
     
-    # Print final summary
-    print(f"\n{'='*60}")
-    print("PARAMETER TESTING SUMMARY")
-    print(f"{'='*60}")
+    logger.info("="*60)
+    logger.info("PARAMETER TESTING SUMMARY")
+    logger.info("="*60)
+    logger.info(f"Total parameter sets: {len(parameter_sets)}")
+    logger.info(f"Successful: {successful_sets}")
+    logger.info(f"Failed: {failed_sets}")
+    logger.info("")
     
     for set_name, summary in results_summary.items():
         if summary['status'] == 'completed':
-            print(f"{set_name:20s}: {summary['meaningful_shelves']:3d}/{summary['total_shelves']:3d} meaningful "
+            logger.info(f"{set_name:20s}: {summary['meaningful_shelves']:3d}/{summary['total_shelves']:3d} meaningful "
                   f"({summary['meaningful_percentage']:5.1f}%), "
                   f"linear: {summary['linear_param_count']:3d}, "
                   f"constant: {summary['constant_param_count']:3d}")
         else:
-            print(f"{set_name:20s}: FAILED - {summary['error']}")
+            logger.error(f"{set_name:20s}: FAILED - {summary['error']}")
     
-    print(f"\nResults saved to: {output_base_dir}")
-    print(f"Summary file: {summary_file}")
+    logger.info(f"\nResults saved to: {output_base_dir}")
+    logger.info(f"Summary file: {summary_file}")
     
     return results_summary
 
 def main():
-    """Main function to run parameter testing."""
+    """Main function with command line interface."""
     
-    print("DRAFT DEPENDENCE PARAMETER TESTING FRAMEWORK")
-    print("=" * 50)
+    parser = argparse.ArgumentParser(
+        description='Parameter testing framework for draft dependence analysis',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Test all parameter sets
+  python draft_dependence_parameter_tester.py
+  
+  # Test only specific parameter sets
+  python draft_dependence_parameter_tester.py --parameter_sets permissive very_permissive
+  
+  # Custom output directory with verbose logging
+  python draft_dependence_parameter_tester.py --output_dir /path/to/output --verbose
+  
+  # Dry run to see parameter sets without running analysis
+  python draft_dependence_parameter_tester.py --dry_run
+        """
+    )
+    parser.add_argument('--parameter_sets', nargs='+', default=None,
+                        help='Specific parameter set names to test (default: test all)')
+    parser.add_argument('--output_dir', type=str, default=None,
+                        help='Base output directory for parameter testing results')
+    parser.add_argument('--dry_run', action='store_true',
+                        help='Show parameter sets without running analysis')
+    parser.add_argument('--verbose', '-v', action='store_true',
+                        help='Enable verbose debug logging')
     
-    # Load data
-    print("Loading satellite observation data...")
-    satobs = xr.open_dataset(config.FILE_PAOLO23_SATOBS_PREPARED)
-    satobs = write_crs(satobs, config.CRS_TARGET)
+    args = parser.parse_args()
     
-    print("Loading ice shelf masks...")
-    icems = gpd.read_file(config.FILE_ICESHELFMASKS)
-    icems = icems.to_crs(config.CRS_TARGET)
+    # Determine output directory
+    if args.output_dir:
+        output_dir = Path(args.output_dir)
+    else:
+        output_dir = config.DIR_ICESHELF_DEDRAFT_SATOBS / "parameter_tests"
+    
+    # Setup logging
+    log_file = setup_logging(output_dir, verbose=args.verbose)
+    
+    logger.info("="*80)
+    logger.info("DRAFT DEPENDENCE PARAMETER TESTING FRAMEWORK")
+    logger.info("="*80)
     
     # Define parameter sets to test
-    parameter_sets = define_parameter_sets()
+    all_parameter_sets = define_parameter_sets()
     
-    print(f"\nWill test {len(parameter_sets)} parameter combinations:")
+    # Filter parameter sets if specific ones requested
+    if args.parameter_sets:
+        logger.info(f"Filtering to requested parameter sets: {args.parameter_sets}")
+        parameter_sets = {name: params for name, params in all_parameter_sets.items() 
+                         if name in args.parameter_sets}
+        
+        # Check for invalid names
+        invalid_names = set(args.parameter_sets) - set(all_parameter_sets.keys())
+        if invalid_names:
+            logger.error(f"Invalid parameter set names: {invalid_names}")
+            logger.error(f"Available sets: {list(all_parameter_sets.keys())}")
+            sys.exit(1)
+    else:
+        parameter_sets = all_parameter_sets
+    
+    logger.info(f"\nWill test {len(parameter_sets)} parameter combination(s):")
     for name, params in parameter_sets.items():
-        print(f"  {name}: {params['description']}")
+        logger.info(f"  {name}: {params['description']}")
+    
+    # Dry run mode - just show parameter sets and exit
+    if args.dry_run:
+        logger.info("\n[DRY RUN MODE] - Parameter sets defined:")
+        for name, params in parameter_sets.items():
+            logger.info(f"\n{name}:")
+            for key, value in params.items():
+                if key != 'description':
+                    logger.info(f"  {key}: {value}")
+        logger.info("\nDry run complete. No analysis was performed.")
+        return
+    
+    # Load data
+    try:
+        logger.info("\nLoading satellite observation data...")
+        satobs = xr.open_dataset(config.FILE_PAOLO23_SATOBS_PREPARED)
+        satobs = write_crs(satobs, config.CRS_TARGET)
+        logger.info(f"Loaded satellite data with shape: {satobs.dims}")
+        
+        logger.info("Loading ice shelf masks...")
+        icems = gpd.read_file(config.FILE_ICESHELFMASKS)
+        icems = icems.to_crs(config.CRS_TARGET)
+        logger.info(f"Loaded {len(icems)} ice shelf masks")
+        
+    except FileNotFoundError as e:
+        logger.error(f"Required data file not found: {e}")
+        logger.error("Please ensure all input files are available")
+        sys.exit(1)
+    except Exception as e:
+        logger.error(f"Error loading data: {e}")
+        traceback.print_exc()
+        sys.exit(1)
     
     # Run parameter tests
-    results_summary = run_parameter_tests(icems, satobs, config, parameter_sets)
-    
-    print("\nParameter testing complete!")
-    print("Next steps:")
-    print("1. Review the results_summary.json file")
-    print("2. Use the visualization script to compare outputs")
-    print("3. Choose the parameter set that gives you the desired results")
+    try:
+        results_summary = run_parameter_tests(icems, satobs, config, parameter_sets, output_dir)
+        
+        logger.info("\n" + "="*80)
+        logger.info("Parameter testing complete!")
+        logger.info("="*80)
+        logger.info("\nNext steps:")
+        logger.info("1. Review the results_summary.json file")
+        logger.info("2. Use visualize_draft_dependence.py to compare outputs:")
+        logger.info(f"   python visualize_draft_dependence.py --parameter_set <set_name>")
+        logger.info("3. Choose the parameter set that gives you the desired results")
+        
+    except Exception as e:
+        logger.error(f"Parameter testing failed: {e}")
+        traceback.print_exc()
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()

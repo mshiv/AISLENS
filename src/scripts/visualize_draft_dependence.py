@@ -6,26 +6,37 @@ Creates scatter plots showing observed melt rates vs draft depth for each ice sh
 along with the predicted melt rates from the draft dependence parameterization.
 Displays all ice shelves in a grid layout for easy comparison.
 
-Usage:
-    python visualize_draft_dependence.py --parameter_set original
-    python visualize_draft_dependence.py --parameter_set permissive --output_dir /path/to/output
+This script validates draft dependence parameterizations by visualizing how well
+the predicted melt-draft relationships match satellite observations.
 
-Author: Generated for AISLENS project  
-Date: August 2025
+Prerequisites:
+- Draft dependence parameters must be computed (see calculate_draft_dependence_comprehensive.py)
+- Satellite observation data must be prepared (see prepare_satobs.py)
+
+Usage:
+    python visualize_draft_dependence.py --parameter_set comprehensive
+    python visualize_draft_dependence.py --parameter_set permissive --max_shelves 12
+    python visualize_draft_dependence.py --parameter_set comprehensive --output_dir /path/to/output
+
 """
 
 import argparse
 import json
+import logging
+import sys
+from datetime import datetime
+from pathlib import Path
+import traceback
+import warnings
+
 import numpy as np
 import matplotlib.pyplot as plt
-import matplotlib.patches as patches
 import xarray as xr
 import geopandas as gpd
-from pathlib import Path
-import warnings
+
 warnings.filterwarnings('ignore')
 
-# Import your AISLENS modules
+# Import AISLENS modules
 from aislens.config import config
 from aislens.utils import write_crs
 
@@ -35,7 +46,20 @@ try:
     SCIPY_AVAILABLE = True
 except ImportError:
     SCIPY_AVAILABLE = False
-    print("Warning: scipy not available, using mean instead of mode for parameter extraction")
+    warnings.warn("scipy not available, using mean instead of mode for parameter extraction")
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler(Path(config.DIR_PROCESSED) / 'visualize_draft_dependence.log'),
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+
+logger = logging.getLogger(__name__)
+
 
 def load_ice_shelf_data(ice_shelf_index, icems, satobs, config):
     """
@@ -49,6 +73,9 @@ def load_ice_shelf_data(ice_shelf_index, icems, satobs, config):
         
     Returns:
         dict with 'draft', 'melt', 'shelf_name' keys, or None if no data
+        
+    Raises:
+        ValueError: If required variables not found in dataset
     """
     try:
         # Get ice shelf geometry and name
@@ -56,7 +83,7 @@ def load_ice_shelf_data(ice_shelf_index, icems, satobs, config):
         shelf_name = icems.iloc[ice_shelf_index].name
         
         if ice_shelf_geom is None or ice_shelf_geom.is_empty:
-            print(f"  {shelf_name}: Empty geometry")
+            logger.debug(f"  {shelf_name}: Empty geometry")
             return None
             
         # Clip satellite data to ice shelf region
@@ -66,8 +93,13 @@ def load_ice_shelf_data(ice_shelf_index, icems, satobs, config):
         draft_var = config.SATOBS_DRAFT_VAR
         flux_var = config.SATOBS_FLUX_VAR
         
-        print(f"  {shelf_name}: Looking for variables '{draft_var}' and '{flux_var}'")
-        print(f"  Available variables: {list(satobs_clipped.data_vars.keys())}")
+        logger.debug(f"  {shelf_name}: Looking for variables '{draft_var}' and '{flux_var}'")
+        
+        # Validate variables exist
+        if draft_var not in satobs_clipped:
+            raise ValueError(f"Draft variable '{draft_var}' not found in dataset")
+        if flux_var not in satobs_clipped:
+            raise ValueError(f"Flux variable '{flux_var}' not found in dataset")
         
         # Get draft data (take time mean if time dimension exists)
         if config.TIME_DIM in satobs_clipped[draft_var].dims:
@@ -85,17 +117,17 @@ def load_ice_shelf_data(ice_shelf_index, icems, satobs, config):
         draft_flat = draft_data.values.flatten()
         melt_flat = melt_data.values.flatten()
         
-        print(f"  {shelf_name}: Raw data shapes - draft: {draft_flat.shape}, melt: {melt_flat.shape}")
-        print(f"  {shelf_name}: Draft range: [{np.nanmin(draft_flat):.2f}, {np.nanmax(draft_flat):.2f}]")
-        print(f"  {shelf_name}: Melt range: [{np.nanmin(melt_flat):.2e}, {np.nanmax(melt_flat):.2e}]")
+        logger.debug(f"  {shelf_name}: Raw data shapes - draft: {draft_flat.shape}, melt: {melt_flat.shape}")
+        logger.debug(f"  {shelf_name}: Draft range: [{np.nanmin(draft_flat):.2f}, {np.nanmax(draft_flat):.2f}]")
+        logger.debug(f"  {shelf_name}: Melt range: [{np.nanmin(melt_flat):.2e}, {np.nanmax(melt_flat):.2e}]")
         
         # Create mask for valid data points
         valid_mask = ~np.isnan(draft_flat) & ~np.isnan(melt_flat) & (draft_flat > 0)
         
-        print(f"  {shelf_name}: Valid points: {valid_mask.sum()} out of {len(valid_mask)}")
+        logger.debug(f"  {shelf_name}: Valid points: {valid_mask.sum()} out of {len(valid_mask)}")
         
         if valid_mask.sum() == 0:
-            print(f"  {shelf_name}: No valid data points found")
+            logger.debug(f"  {shelf_name}: No valid data points found")
             return None
             
         return {
@@ -105,20 +137,29 @@ def load_ice_shelf_data(ice_shelf_index, icems, satobs, config):
         }
         
     except Exception as e:
-        print(f"Warning: Could not load data for ice shelf {ice_shelf_index}: {e}")
+        logger.warning(f"Could not load data for ice shelf {ice_shelf_index}: {e}")
         return None
 
 def load_predicted_data(shelf_name, ice_shelf_geom, parameter_set_dir, config):
     """
     Load predicted melt rates for an ice shelf from merged parameter grid files.
-    Simplified version with better error handling and debugging.
+    
+    Args:
+        shelf_name: Name of ice shelf
+        ice_shelf_geom: Geometry of ice shelf
+        parameter_set_dir: Directory containing parameter files
+        config: Configuration object
+        
+    Returns:
+        dict: Parameter dictionary with keys: minDraft, constantValue, paramType, alpha0, alpha1
+        None: If parameters cannot be loaded
     """
     try:
         # Use the combined parameter file instead of individual files
         combined_file = parameter_set_dir / "ruptures_draftDepenBasalMelt_parameters_filled.nc"
         
         if not combined_file.exists():
-            print(f"Warning: Combined parameter file not found: {combined_file}")
+            logger.warning(f"Combined parameter file not found: {combined_file}")
             return None
             
         # Load the combined dataset
@@ -153,11 +194,11 @@ def load_predicted_data(shelf_name, ice_shelf_geom, parameter_set_dir, config):
                 else:
                     params[param_name] = 0.0
                     
-            print(f"  Extracted parameters for {shelf_name}: {params}")
+            logger.debug(f"  Extracted parameters for {shelf_name}: {params}")
             return params
             
         except Exception as clip_error:
-            print(f"  Clipping failed for {shelf_name}, trying fallback method: {clip_error}")
+            logger.debug(f"  Clipping failed for {shelf_name}, trying fallback method: {clip_error}")
             
             # Fallback: use spatial bounds to find relevant data
             try:
@@ -190,18 +231,18 @@ def load_predicted_data(shelf_name, ice_shelf_geom, parameter_set_dir, config):
                         else:
                             params[param_name] = 0.0
                             
-                    print(f"  Fallback extraction for {shelf_name}: {params}")
+                    logger.debug(f"  Fallback extraction for {shelf_name}: {params}")
                     return params
                 else:
-                    print(f"  No data found in bounds for {shelf_name}")
+                    logger.debug(f"  No data found in bounds for {shelf_name}")
                     return None
                     
             except Exception as fallback_error:
-                print(f"  Fallback failed for {shelf_name}: {fallback_error}")
+                logger.warning(f"  Fallback failed for {shelf_name}: {fallback_error}")
                 return None
         
     except Exception as e:
-        print(f"Error loading predicted data for {shelf_name}: {e}")
+        logger.error(f"Error loading predicted data for {shelf_name}: {e}")
         return None
 
 def create_draft_melt_prediction(draft_range, params):
@@ -252,7 +293,7 @@ def plot_ice_shelf_comparison(obs_data, pred_params, shelf_name, ax):
     # Plot observational data
     if obs_data is not None and len(obs_data['draft']) > 0:
         # Debug: Print data ranges
-        print(f"  {shelf_name}: Draft range [{obs_data['draft'].min():.1f}, {obs_data['draft'].max():.1f}], "
+        logger.debug(f"  {shelf_name}: Draft range [{obs_data['draft'].min():.1f}, {obs_data['draft'].max():.1f}], "
               f"Melt range [{obs_data['melt'].min():.2e}, {obs_data['melt'].max():.2e}], "
               f"N points: {len(obs_data['draft'])}")
         
@@ -276,7 +317,7 @@ def plot_ice_shelf_comparison(obs_data, pred_params, shelf_name, ax):
             # 1 kg/m²/s * (1 m³/917 kg) * (31536000 s/yr) = ~34394 m/yr
             plot_melt = plot_melt * 31536000 / 917  # Convert to m/yr
             melt_units = 'm/yr'
-            print(f"    Converted melt units to {melt_units}, new range: [{plot_melt.min():.3f}, {plot_melt.max():.3f}]")
+            logger.debug(f"    Converted melt units to {melt_units}, new range: [{plot_melt.min():.3f}, {plot_melt.max():.3f}]")
         
         # Plot observed data (black points like in notebook) with smaller scatter points
         ax.scatter(plot_melt, plot_draft, c='black', s=2, alpha=0.6, label='Observed')
@@ -286,12 +327,12 @@ def plot_ice_shelf_comparison(obs_data, pred_params, shelf_name, ax):
         
         # Plot predictions if available
         if pred_params is not None:
-            print(f"    {shelf_name}: Creating predictions with parameters: {pred_params}")
+            logger.debug(f"    {shelf_name}: Creating predictions with parameters: {pred_params}")
             
             # Create prediction for the same draft values
             pred_melt = create_draft_melt_prediction(plot_draft, pred_params)
             
-            print(f"    {shelf_name}: Predicted melt range (raw, already in m/yr): [{pred_melt.min():.3f}, {pred_melt.max():.3f}]")
+            logger.debug(f"    {shelf_name}: Predicted melt range (raw, already in m/yr): [{pred_melt.min():.3f}, {pred_melt.max():.3f}]")
             
             # Predicted values are already in m/yr (from parameter units), so no conversion needed
             # Only convert observations from SI units to m/yr for comparison
@@ -308,7 +349,7 @@ def plot_ice_shelf_comparison(obs_data, pred_params, shelf_name, ax):
                 ax.collections[0].set_color('gray')  # Change observed points to gray
             
             # Plot predicted data with smaller scatter points
-            print(f"    {shelf_name}: Plotting {len(pred_melt)} predicted points in {pred_color}")
+            logger.debug(f"    {shelf_name}: Plotting {len(pred_melt)} predicted points in {pred_color}")
             ax.scatter(pred_melt, plot_draft, c=pred_color, s=2, alpha=0.8, label='Predicted')
             
             # Add threshold line if it's a linear parameterization
@@ -380,7 +421,7 @@ def plot_ice_shelf_comparison(obs_data, pred_params, shelf_name, ax):
                 y_max = draft_max + 0.1*abs(draft_max) + 10
                 ax.set_ylim(y_min, y_max)
             
-            print(f"    Axis bounds: X=[{ax.get_xlim()[0]:.3f}, {ax.get_xlim()[1]:.3f}], Y=[{ax.get_ylim()[0]:.1f}, {ax.get_ylim()[1]:.1f}]")
+            logger.debug(f"    Axis bounds: X=[{ax.get_xlim()[0]:.3f}, {ax.get_xlim()[1]:.3f}], Y=[{ax.get_ylim()[0]:.1f}, {ax.get_ylim()[1]:.1f}]")
             
             # Invert Y-axis like in notebook (deeper drafts at bottom)
             ax.invert_yaxis()
@@ -389,7 +430,7 @@ def plot_ice_shelf_comparison(obs_data, pred_params, shelf_name, ax):
             ax.set_xlim(-1, 1)
             ax.set_ylim(-100, 100)
             ax.invert_yaxis()
-            print(f"    Using default axis bounds: X=[-1, 1], Y=[-100, 100]")
+            logger.debug(f"    Using default axis bounds: X=[-1, 1], Y=[-100, 100]")
         
         # Add grid and formatting
         ax.grid(True, alpha=0.3)
@@ -417,9 +458,15 @@ def create_draft_dependence_visualization(parameter_set_name, parameter_test_dir
         output_dir: Directory to save plots  
         max_shelves: Maximum number of shelves to plot (for testing)
         start_index: Starting index for ice shelves (default: 33 for Abbott Ice Shelf)
+        
+    Returns:
+        Path: Output file path, or None if visualization failed
     """
     
-    print(f"Creating draft dependence visualization for parameter set: {parameter_set_name}")
+    logger.info("="*80)
+    logger.info("Draft Dependence Visualization")
+    logger.info("="*80)
+    logger.info(f"Parameter set: {parameter_set_name}")
     
     try:
         # Set up directories
@@ -432,36 +479,45 @@ def create_draft_dependence_visualization(parameter_set_name, parameter_test_dir
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
         
+        logger.info(f"Parameter directory: {parameter_test_dir}")
+        logger.info(f"Output directory: {output_dir}")
+        
         # Load data
-        print("Loading satellite observation data...")
+        logger.info("Loading satellite observation data...")
+        if not Path(config.FILE_PAOLO23_SATOBS_PREPARED).exists():
+            raise FileNotFoundError(f"Satellite data not found: {config.FILE_PAOLO23_SATOBS_PREPARED}")
+            
         satobs = xr.open_dataset(config.FILE_PAOLO23_SATOBS_PREPARED)
         satobs = write_crs(satobs, config.CRS_TARGET)
-        print(f"  Loaded satellite data with shape: {satobs.dims}")
+        logger.info(f"  Loaded satellite data with shape: {satobs.dims}")
         
-        print("Loading ice shelf masks...")
+        logger.info("Loading ice shelf masks...")
+        if not Path(config.FILE_ICESHELFMASKS).exists():
+            raise FileNotFoundError(f"Ice shelf masks not found: {config.FILE_ICESHELFMASKS}")
+            
         icems = gpd.read_file(config.FILE_ICESHELFMASKS)
         icems = icems.to_crs(config.CRS_TARGET)
-        print(f"  Loaded {len(icems)} ice shelf masks")
+        logger.info(f"  Loaded {len(icems)} ice shelf masks")
         
         # For merged parameter grids, the parameter set directory IS the data directory
         param_set_dir = parameter_test_dir
         if not param_set_dir.exists():
-            print(f"Error: Parameter set directory not found: {param_set_dir}")
-            return
+            raise FileNotFoundError(f"Parameter set directory not found: {param_set_dir}")
             
         # Get ice shelf names starting from specified index
         shelf_names = list(icems.name.values[start_index:])
         if max_shelves is not None:
             shelf_names = shelf_names[:max_shelves]
+            logger.info(f"Limiting to first {max_shelves} shelves for testing")
             
-        print(f"Processing {len(shelf_names)} ice shelves starting from index {start_index}")
+        logger.info(f"Processing {len(shelf_names)} ice shelves starting from index {start_index}")
         
         # Calculate grid layout
         n_shelves = len(shelf_names)
         n_cols = min(6, n_shelves)  # Max 6 columns
         n_rows = int(np.ceil(n_shelves / n_cols))
         
-        print(f"Creating {n_rows} x {n_cols} grid for {n_shelves} ice shelves")
+        logger.info(f"Creating {n_rows} x {n_cols} grid for {n_shelves} ice shelves")
         
         # Create figure with subplots (like in the notebook)
         fig, axes = plt.subplots(n_rows, n_cols, figsize=(n_cols * 3, n_rows * 3))
@@ -476,12 +532,13 @@ def create_draft_dependence_visualization(parameter_set_name, parameter_test_dir
         
         # Process each ice shelf
         processed_count = 0
+        error_count = 0
         for i, shelf_name in enumerate(shelf_names):
             actual_index = i + start_index
             
             ax = axes[i]
             
-            print(f"Processing {shelf_name} ({i+1}/{len(shelf_names)})...")
+            logger.info(f"Processing {shelf_name} ({i+1}/{len(shelf_names)})...")
             
             try:
                 # Get ice shelf geometry
@@ -500,43 +557,42 @@ def create_draft_dependence_visualization(parameter_set_name, parameter_test_dir
                     processed_count += 1
                     
             except Exception as shelf_error:
-                print(f"  Error processing {shelf_name}: {shelf_error}")
+                logger.error(f"  Error processing {shelf_name}: {shelf_error}")
+                error_count += 1
                 # Still create a placeholder plot
                 ax.text(0.5, 0.5, f"{shelf_name}\nError: {str(shelf_error)[:50]}...", 
                         transform=ax.transAxes, ha='center', va='center', fontsize=8)
                 ax.set_xlim(0, 1)
                 ax.set_ylim(0, 1)
                 
-        # Add overall title (positioned to avoid overlap)
-        #fig.suptitle(f'Draft Dependence Analysis: {parameter_set_name}\n'
-        #            f'Observations (black) vs Predictions (orange)', fontsize=14, y=0.95)
-        
-        # Remove the overall figure legend - keep individual subplot legends only
-        # (Individual legends are created in plot_ice_shelf_comparison function)
-        
         # Hide unused subplots
         for i in range(n_shelves, len(axes)):
             axes[i].set_visible(False)
         
         # Save plot
         output_file = output_dir / f"draft_dependence_comparison_{parameter_set_name}.png"
-        print(f"Saving plot to: {output_file}")
+        logger.info(f"Saving plot to: {output_file}")
         plt.savefig(output_file, dpi=150, bbox_inches='tight')
-        print(f"Visualization saved to: {output_file}")
         
         # Save high-res version  
         output_file_hires = output_dir / f"draft_dependence_comparison_{parameter_set_name}_hires.png"
+        logger.info(f"Saving high-resolution version to: {output_file_hires}")
         plt.savefig(output_file_hires, dpi=300, bbox_inches='tight')
         
         plt.close()
         
-        print(f"Processed {processed_count} ice shelves with data out of {len(shelf_names)} total")
+        logger.info("="*80)
+        logger.info(f"Processed {processed_count} ice shelves with data out of {len(shelf_names)} total")
+        logger.info(f"Errors encountered: {error_count}")
+        logger.info(f"Output: {output_file}")
+        logger.info("="*80)
         
         return output_file
         
     except Exception as e:
-        print(f"Error in create_draft_dependence_visualization: {e}")
-        import traceback
+        logger.error("="*80)
+        logger.error(f"FATAL ERROR in create_draft_dependence_visualization: {e}")
+        logger.error("="*80)
         traceback.print_exc()
         return None
 
@@ -547,7 +603,12 @@ def create_summary_comparison(parameter_test_dir=None, output_dir=None):
     Args:
         parameter_test_dir: Directory containing parameter test results
         output_dir: Directory to save plots
+        
+    Returns:
+        Path: Output file path, or None if creation failed
     """
+    
+    logger.info("Creating parameter set comparison summary...")
     
     if parameter_test_dir is None:
         parameter_test_dir = config.DIR_ICESHELF_DEDRAFT_SATOBS / "parameter_tests"
@@ -561,8 +622,8 @@ def create_summary_comparison(parameter_test_dir=None, output_dir=None):
     # Load results summary
     summary_file = parameter_test_dir / "results_summary.json"
     if not summary_file.exists():
-        print(f"Error: Results summary not found: {summary_file}")
-        return
+        logger.error(f"Results summary not found: {summary_file}")
+        return None
         
     with open(summary_file, 'r') as f:
         results_summary = json.load(f)
@@ -610,12 +671,11 @@ def create_summary_comparison(parameter_test_dir=None, output_dir=None):
     ax2.legend()
     ax2.grid(True, alpha=0.3)
     
-    plt.tight_layout()
     
     # Save comparison plot
     output_file = output_dir / "parameter_set_comparison.png"
     plt.savefig(output_file, dpi=150, bbox_inches='tight')
-    print(f"Parameter set comparison saved to: {output_file}")
+    logger.info(f"Parameter set comparison saved to: {output_file}")
     
     plt.close()
     
@@ -624,7 +684,24 @@ def create_summary_comparison(parameter_test_dir=None, output_dir=None):
 def main():
     """Main function with command line interface."""
     
-    parser = argparse.ArgumentParser(description='Visualize draft dependence analysis results')
+    parser = argparse.ArgumentParser(
+        description='Visualize draft dependence analysis results',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Visualize comprehensive parameter set
+  python visualize_draft_dependence.py --parameter_set comprehensive
+  
+  # Test with first 12 shelves only
+  python visualize_draft_dependence.py --parameter_set permissive --max_shelves 12
+  
+  # Custom output directory
+  python visualize_draft_dependence.py --parameter_set comprehensive --output_dir /path/to/output
+  
+  # Create summary comparison of multiple parameter sets
+  python visualize_draft_dependence.py --parameter_set comprehensive --create_summary
+        """
+    )
     parser.add_argument('--parameter_set', type=str, required=True,
                         help='Name of parameter set to visualize')
     parser.add_argument('--parameter_test_dir', type=str, default=None,
@@ -634,33 +711,57 @@ def main():
     parser.add_argument('--max_shelves', type=int, default=None,
                         help='Maximum number of shelves to plot (for testing)')
     parser.add_argument('--start_index', type=int, default=33,
-                        help='Starting index for ice shelves (default: 33)')
+                        help='Starting index for ice shelves (default: 33 for Abbott Ice Shelf)')
     parser.add_argument('--create_summary', action='store_true',
                         help='Also create summary comparison plot')
+    parser.add_argument('--verbose', '-v', action='store_true',
+                        help='Enable verbose debug logging')
     
     args = parser.parse_args()
     
-    print("DRAFT DEPENDENCE VISUALIZATION")
-    print("=" * 40)
+    # Set logging level based on verbose flag
+    if args.verbose:
+        logging.getLogger().setLevel(logging.DEBUG)
+        logger.setLevel(logging.DEBUG)
     
-    # Create main visualization
-    output_file = create_draft_dependence_visualization(
-        parameter_set_name=args.parameter_set,
-        parameter_test_dir=args.parameter_test_dir,
-        output_dir=args.output_dir,
-        max_shelves=args.max_shelves,
-        start_index=args.start_index
-    )
+    logger.info("="*80)
+    logger.info("DRAFT DEPENDENCE VISUALIZATION")
+    logger.info("="*80)
     
-    # Create summary comparison if requested
-    if args.create_summary:
-        summary_file = create_summary_comparison(
+    try:
+        # Create main visualization
+        output_file = create_draft_dependence_visualization(
+            parameter_set_name=args.parameter_set,
             parameter_test_dir=args.parameter_test_dir,
-            output_dir=args.output_dir
+            output_dir=args.output_dir,
+            max_shelves=args.max_shelves,
+            start_index=args.start_index
         )
-        print(f"Summary comparison saved to: {summary_file}")
-    
-    print("Visualization complete!")
+        
+        if output_file is None:
+            logger.error("Visualization creation failed")
+            sys.exit(1)
+        
+        # Create summary comparison if requested
+        if args.create_summary:
+            logger.info("Creating summary comparison...")
+            summary_file = create_summary_comparison(
+                parameter_test_dir=args.parameter_test_dir,
+                output_dir=args.output_dir
+            )
+            if summary_file:
+                logger.info(f"Summary comparison saved to: {summary_file}")
+            else:
+                logger.warning("Summary comparison creation failed")
+        
+        logger.info("="*80)
+        logger.info("Visualization complete!")
+        logger.info("="*80)
+        
+    except Exception as e:
+        logger.error(f"Script failed: {e}")
+        traceback.print_exc()
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()
