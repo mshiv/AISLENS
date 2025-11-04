@@ -46,7 +46,9 @@ class Config:
     FILE_MPASO_MODEL: Path = DIR_EXTERNAL / "Regridded_SORRMv2.1.ISMF.FULL.nc"
     FILE_ICESHELFMASKS: Path = DIR_EXTERNAL / "iceShelves.geojson"
 
+
     # Processed file paths
+    FILE_EOF_MODEL: Path = DIR_PROCESSED / "eof_model.pkl" # EOF model persistence
     FILE_PAOLO23_SATOBS_PREPARED: Path = DIR_PROCESSED / "satellite_observations_prepared.nc"
     FILE_PAOLO23_SATOBS_MEAN_IC: Path = DIR_PROCESSED / "satellite_observations_meanfield_ic.nc"
     FILE_MPASO_MODEL_PREPARED: Path = DIR_PROCESSED / "model_simulation_prepared.nc"
