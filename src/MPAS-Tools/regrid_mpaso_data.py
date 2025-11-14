@@ -16,25 +16,9 @@ import gc
 import argparse
 import logging
 from pathlib import Path
-from datetime import datetime
+from aislens.utils import setup_logging
 
 logger = logging.getLogger(__name__)
-
-
-def setup_logging(output_dir):
-    """Setup logging to file and console."""
-    log_file = Path(output_dir) / f'regrid_mpaso_{datetime.now().strftime("%Y%m%d_%H%M%S")}.log'
-    
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(levelname)s - %(message)s',
-        handlers=[
-            logging.FileHandler(log_file),
-            logging.StreamHandler()
-        ]
-    )
-    logger.info(f"Log file: {log_file}")
-    return log_file
 
 
 def main():
@@ -77,7 +61,7 @@ def main():
     output_dir.mkdir(parents=True, exist_ok=True)
     
     # Setup logging
-    setup_logging(output_dir)
+    setup_logging(output_dir, "regrid_mpaso")
     
     # Determine grid name
     inGridName = args.grid_name or (grid_file.stem.split('.')[1] if '.' in grid_file.stem else grid_file.stem)
