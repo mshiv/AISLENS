@@ -19,6 +19,41 @@ import cftime
 from scipy.spatial import cKDTree
 from sklearn.linear_model import LinearRegression
 from scipy.signal import savgol_filter, medfilt
+import logging
+from datetime import datetime
+
+
+##################################################################
+# Logging utilities
+##################################################################
+
+def setup_logging(output_dir, script_name="script"):
+    """
+    Setup logging to file and console.
+    
+    Args:
+        output_dir: Directory to save log file
+        script_name: Name prefix for log file (default: "script")
+    
+    Returns:
+        Path to the log file
+    """
+    log_file = Path(output_dir) / f'{script_name}_{datetime.now().strftime("%Y%m%d_%H%M%S")}.log'
+    
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.FileHandler(log_file),
+            logging.StreamHandler()
+        ]
+    )
+    
+    logger = logging.getLogger(__name__)
+    logger.info(f"Log file: {log_file}")
+    
+    return log_file
+
 
 ##################################################################
 # Utilities to create the data directory structure and 
