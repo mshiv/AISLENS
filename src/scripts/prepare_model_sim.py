@@ -13,6 +13,7 @@ import argparse
 import logging
 import sys
 from pathlib import Path
+from concurrent.futures import ProcessPoolExecutor, as_completed
 import xarray as xr
 import geopandas as gpd
 
@@ -36,6 +37,10 @@ def main():
                         help='Skip extrapolation step (for testing)')
     parser.add_argument('--init-dirs', action='store_true',
                         help='Initialize required directories before processing')
+    parser.add_argument('--parallel', type=int, default=1,
+                        help='Number of parallel workers for draft dependence (default: 1, sequential)')
+    parser.add_argument('--rechunk-time', action='store_true',
+                        help='Rechunk time dimension for draft dependence (faster but uses more RAM)')
     
     args = parser.parse_args()
     
@@ -91,24 +96,55 @@ def main():
         logger.info(f"Calculating draft dependence ({len(missing)} missing)...")
         config.DIR_ICESHELF_DEDRAFT_MODEL.mkdir(parents=True, exist_ok=True)
         
-        for idx, i in enumerate(config.ICE_SHELF_REGIONS, 1):
-            catchment_name = icems.name.values[i]
-            output_file = config.DIR_ICESHELF_DEDRAFT_MODEL / f'draftDepenModelPred_{catchment_name}.nc'
+        # Optional: Rechunk time dimension for faster regression
+        data_for_processing = model_deseasonalized
+        if args.rechunk_time:
+            logger.info("Rechunking time dimension (requires sufficient RAM)...")
+            data_for_processing = model_deseasonalized.chunk({
+                config.TIME_DIM: -1,  # Load all time at once for regression
+                'x': 500, 'y': 500    # Keep spatial chunks reasonable
+            })
+        
+        # Process ice shelves (sequential or parallel)
+        ice_shelves_to_process = [
+            (i, icems.name.values[i]) for i in config.ICE_SHELF_REGIONS
+            if not (config.DIR_ICESHELF_DEDRAFT_MODEL / f'draftDepenModelPred_{icems.name.values[i]}.nc').exists()
+        ]
+        
+        if args.parallel > 1:
+            logger.info(f"Processing {len(ice_shelves_to_process)} ice shelves with {args.parallel} workers...")
             
-            if output_file.exists():
-                continue
+            def process_ice_shelf(shelf_tuple):
+                i, catchment_name = shelf_tuple
+                try:
+                    dedraft_catchment(
+                        i, icems, data_for_processing, config,
+                        save_dir=config.DIR_ICESHELF_DEDRAFT_MODEL,
+                        save_pred=True,
+                        save_coefs=False
+                    )
+                    return catchment_name, None
+                except Exception as e:
+                    return catchment_name, str(e)
             
-            logger.info(f"[{idx}/{len(config.ICE_SHELF_REGIONS)}] {catchment_name}")
-            try:
+            with ProcessPoolExecutor(max_workers=args.parallel) as executor:
+                futures = {executor.submit(process_ice_shelf, shelf): shelf for shelf in ice_shelves_to_process}
+                for idx, future in enumerate(as_completed(futures), 1):
+                    catchment_name, error = future.result()
+                    if error:
+                        logger.error(f"[{idx}/{len(ice_shelves_to_process)}] {catchment_name} - Failed: {error}")
+                    else:
+                        logger.info(f"[{idx}/{len(ice_shelves_to_process)}] {catchment_name} - Complete")
+        else:
+            # Sequential processing
+            for idx, (i, catchment_name) in enumerate(ice_shelves_to_process, 1):
+                logger.info(f"[{idx}/{len(ice_shelves_to_process)}] {catchment_name}")
                 dedraft_catchment(
-                    i, icems, model_deseasonalized, config,
+                    i, icems, data_for_processing, config,
                     save_dir=config.DIR_ICESHELF_DEDRAFT_MODEL,
                     save_pred=True,
                     save_coefs=False
                 )
-            except Exception as e:
-                logger.error(f"  Failed: {e}")
-                continue
     
     # Step 5: Merge draft dependence predictions
     logger.info("Merging draft dependence predictions...")
