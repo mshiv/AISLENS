@@ -91,11 +91,19 @@ def main():
         logger.info(f"Calculating draft dependence ({len(missing)} missing)...")
         config.DIR_ICESHELF_DEDRAFT_MODEL.mkdir(parents=True, exist_ok=True)
         
-        # Compute time-mean once for all ice shelves (massive speedup)
-        # dedraft() only uses time-mean anyway, so no need to load full temporal data
-        logger.info("Computing time-mean for draft dependence calculation...")
-        model_deseasonalized_mean = model_deseasonalized.mean(dim=config.TIME_DIM).compute()
-        logger.info(f"Time-mean computed: {model_deseasonalized_mean.dims}")
+        # Save time-mean to temporary file to avoid recomputing
+        temp_mean_file = config.DIR_ICESHELF_DEDRAFT_MODEL / '_temp_time_mean.nc'
+        
+        if not temp_mean_file.exists():
+            logger.info("Computing time-mean (this will take a few minutes)...")
+            # Compute in chunks and save to disk
+            model_deseasonalized.mean(dim=config.TIME_DIM).to_netcdf(temp_mean_file)
+            logger.info(f"Time-mean saved to: {temp_mean_file}")
+        else:
+            logger.info(f"Loading existing time-mean from: {temp_mean_file}")
+        
+        # Load time-mean from disk with spatial chunking
+        model_deseasonalized_mean = xr.open_dataset(temp_mean_file, chunks={'x': 200, 'y': 200})
         
         # Process ice shelves sequentially
         ice_shelves_to_process = [
