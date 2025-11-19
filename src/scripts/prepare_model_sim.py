@@ -15,6 +15,7 @@ import sys
 from pathlib import Path
 import xarray as xr
 import geopandas as gpd
+import numpy as np
 
 from aislens.dataprep import detrend_dim, deseasonalize, dedraft_catchment, extrapolate_catchment_over_time
 from aislens.utils import merge_catchment_files, subset_dataset_by_time, initialize_directories, collect_directories, write_crs, setup_logging
@@ -91,19 +92,75 @@ def main():
         logger.info(f"Calculating draft dependence ({len(missing)} missing)...")
         config.DIR_ICESHELF_DEDRAFT_MODEL.mkdir(parents=True, exist_ok=True)
         
-        # Save time-mean to temporary file to avoid recomputing
+        # Save time-mean to temporary file using spatial tiling to avoid OOM
         temp_mean_file = config.DIR_ICESHELF_DEDRAFT_MODEL / '_temp_time_mean.nc'
         
         if not temp_mean_file.exists():
-            logger.info("Computing time-mean (this will take a few minutes)...")
-            # Compute in chunks and save to disk
-            model_deseasonalized.mean(dim=config.TIME_DIM).to_netcdf(temp_mean_file)
-            logger.info(f"Time-mean saved to: {temp_mean_file}")
+            logger.info("Computing time-mean using spatial tiling...")
+            
+            # Get spatial dimensions
+            nx = len(model_deseasonalized.x)
+            ny = len(model_deseasonalized.y)
+            tile_size = 200  # Process 200x200 tiles at a time
+            
+            # Initialize output array
+            result_dict = {}
+            for var in model_deseasonalized.data_vars:
+                result_dict[var] = np.full((ny, nx), np.nan)
+            
+            # Process tiles
+            n_tiles_x = int(np.ceil(nx / tile_size))
+            n_tiles_y = int(np.ceil(ny / tile_size))
+            total_tiles = n_tiles_x * n_tiles_y
+            
+            logger.info(f"Processing {total_tiles} spatial tiles...")
+            for i in range(n_tiles_x):
+                for j in range(n_tiles_y):
+                    x_start = i * tile_size
+                    x_end = min((i + 1) * tile_size, nx)
+                    y_start = j * tile_size
+                    y_end = min((j + 1) * tile_size, ny)
+                    
+                    tile_num = i * n_tiles_y + j + 1
+                    if tile_num % 10 == 0:
+                        logger.info(f"  Tile {tile_num}/{total_tiles}")
+                    
+                    # Extract and compute mean for this tile
+                    tile = model_deseasonalized.isel(x=slice(x_start, x_end), y=slice(y_start, y_end))
+                    tile_mean = tile.mean(dim=config.TIME_DIM).compute()
+                    
+                    # Store results
+                    for var in model_deseasonalized.data_vars:
+                        result_dict[var][y_start:y_end, x_start:x_end] = tile_mean[var].values
+            
+            # Create dataset from results
+            logger.info("Assembling time-mean dataset...")
+            data_vars = {}
+            for var in model_deseasonalized.data_vars:
+                data_vars[var] = (('y', 'x'), result_dict[var])
+            
+            time_mean_ds = xr.Dataset(
+                data_vars,
+                coords={
+                    'x': model_deseasonalized.x,
+                    'y': model_deseasonalized.y
+                }
+            )
+            
+            # Copy attributes
+            for var in model_deseasonalized.data_vars:
+                time_mean_ds[var].attrs = model_deseasonalized[var].attrs
+            time_mean_ds.attrs = model_deseasonalized.attrs
+            
+            # Save to file
+            logger.info(f"Saving to: {temp_mean_file}")
+            time_mean_ds.to_netcdf(temp_mean_file)
+            logger.info("Time-mean saved successfully")
         else:
             logger.info(f"Loading existing time-mean from: {temp_mean_file}")
         
-        # Load time-mean from disk with spatial chunking
-        model_deseasonalized_mean = xr.open_dataset(temp_mean_file, chunks={'x': 200, 'y': 200})
+        # Load time-mean from disk
+        model_deseasonalized_mean = xr.open_dataset(temp_mean_file)
         
         # Process ice shelves sequentially
         ice_shelves_to_process = [
