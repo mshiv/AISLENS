@@ -24,6 +24,21 @@ from aislens.config import config
 logger = logging.getLogger(__name__)
 
 
+def _process_ice_shelf_worker(args_tuple):
+    """Worker function for parallel ice shelf processing (must be at module level for pickling)."""
+    i, catchment_name, icems, data_for_processing, config = args_tuple
+    try:
+        dedraft_catchment(
+            i, icems, data_for_processing, config,
+            save_dir=config.DIR_ICESHELF_DEDRAFT_MODEL,
+            save_pred=True,
+            save_coefs=False
+        )
+        return catchment_name, None
+    except Exception as e:
+        return catchment_name, str(e)
+
+
 def main():
     """Main function with command line interface."""
     
@@ -114,21 +129,14 @@ def main():
         if args.parallel > 1:
             logger.info(f"Processing {len(ice_shelves_to_process)} ice shelves with {args.parallel} workers...")
             
-            def process_ice_shelf(shelf_tuple):
-                i, catchment_name = shelf_tuple
-                try:
-                    dedraft_catchment(
-                        i, icems, data_for_processing, config,
-                        save_dir=config.DIR_ICESHELF_DEDRAFT_MODEL,
-                        save_pred=True,
-                        save_coefs=False
-                    )
-                    return catchment_name, None
-                except Exception as e:
-                    return catchment_name, str(e)
+            # Prepare arguments for parallel processing
+            worker_args = [
+                (i, catchment_name, icems, data_for_processing, config)
+                for i, catchment_name in ice_shelves_to_process
+            ]
             
             with ProcessPoolExecutor(max_workers=args.parallel) as executor:
-                futures = {executor.submit(process_ice_shelf, shelf): shelf for shelf in ice_shelves_to_process}
+                futures = {executor.submit(_process_ice_shelf_worker, args): args for args in worker_args}
                 for idx, future in enumerate(as_completed(futures), 1):
                     catchment_name, error = future.result()
                     if error:
