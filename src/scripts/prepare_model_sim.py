@@ -13,7 +13,6 @@ import argparse
 import logging
 import sys
 from pathlib import Path
-from concurrent.futures import ProcessPoolExecutor, as_completed
 import xarray as xr
 import geopandas as gpd
 
@@ -22,21 +21,6 @@ from aislens.utils import merge_catchment_files, subset_dataset_by_time, initial
 from aislens.config import config
 
 logger = logging.getLogger(__name__)
-
-
-def _process_ice_shelf_worker(args_tuple):
-    """Worker function for parallel ice shelf processing (must be at module level for pickling)."""
-    i, catchment_name, icems, data_for_processing, config = args_tuple
-    try:
-        dedraft_catchment(
-            i, icems, data_for_processing, config,
-            save_dir=config.DIR_ICESHELF_DEDRAFT_MODEL,
-            save_pred=True,
-            save_coefs=False
-        )
-        return catchment_name, None
-    except Exception as e:
-        return catchment_name, str(e)
 
 
 def main():
@@ -52,8 +36,6 @@ def main():
                         help='Skip extrapolation step (for testing)')
     parser.add_argument('--init-dirs', action='store_true',
                         help='Initialize required directories before processing')
-    parser.add_argument('--parallel', type=int, default=1,
-                        help='Number of parallel workers for draft dependence (default: 1, sequential)')
     parser.add_argument('--rechunk-time', action='store_true',
                         help='Rechunk time dimension for draft dependence (faster but uses more RAM)')
     
@@ -120,39 +102,20 @@ def main():
                 'x': 500, 'y': 500    # Keep spatial chunks reasonable
             })
         
-        # Process ice shelves (sequential or parallel)
+        # Process ice shelves sequentially
         ice_shelves_to_process = [
             (i, icems.name.values[i]) for i in config.ICE_SHELF_REGIONS
             if not (config.DIR_ICESHELF_DEDRAFT_MODEL / f'draftDepenModelPred_{icems.name.values[i]}.nc').exists()
         ]
         
-        if args.parallel > 1:
-            logger.info(f"Processing {len(ice_shelves_to_process)} ice shelves with {args.parallel} workers...")
-            
-            # Prepare arguments for parallel processing
-            worker_args = [
-                (i, catchment_name, icems, data_for_processing, config)
-                for i, catchment_name in ice_shelves_to_process
-            ]
-            
-            with ProcessPoolExecutor(max_workers=args.parallel) as executor:
-                futures = {executor.submit(_process_ice_shelf_worker, args): args for args in worker_args}
-                for idx, future in enumerate(as_completed(futures), 1):
-                    catchment_name, error = future.result()
-                    if error:
-                        logger.error(f"[{idx}/{len(ice_shelves_to_process)}] {catchment_name} - Failed: {error}")
-                    else:
-                        logger.info(f"[{idx}/{len(ice_shelves_to_process)}] {catchment_name} - Complete")
-        else:
-            # Sequential processing
-            for idx, (i, catchment_name) in enumerate(ice_shelves_to_process, 1):
-                logger.info(f"[{idx}/{len(ice_shelves_to_process)}] {catchment_name}")
-                dedraft_catchment(
-                    i, icems, data_for_processing, config,
-                    save_dir=config.DIR_ICESHELF_DEDRAFT_MODEL,
-                    save_pred=True,
-                    save_coefs=False
-                )
+        for idx, (i, catchment_name) in enumerate(ice_shelves_to_process, 1):
+            logger.info(f"[{idx}/{len(ice_shelves_to_process)}] {catchment_name}")
+            dedraft_catchment(
+                i, icems, data_for_processing, config,
+                save_dir=config.DIR_ICESHELF_DEDRAFT_MODEL,
+                save_pred=True,
+                save_coefs=False
+            )
     
     # Step 5: Merge draft dependence predictions
     logger.info("Merging draft dependence predictions...")
