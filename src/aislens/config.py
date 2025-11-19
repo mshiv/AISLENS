@@ -43,7 +43,7 @@ class Config:
 
     # File paths
     FILE_PAOLO23_SATOBS: Path = DIR_EXTERNAL / "ANT_G1920V01_IceShelfMeltDraft_Time.nc"
-    FILE_MPASO_MODEL: Path = DIR_EXTERNAL / "Regridded_SORRMv2.1.ISMF.FULL.nc"
+    FILE_MPASO_MODEL: Path = DIR_EXTERNAL / "Regridded_SORRMv2.1.ISMF.FULL.4km.nc" # Regridded_SORRMv2.1.ISMF.FULL.4km.nc
     FILE_ICESHELFMASKS: Path = DIR_EXTERNAL / "iceShelves.geojson"
 
 
