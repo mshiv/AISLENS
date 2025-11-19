@@ -58,7 +58,7 @@ def main():
     
     # Step 1: Load and subset model data
     logger.info(f"Loading model: {config.FILE_MPASO_MODEL}")
-    model = xr.open_dataset(config.FILE_MPASO_MODEL, chunks={config.TIME_DIM: 36})
+    model = xr.open_dataset(config.FILE_MPASO_MODEL, chunks={config.TIME_DIM: 36, 'x': 250, 'y': 250})
     model = write_crs(model, config.CRS_TARGET)
     
     logger.info(f"Subsetting to {start_year}-{end_year}...")
@@ -74,6 +74,10 @@ def main():
     
     logger.info("Deseasonalizing...")
     model_deseasonalized = deseasonalize(model_detrended)
+    
+    # Rechunk after deseasonalize to prevent large chunks
+    logger.info("Rechunking after deseasonalize...")
+    model_deseasonalized = model_deseasonalized.chunk({config.TIME_DIM: 36, 'x': 250, 'y': 250})
     
     # Step 3: Load ice shelf masks
     logger.info("Loading ice shelf masks...")
