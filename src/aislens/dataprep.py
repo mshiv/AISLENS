@@ -69,14 +69,15 @@ def dedraft(data, draft, weights=None):
         reg.intercept_: Intercept of the regression.
         xarray.DataArray: Predicted draft dependence.
     """
-    data_tm = data.mean(dim='Time')
-    draft_tm = draft.mean(dim='Time')
+    # Take time-mean if Time dimension exists, otherwise use data as-is
+    data_tm = data.mean(dim='Time') if 'Time' in data.dims else data
+    draft_tm = draft.mean(dim='Time') if 'Time' in draft.dims else draft
     data_stack = data_tm.stack(z=('x', 'y'))
     draft_stack = draft_tm.stack(z=('x', 'y'))
     data_stack_noNaN = data_stack.fillna(0)
     draft_stack_noNaN = draft_stack.fillna(0)
     if weights is not None:
-        weights_tm = weights.mean(dim='Time')
+        weights_tm = weights.mean(dim='Time') if 'Time' in weights.dims else weights
         weights_stack = weights_tm.stack(z=('x', 'y'))
         w = weights_stack.fillna(0)
     else:
@@ -143,7 +144,8 @@ def dedraft_catchment(
     catchment_name = icems.name.values[i]
     print(f'Extracting data for catchment {catchment_name}')
     ds = clip_data(data, i, icems)
-    ds_tm = ds.mean(dim=config.TIME_DIM)
+    # Take time-mean if Time dimension exists (for saving coefficients reference)
+    ds_tm = ds.mean(dim=config.TIME_DIM) if config.TIME_DIM in ds.dims else ds
     # Choose the correct variable names based on the data type
     if config.SORRM_FLUX_VAR in ds.data_vars:
         # If the data is from the model, use SORRM variables

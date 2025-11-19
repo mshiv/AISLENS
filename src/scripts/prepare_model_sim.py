@@ -36,8 +36,6 @@ def main():
                         help='Skip extrapolation step (for testing)')
     parser.add_argument('--init-dirs', action='store_true',
                         help='Initialize required directories before processing')
-    parser.add_argument('--rechunk-time', action='store_true',
-                        help='Rechunk time dimension for draft dependence (faster but uses more RAM)')
     
     args = parser.parse_args()
     
@@ -93,14 +91,10 @@ def main():
         logger.info(f"Calculating draft dependence ({len(missing)} missing)...")
         config.DIR_ICESHELF_DEDRAFT_MODEL.mkdir(parents=True, exist_ok=True)
         
-        # Optional: Rechunk time dimension for faster regression
-        data_for_processing = model_deseasonalized
-        if args.rechunk_time:
-            logger.info("Rechunking time dimension (requires sufficient RAM)...")
-            data_for_processing = model_deseasonalized.chunk({
-                config.TIME_DIM: -1,  # Load all time at once for regression
-                'x': 500, 'y': 500    # Keep spatial chunks reasonable
-            })
+        # Compute time-mean once for all ice shelves (massive speedup)
+        # dedraft() only uses time-mean anyway, so no need to load full temporal data
+        logger.info("Computing time-mean for draft dependence calculation...")
+        model_deseasonalized_mean = model_deseasonalized.mean(dim=config.TIME_DIM)
         
         # Process ice shelves sequentially
         ice_shelves_to_process = [
@@ -111,7 +105,7 @@ def main():
         for idx, (i, catchment_name) in enumerate(ice_shelves_to_process, 1):
             logger.info(f"[{idx}/{len(ice_shelves_to_process)}] {catchment_name}")
             dedraft_catchment(
-                i, icems, data_for_processing, config,
+                i, icems, model_deseasonalized_mean, config,
                 save_dir=config.DIR_ICESHELF_DEDRAFT_MODEL,
                 save_pred=True,
                 save_coefs=False
