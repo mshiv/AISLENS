@@ -94,7 +94,8 @@ def main():
         # Compute time-mean once for all ice shelves (massive speedup)
         # dedraft() only uses time-mean anyway, so no need to load full temporal data
         logger.info("Computing time-mean for draft dependence calculation...")
-        model_deseasonalized_mean = model_deseasonalized.mean(dim=config.TIME_DIM)
+        model_deseasonalized_mean = model_deseasonalized.mean(dim=config.TIME_DIM).compute()
+        logger.info(f"Time-mean computed: {model_deseasonalized_mean.dims}")
         
         # Process ice shelves sequentially
         ice_shelves_to_process = [
