@@ -96,11 +96,19 @@ def main():
         logger.info(f"Calculating draft dependence ({len(missing)} missing)...")
         config.DIR_ICESHELF_DEDRAFT_MODEL.mkdir(parents=True, exist_ok=True)
         
-        # Process ice shelves directly with full temporal data
-        # Each ice shelf clips to small region, computes its own mean
-        # With proper chunking, this should be memory-efficient
-        logger.info("Processing ice shelves (each computes time-mean from clipped region)...")
+        # Load pre-computed time-mean
+        temp_mean_file = config.DIR_ICESHELF_DEDRAFT_MODEL / '_temp_time_mean.nc'
         
+        if not temp_mean_file.exists():
+            logger.error(f"Time-mean file not found: {temp_mean_file}")
+            logger.error("Run prepare_time_mean.py first to compute the time-mean:")
+            logger.error(f"  python src/scripts/prepare_time_mean.py --start-year {start_year} --end-year {end_year}")
+            sys.exit(1)
+        
+        logger.info(f"Loading pre-computed time-mean from: {temp_mean_file}")
+        model_deseasonalized_mean = xr.open_dataset(temp_mean_file)
+        
+        # Process ice shelves sequentially
         ice_shelves_to_process = [
             (i, icems.name.values[i]) for i in config.ICE_SHELF_REGIONS
             if not (config.DIR_ICESHELF_DEDRAFT_MODEL / f'draftDepenModelPred_{icems.name.values[i]}.nc').exists()
@@ -109,7 +117,7 @@ def main():
         for idx, (i, catchment_name) in enumerate(ice_shelves_to_process, 1):
             logger.info(f"[{idx}/{len(ice_shelves_to_process)}] {catchment_name}")
             dedraft_catchment(
-                i, icems, model_deseasonalized, config,
+                i, icems, model_deseasonalized_mean, config,
                 save_dir=config.DIR_ICESHELF_DEDRAFT_MODEL,
                 save_pred=True,
                 save_coefs=False
