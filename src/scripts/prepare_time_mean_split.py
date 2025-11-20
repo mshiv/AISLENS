@@ -37,6 +37,8 @@ def main():
                         help='Skip detrending (use raw data)')
     parser.add_argument('--skip-deseasonalize', action='store_true',
                         help='Skip deseasonalizing (use detrended data only)')
+    parser.add_argument('--coarsen', type=int, default=1,
+                        help='Coarsen factor (e.g., 2 = half resolution, 4 = quarter resolution)')
     
     args = parser.parse_args()
     
@@ -84,6 +86,17 @@ def main():
         n_timesteps = len(ds[config.TIME_DIM])
         logger.info(f"  Timesteps: {n_timesteps}")
         
+        # Optional: Coarsen FIRST (before detrend/deseasonalize for efficiency)
+        if args.coarsen > 1:
+            logger.info(f"  Coarsening by factor {args.coarsen}...")
+            # Rechunk to smaller pieces before coarsening
+            ds = ds.chunk({config.TIME_DIM: 12, 'x': 100, 'y': 100})
+            ds = ds.coarsen(x=args.coarsen, y=args.coarsen, boundary='trim').mean()
+            logger.info(f"  New spatial dimensions: {len(ds.x)}×{len(ds.y)}")
+        
+        # Rechunk after coarsening
+        ds = ds.chunk({config.TIME_DIM: 36, 'x': 200, 'y': 200})
+        
         # Optional: Detrend
         if not args.skip_detrend:
             logger.info(f"  Detrending...")
@@ -97,6 +110,9 @@ def main():
         if not args.skip_deseasonalize:
             logger.info(f"  Deseasonalizing...")
             ds = deseasonalize(ds)
+        
+        # Rechunk again after detrend/deseasonalize to prevent large chunks
+        ds = ds.chunk({config.TIME_DIM: 36, 'x': 200, 'y': 200})
         
         # Compute mean for this file using spatial tiling
         logger.info(f"  Computing time-mean with spatial tiling...")
