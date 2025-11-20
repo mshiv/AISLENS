@@ -98,9 +98,60 @@ def main():
             logger.info(f"  Deseasonalizing...")
             ds = deseasonalize(ds)
         
-        # Compute mean for this file
-        logger.info(f"  Computing time-mean...")
-        file_mean = ds.mean(dim=config.TIME_DIM).compute()
+        # Compute mean for this file using spatial tiling
+        logger.info(f"  Computing time-mean with spatial tiling...")
+        
+        # Get dimensions
+        nx = len(ds.x)
+        ny = len(ds.y)
+        tile_size = 100
+        
+        # Initialize result arrays for this file
+        file_result = {}
+        for var in ds.data_vars:
+            file_result[var] = np.full((ny, nx), np.nan, dtype=np.float32)
+        
+        # Process in tiles
+        n_tiles_x = int(np.ceil(nx / tile_size))
+        n_tiles_y = int(np.ceil(ny / tile_size))
+        total_tiles = n_tiles_x * n_tiles_y
+        
+        logger.info(f"    Processing {total_tiles} tiles ({tile_size}x{tile_size} each)...")
+        
+        for i in range(n_tiles_x):
+            for j in range(n_tiles_y):
+                x_start = i * tile_size
+                x_end = min((i + 1) * tile_size, nx)
+                y_start = j * tile_size
+                y_end = min((j + 1) * tile_size, ny)
+                
+                tile_num = i * n_tiles_y + j + 1
+                if tile_num % 50 == 0 or tile_num == 1:
+                    logger.info(f"      Tile {tile_num}/{total_tiles}")
+                
+                # Extract tile and compute mean
+                tile = ds.isel(x=slice(x_start, x_end), y=slice(y_start, y_end))
+                tile = tile.chunk({config.TIME_DIM: 12, 'x': -1, 'y': -1})
+                tile_mean = tile.mean(dim=config.TIME_DIM).compute()
+                
+                # Store result
+                for var in ds.data_vars:
+                    file_result[var][y_start:y_end, x_start:x_end] = tile_mean[var].values
+        
+        # Create dataset from tiled results
+        file_mean_data_vars = {}
+        for var in ds.data_vars:
+            file_mean_data_vars[var] = (('y', 'x'), file_result[var])
+        
+        file_mean = xr.Dataset(
+            file_mean_data_vars,
+            coords={'x': ds.x, 'y': ds.y}
+        )
+        
+        # Copy attributes
+        for var in ds.data_vars:
+            file_mean[var].attrs = ds[var].attrs
+        file_mean.attrs = ds.attrs
         
         partial_means.append(file_mean)
         timestep_counts.append(n_timesteps)
