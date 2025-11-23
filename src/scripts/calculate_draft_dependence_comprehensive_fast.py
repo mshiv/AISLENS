@@ -197,7 +197,7 @@ def precompute_shelf_masks(icems: gpd.GeoDataFrame, satobs: xr.Dataset,
         # Get bounding box for quick spatial subset
         bounds = shelf_geom.bounds  # (minx, miny, maxx, maxy)
         
-        # Quick check: count valid points in bounding box
+        # Quick check: count valid points in bounding box (for info only, not filtering)
         try:
             subset = satobs.sel(x=slice(bounds[0], bounds[2]), 
                                y=slice(bounds[1], bounds[3]))
@@ -205,20 +205,16 @@ def precompute_shelf_masks(icems: gpd.GeoDataFrame, satobs: xr.Dataset,
             flux_var = config.SATOBS_FLUX_VAR
             valid_count = (~subset[flux_var].isnull()).sum().item()
             
-            processable = valid_count >= min_valid_points
-            
+            # Always processable if geometry is valid - let internal checks decide
             shelf_info[actual_index] = {
                 'name': shelf_name,
                 'bounds': bounds,
                 'valid_points': valid_count,
-                'processable': processable,
-                'reason': 'OK' if processable else f'Insufficient data ({valid_count} < {min_valid_points})'
+                'processable': True,  # Let internal checks handle quality control
+                'reason': 'OK'
             }
             
-            if processable:
-                processable_count += 1
-            else:
-                skipped_insufficient += 1
+            processable_count += 1
                 
         except Exception as e:
             shelf_info[actual_index] = {
@@ -232,10 +228,9 @@ def precompute_shelf_masks(icems: gpd.GeoDataFrame, satobs: xr.Dataset,
     precompute_time = time() - start_time
     
     logger.info(f"  Pre-computation complete ({precompute_time:.2f}s)")
-    logger.info(f"  Processable shelves: {processable_count}")
-    logger.info(f"  Skipped (empty/invalid geometry): {skipped_empty}")
-    logger.info(f"  Skipped (insufficient data): {skipped_insufficient}")
-    logger.info(f"  Total analyzed: {len(shelf_info)}")
+    logger.info(f"  Total shelves analyzed: {len(shelf_info)}")
+    logger.info(f"  Valid geometry: {processable_count}")
+    logger.info(f"  Empty/invalid geometry: {skipped_empty}")
     
     return shelf_info
 
@@ -402,12 +397,13 @@ def calculate_draft_dependence_comprehensive_fast(
             shelves_to_skip.append((idx, shelf_name, "All files exist"))
             continue
         
-        # Skip if not processable
-        if not info['processable']:
+        # Skip if not processable (empty geometry only - let internal checks handle insufficient data)
+        if not info['processable'] and 'Empty' in info['reason']:
             shelves_to_skip.append((idx, shelf_name, info['reason']))
             continue
         
-        shelves_to_process.append((idx, shelf_name, info['valid_points']))
+        # Process even if insufficient data - internal checks will handle it
+        shelves_to_process.append((idx, shelf_name, info.get('valid_points', 0)))
     
     logger.info(f"Shelves to process: {len(shelves_to_process)}, to skip: {len(shelves_to_skip)}, total: {len(shelf_info)}")
     
