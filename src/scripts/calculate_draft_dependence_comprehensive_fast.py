@@ -265,11 +265,11 @@ def calculate_draft_dependence_comprehensive_fast(
     n_bins: int = 50, 
     min_points_per_bin: int = 5,
     ruptures_method: str = 'pelt', 
-    ruptures_penalty: float = 1.0,
-    min_r2_threshold: float = 0.05, 
-    min_correlation: float = 0.1,
-    noisy_fallback: str = 'zero', 
-    model_selection: str = 'best',
+    ruptures_penalty: float = 0.5,
+    min_r2_threshold: float = 0.005, 
+    min_correlation: float = -0.7,
+    noisy_fallback: str = 'mean', 
+    model_selection: str = 'threshold_intercept',
     # Fast version specific parameters
     coarsen_factor: int = 1,
     min_valid_points: int = 100,
@@ -290,11 +290,11 @@ def calculate_draft_dependence_comprehensive_fast(
         n_bins: Number of bins for draft binning (default: 50)
         min_points_per_bin: Minimum points required per bin (default: 5)
         ruptures_method: Ruptures method ('pelt', 'binseg', 'window') (default: 'pelt')
-        ruptures_penalty: Penalty parameter for ruptures (default: 1.0)
-        min_r2_threshold: Minimum R² for meaningful relationship (default: 0.05)
-        min_correlation: Minimum correlation for meaningful relationship (default: 0.1)
-        noisy_fallback: For noisy data ('zero' or 'mean') (default: 'zero')
-        model_selection: Which model to use ('best', 'zero_shallow', 'mean_shallow', 'threshold_intercept')
+        ruptures_penalty: Penalty parameter for ruptures (default: 0.5)
+        min_r2_threshold: Minimum R² for meaningful relationship (default: 0.005)
+        min_correlation: Minimum correlation for meaningful relationship (default: -0.7)
+        noisy_fallback: For noisy data ('zero' or 'mean') (default: 'mean')
+        model_selection: Which model to use ('best', 'zero_shallow', 'mean_shallow', 'threshold_intercept') (default: 'threshold_intercept')
         coarsen_factor: Spatial coarsening factor for testing (default: 1 = no coarsening)
         min_valid_points: Minimum valid points to process shelf (default: 100)
         skip_existing: Skip shelves with all 5 parameter files (default: True)
@@ -681,8 +681,8 @@ Examples:
       --processed-dir data/processed/draft_dependence_changepoint-fast \\
       --test-mode
   
-  # Custom parameters for more permissive relationships
-  python calculate_draft_dependence_comprehensive_fast.py --min-r2 0.005 --min-corr -0.7
+  # Custom parameters for more restrictive relationships (stricter thresholds)
+  python calculate_draft_dependence_comprehensive_fast.py --min-r2 0.05 --min-corr 0.3
         """
     )
     
@@ -718,18 +718,18 @@ Examples:
     parser.add_argument('--ruptures-method', type=str, default='pelt', 
                         choices=['pelt', 'binseg', 'window'],
                         help='Ruptures changepoint detection method (default: pelt)')
-    parser.add_argument('--ruptures-penalty', type=float, default=1.0, metavar='X',
-                        help='Penalty parameter for ruptures (default: 1.0)')
-    parser.add_argument('--min-r2', type=float, default=0.05, metavar='X',
-                        help='Minimum R² for meaningful relationship (default: 0.05)')
-    parser.add_argument('--min-corr', type=float, default=0.1, metavar='X',
-                        help='Minimum correlation for meaningful relationship (default: 0.1)')
-    parser.add_argument('--noisy-fallback', type=str, default='zero', 
+    parser.add_argument('--ruptures-penalty', type=float, default=0.5, metavar='X',
+                        help='Penalty parameter for ruptures (default: 0.5)')
+    parser.add_argument('--min-r2', type=float, default=0.005, metavar='X',
+                        help='Minimum R² for meaningful relationship (default: 0.005)')
+    parser.add_argument('--min-corr', type=float, default=-0.7, metavar='X',
+                        help='Minimum correlation for meaningful relationship (default: -0.7)')
+    parser.add_argument('--noisy-fallback', type=str, default='mean', 
                         choices=['zero', 'mean'],
-                        help='Fallback for noisy data: zero or mean (default: zero)')
-    parser.add_argument('--model-selection', type=str, default='best',
+                        help='Fallback for noisy data: zero or mean (default: mean)')
+    parser.add_argument('--model-selection', type=str, default='threshold_intercept',
                         choices=['best', 'zero_shallow', 'mean_shallow', 'threshold_intercept'],
-                        help='Model selection strategy (default: best)')
+                        help='Model selection strategy (default: threshold_intercept)')
     
     args = parser.parse_args()
     
