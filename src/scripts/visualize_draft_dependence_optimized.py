@@ -8,13 +8,11 @@ for faster execution.
 Usage:
     python visualize_draft_dependence_optimized.py --parameter_set original
     python visualize_draft_dependence_optimized.py --parameter_set permissive --output_dir /path/to/output
-
-Author: Generated for AISLENS project
-Date: August 2025
 """
 
 import argparse
 import json
+import logging
 import numpy as np
 import matplotlib.pyplot as plt
 import xarray as xr
@@ -26,9 +24,10 @@ from functools import lru_cache
 import warnings
 warnings.filterwarnings('ignore')
 
-# Import your AISLENS modules
 from aislens.config import config
-from aislens.utils import write_crs
+from aislens.utils import write_crs, setup_logging
+
+logger = logging.getLogger(__name__)
 
 # Global variables for caching loaded datasets
 _satobs_cache = None
@@ -41,12 +40,12 @@ def load_datasets():
     global _satobs_cache, _icems_cache
     
     if _satobs_cache is None:
-        print("Loading satellite observation data...")
+        logger.info("Loading satellite observation data...")
         _satobs_cache = xr.open_dataset(config.FILE_PAOLO23_SATOBS_PREPARED)
         _satobs_cache = write_crs(_satobs_cache, config.CRS_TARGET)
     
     if _icems_cache is None:
-        print("Loading ice shelf masks...")
+        logger.info("Loading ice shelf masks...")
         _icems_cache = gpd.read_file(config.FILE_ICESHELFMASKS).to_crs(config.CRS_TARGET)
     
     return _satobs_cache, _icems_cache
@@ -196,19 +195,19 @@ def plot_ice_shelf_comparison(obs_data, pred_params, shelf_name, ax):
     if pred_params is not None:
         pred_melt = create_draft_melt_prediction(plot_draft, pred_params)
         
-        # DEBUG: Print parameter values and prediction ranges
-        print(f"    DEBUG {shelf_name}: Parameters - alpha0={pred_params['alpha0']:.6f}, alpha1={pred_params['alpha1']:.6f}, minDraft={pred_params['minDraft']:.2f}")
-        print(f"    DEBUG {shelf_name}: Draft range [{plot_draft.min():.1f}, {plot_draft.max():.1f}]")
-        print(f"    DEBUG {shelf_name}: Predicted melt range (raw) [{pred_melt.min():.6f}, {pred_melt.max():.6f}]")
-        print(f"    DEBUG {shelf_name}: Observed melt range (after conversion) [{plot_melt.min():.6f}, {plot_melt.max():.6f}]")
+        # Log parameter values and prediction ranges
+        logger.debug(f"{shelf_name}: Parameters - alpha0={pred_params['alpha0']:.6f}, alpha1={pred_params['alpha1']:.6f}, minDraft={pred_params['minDraft']:.2f}")
+        logger.debug(f"{shelf_name}: Draft range [{plot_draft.min():.1f}, {plot_draft.max():.1f}]")
+        logger.debug(f"{shelf_name}: Predicted melt range (raw) [{pred_melt.min():.6f}, {pred_melt.max():.6f}]")
+        logger.debug(f"{shelf_name}: Observed melt range (after conversion) [{plot_melt.min():.6f}, {plot_melt.max():.6f}]")
         
         # Convert ONLY predicted melt rates for better visualization
         # Keep observed data in original kg/m²/s units
         # Convert predicted data from kg/m²/s to m/yr for comparison
-        print(f"    DEBUG {shelf_name}: Converting ONLY predicted melt from kg/m²/s to m/yr")
+        logger.debug(f"{shelf_name}: Converting predicted melt from kg/m²/s to m/yr")
         pred_melt = pred_melt * 31536000 / 917
-        print(f"    DEBUG {shelf_name}: Predicted melt range (after conversion to m/yr) [{pred_melt.min():.6f}, {pred_melt.max():.6f}]")
-        print(f"    DEBUG {shelf_name}: Observed melt range (kept in kg/m²/s) [{plot_melt.min():.6f}, {plot_melt.max():.6f}]")
+        logger.debug(f"{shelf_name}: Predicted melt range (after conversion to m/yr) [{pred_melt.min():.6f}, {pred_melt.max():.6f}]")
+        logger.debug(f"{shelf_name}: Observed melt range (kept in kg/m²/s) [{plot_melt.min():.6f}, {plot_melt.max():.6f}]")
         
         # Determine colors and calculate metrics vectorized
         is_meaningful = True  # Could add correlation-based logic here
@@ -318,11 +317,6 @@ def process_and_plot_ice_shelf(args):
         safe_shelf_name = shelf_name.replace(" ", "_").replace("/", "_")
         output_file = individual_plots_dir / f"{safe_shelf_name}_{parameter_set_name}.png"
         plt.savefig(output_file, dpi=150, bbox_inches='tight')
-        
-        # Save high-res version
-        #output_file_hires = individual_plots_dir / f"{safe_shelf_name}_{parameter_set_name}_hires.png"
-        #plt.savefig(output_file_hires, dpi=300, bbox_inches='tight')
-        
         plt.close()  # Important: close the figure to free memory
         
         return (shelf_name, output_file, has_data)
@@ -362,8 +356,7 @@ def create_draft_dependence_visualization(parameter_set_name, parameter_test_dir
 
     # Use parallel processing with optimized worker count
     max_workers = min(mp.cpu_count(), 8, n_shelves)  # Don't use more workers than shelves
-    print(f"Using {max_workers} parallel workers")
-    print(f"Processing and plotting {n_shelves} ice shelves...")
+    logger.info(f"Using {max_workers} parallel workers to process {n_shelves} ice shelves...")
     
     with ProcessPoolExecutor(max_workers=max_workers) as executor:
         results = list(executor.map(process_and_plot_ice_shelf, args_list))
@@ -378,8 +371,8 @@ def create_draft_dependence_visualization(parameter_set_name, parameter_test_dir
         if output_file is not None:
             output_files.append(output_file)
     
-    print(f"Processed {processed_count} ice shelves with data out of {len(shelf_names)} total")
-    print(f"Individual plots saved to: {individual_plots_dir}")
+    logger.info(f"Processed {processed_count} ice shelves with data out of {len(shelf_names)} total")
+    logger.info(f"Individual plots saved to: {individual_plots_dir}")
     
     return output_files
 
@@ -400,7 +393,7 @@ def create_summary_comparison(parameter_test_dir=None, output_dir=None):
     # Load results summary
     summary_file = parameter_test_dir / "results_summary.json"
     if not summary_file.exists():
-        print(f"Error: Results summary not found: {summary_file}")
+        logger.error(f"Results summary not found: {summary_file}")
         return
         
     with open(summary_file, 'r') as f:
@@ -411,7 +404,7 @@ def create_summary_comparison(parameter_test_dir=None, output_dir=None):
                           if summary['status'] == 'completed'}
     
     if not completed_summaries:
-        print("No completed parameter sets found")
+        logger.warning("No completed parameter sets found")
         return
     
     # Use numpy arrays for vectorized operations
@@ -455,7 +448,7 @@ def create_summary_comparison(parameter_test_dir=None, output_dir=None):
     # Save comparison plot
     output_file = output_dir / "parameter_set_comparison.png"
     plt.savefig(output_file, dpi=150, bbox_inches='tight')
-    print(f"Parameter set comparison saved to: {output_file}")
+    logger.info(f"Parameter set comparison saved to: {output_file}")
     
     plt.close()
     
@@ -477,9 +470,9 @@ def main():
     if args.n_workers is None:
         args.n_workers = min(mp.cpu_count(), 8)  # Cap at 8 to avoid memory issues
     
-    print("DRAFT DEPENDENCE VISUALIZATION (OPTIMIZED)")
-    print("=" * 50)
-    print(f"Using {args.n_workers} parallel workers")
+    setup_logging(Path(args.output_dir) if args.output_dir else Path.cwd(), "visualize_draft_dependence_optimized")
+    logger.info("DRAFT DEPENDENCE VISUALIZATION (OPTIMIZED)")
+    logger.info(f"Using {args.n_workers} parallel workers")
     
     # Create main visualization
     output_file = create_draft_dependence_visualization(
@@ -497,9 +490,9 @@ def main():
             output_dir=args.output_dir
         )
         if summary_file:
-            print(f"Summary comparison saved to: {summary_file}")
+            logger.info(f"Summary comparison saved to: {summary_file}")
     
-    print("Visualization complete!")
+    logger.info("Visualization complete!")
 
 if __name__ == "__main__":
     main()

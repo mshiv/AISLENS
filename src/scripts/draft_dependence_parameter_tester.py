@@ -237,9 +237,6 @@ def run_parameter_tests(icems, satobs, config, parameter_sets, output_base_dir=N
                 icems, satobs, config, **function_params
             )
             
-            # Restore original config
-            config.DIR_ICESHELF_DEDRAFT_SATOBS = original_dir
-            
             # Store summary statistics
             meaningful_count = sum(1 for r in all_results.values() if r.get('is_meaningful', False))
             total_count = len(all_results)
@@ -266,7 +263,6 @@ def run_parameter_tests(icems, satobs, config, parameter_sets, output_base_dir=N
                 'error': f"File not found: {e}",
                 'output_directory': str(set_output_dir)
             }
-            config.DIR_ICESHELF_DEDRAFT_SATOBS = original_dir
             failed_sets += 1
             
         except ValueError as e:
@@ -276,7 +272,6 @@ def run_parameter_tests(icems, satobs, config, parameter_sets, output_base_dir=N
                 'error': f"Invalid value: {e}",
                 'output_directory': str(set_output_dir)
             }
-            config.DIR_ICESHELF_DEDRAFT_SATOBS = original_dir
             failed_sets += 1
             
         except Exception as e:
@@ -287,8 +282,11 @@ def run_parameter_tests(icems, satobs, config, parameter_sets, output_base_dir=N
                 'error': str(e),
                 'output_directory': str(set_output_dir)
             }
-            config.DIR_ICESHELF_DEDRAFT_SATOBS = original_dir
             failed_sets += 1
+        
+        finally:
+            # Always restore original config directory
+            config.DIR_ICESHELF_DEDRAFT_SATOBS = original_dir
     
     # Save results summary
     summary_file = output_base_dir / "results_summary.json"

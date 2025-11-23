@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 """
-Draft Dependence Map Visualization
+Create Antarctica map with ice shelf insets showing draft dependence analysis.
 
-Creates a massive Antarctica ice sheet map with colored ice shelf regions and 
-scatter plot insets positioned near their corresponding ice shelves showing 
-observed vs predicted melt rates from draft dependence parameterization.
+Visualizes observed vs predicted melt rates from draft dependence parameterization
+with scatter plot insets positioned geographically near their ice shelves.
 
-Shiva Muruganandham
-August 2025
+Usage:
+    python visualize_draft_dependence_map.py --parameter_set original
+    python visualize_draft_dependence_map.py --parameter_set original --use_cache
 """
 
 import argparse
-import json
+import logging
 import pickle
 import numpy as np
 import matplotlib.pyplot as plt
@@ -27,71 +27,48 @@ from shapely.geometry import mapping
 from sklearn.linear_model import LinearRegression
 warnings.filterwarnings('ignore')
 
-# Import your AISLENS modules
 from aislens.config import config
-from aislens.utils import write_crs
+from aislens.utils import setup_logging, write_crs
+
+logger = logging.getLogger(__name__)
 
 def load_ice_shelf_data(ice_shelf_index, icems, satobs, config):
-    """
-    Load observational data for a specific ice shelf.
-    """
+    """Load observational data for a specific ice shelf."""
     try:
-        # Get ice shelf geometry and name
         ice_shelf_geom = icems.iloc[ice_shelf_index].geometry
         shelf_name = icems.iloc[ice_shelf_index].name
         
         if ice_shelf_geom is None or ice_shelf_geom.is_empty:
-            print(f"  {shelf_name}: Empty geometry")
+            logger.debug(f"{shelf_name}: Empty geometry")
             return None
             
-        # Create mask for ice shelf using the same method as notebook
         ice_shelf_mask = icems.loc[[ice_shelf_index], 'geometry'].apply(mapping)
-        
-        # Clip satellite data to ice shelf region
         satobs_clipped = satobs.rio.clip(ice_shelf_mask, icems.crs)
         
-        # Extract draft and melt rate data
-        draft_var = config.SATOBS_DRAFT_VAR
-        flux_var = config.SATOBS_FLUX_VAR
+        draft_var, flux_var = config.SATOBS_DRAFT_VAR, config.SATOBS_FLUX_VAR
+        logger.debug(f"{shelf_name}: Variables '{draft_var}', '{flux_var}'")
         
-        print(f"  {shelf_name}: Looking for variables '{draft_var}' and '{flux_var}'")
+        # Get time-averaged draft and melt data
+        draft_data = (satobs_clipped[draft_var].mean(dim=config.TIME_DIM) if config.TIME_DIM in satobs_clipped[draft_var].dims 
+                     else satobs_clipped[draft_var])
+        melt_data = (satobs_clipped[flux_var].mean(dim=config.TIME_DIM) if config.TIME_DIM in satobs_clipped[flux_var].dims 
+                    else satobs_clipped[flux_var])
         
-        # Get draft data (take time mean if time dimension exists)
-        if config.TIME_DIM in satobs_clipped[draft_var].dims:
-            draft_data = satobs_clipped[draft_var].mean(dim=config.TIME_DIM)
-        else:
-            draft_data = satobs_clipped[draft_var]
-            
-        # Get melt rate data (take time mean if time dimension exists) 
-        if config.TIME_DIM in satobs_clipped[flux_var].dims:
-            melt_data = satobs_clipped[flux_var].mean(dim=config.TIME_DIM)
-        else:
-            melt_data = satobs_clipped[flux_var]
+        draft_flat, melt_flat = draft_data.values.flatten(), melt_data.values.flatten()
+        logger.debug(f"{shelf_name}: Draft [{np.nanmin(draft_flat):.2f}, {np.nanmax(draft_flat):.2f}], "
+                    f"Melt [{np.nanmin(melt_flat):.2e}, {np.nanmax(melt_flat):.2e}]")
         
-        # Flatten and remove NaN values
-        draft_flat = draft_data.values.flatten()
-        melt_flat = melt_data.values.flatten()
-        
-        print(f"  {shelf_name}: Draft range: [{np.nanmin(draft_flat):.2f}, {np.nanmax(draft_flat):.2f}]")
-        print(f"  {shelf_name}: Melt range: [{np.nanmin(melt_flat):.2e}, {np.nanmax(melt_flat):.2e}]")
-        
-        # Create mask for valid data points
         valid_mask = ~np.isnan(draft_flat) & ~np.isnan(melt_flat) & (draft_flat > 0)
-        
-        print(f"  {shelf_name}: Valid points: {valid_mask.sum()} out of {len(valid_mask)}")
+        logger.debug(f"{shelf_name}: {valid_mask.sum()}/{len(valid_mask)} valid points")
         
         if valid_mask.sum() == 0:
-            print(f"  {shelf_name}: No valid data points found")
+            logger.debug(f"{shelf_name}: No valid data")
             return None
             
-        return {
-            'draft': draft_flat[valid_mask],
-            'melt': melt_flat[valid_mask], 
-            'shelf_name': shelf_name
-        }
+        return {'draft': draft_flat[valid_mask], 'melt': melt_flat[valid_mask], 'shelf_name': shelf_name}
         
     except Exception as e:
-        print(f"Warning: Could not load data for ice shelf {ice_shelf_index}: {e}")
+        logger.warning(f"Could not load data for shelf {ice_shelf_index}: {e}")
         return None
 
 def load_predicted_data(shelf_name, ice_shelf_index, icems, parameter_set_dir, config):
@@ -103,7 +80,7 @@ def load_predicted_data(shelf_name, ice_shelf_index, icems, parameter_set_dir, c
         combined_file = parameter_set_dir / "ruptures_draftDepenBasalMelt_parameters_filled.nc"
         
         if not combined_file.exists():
-            print(f"Warning: Combined parameter file not found: {combined_file}")
+            logger.warning(f"Combined parameter file not found: {combined_file}")
             return None
             
         # Load the combined dataset
@@ -119,7 +96,7 @@ def load_predicted_data(shelf_name, ice_shelf_index, icems, parameter_set_dir, c
         try:
             clipped = ds.rio.clip(ice_shelf_mask, icems.crs)
             
-            # Extract parameter values using notebook approach
+            # Extract parameter values
             params = {}
             param_vars = {
                 'minDraft': 'draftDepenBasalMelt_minDraft',
@@ -133,22 +110,19 @@ def load_predicted_data(shelf_name, ice_shelf_index, icems, parameter_set_dir, c
                 if var_name in clipped.data_vars:
                     data = clipped[var_name].values.flatten()
                     valid_values = data[~np.isnan(data) & (data != 0)]
-                    if len(valid_values) > 0:
-                        params[param_name] = float(valid_values[0])
-                    else:
-                        params[param_name] = 0.0
+                    params[param_name] = float(valid_values[0]) if len(valid_values) > 0 else 0.0
                 else:
                     params[param_name] = 0.0
                     
-            print(f"  Extracted parameters for {shelf_name}: {params}")
+            logger.debug(f"Extracted parameters for {shelf_name}: {params}")
             return params
             
         except Exception as clip_error:
-            print(f"  Clipping failed for {shelf_name}: {clip_error}")
+            logger.warning(f"Clipping failed for {shelf_name}: {clip_error}")
             return None
         
     except Exception as e:
-        print(f"Error loading predicted data for {shelf_name}: {e}")
+        logger.warning(f"Error loading predicted data for {shelf_name}: {e}")
         return None
 
 def create_draft_melt_prediction(draft_range, params):
@@ -185,7 +159,7 @@ def get_ice_shelf_centroid(ice_shelf_geom):
         centroid = ice_shelf_geom.centroid
         return centroid.x, centroid.y
     except Exception as e:
-        print(f"Error getting centroid: {e}")
+        logger.error(f"Error getting centroid: {e}")
         return 0, 0
 
 def calculate_geographic_inset_positions(ice_shelf_centroids, ice_shelf_names, n_shelves):
@@ -193,14 +167,14 @@ def calculate_geographic_inset_positions(ice_shelf_centroids, ice_shelf_names, n
     Calculate inset positions based on geographic proximity and regions.
     Ice shelves close together on the map should have adjacent insets.
     """
-    print(f"Calculating geographic inset positions for {n_shelves} ice shelves")
+    logger.info(f"Calculating geographic inset positions for {n_shelves} ice shelves")
     
     # Convert centroids to arrays for easier processing
     centroids = np.array(ice_shelf_centroids)
     x_coords = centroids[:, 0]
     y_coords = centroids[:, 1]
     
-    print(f"Centroid ranges: X=[{x_coords.min():.0f}, {x_coords.max():.0f}], Y=[{y_coords.min():.0f}, {y_coords.max():.0f}]")
+    logger.info(f"Centroid ranges: X=[{x_coords.min():.0f}, {x_coords.max():.0f}], Y=[{y_coords.min():.0f}, {y_coords.max():.0f}]")
     
     # Define Antarctic regions based on coordinates (rough approximation)
     # These are approximate regions in Antarctic Polar Stereographic coordinates
@@ -225,9 +199,9 @@ def calculate_geographic_inset_positions(ice_shelf_centroids, ice_shelf_names, n
         if not assigned:
             shelf_regions[i] = 'Other'
     
-    print("Regional assignments:")
+    logger.info("Regional assignments:")
     for i, region in shelf_regions.items():
-        print(f"  {ice_shelf_names[i]}: {region}")
+        logger.debug(f"{ice_shelf_names[i]}: {region}")
     
     # Group ice shelves by region
     region_groups = {}
@@ -247,7 +221,7 @@ def calculate_geographic_inset_positions(ice_shelf_centroids, ice_shelf_names, n
             sorted_by_x = sorted(region_centroids, key=lambda x: x[1][0])
             ordered_indices.extend([i for i, _ in sorted_by_x])
     
-    print(f"Geographic ordering: {[ice_shelf_names[i] for i in ordered_indices]}")
+    logger.info(f"Geographic ordering: {[ice_shelf_names[i] for i in ordered_indices]}")
     
     # Create grid layout for insets
     n_cols = 6
@@ -318,7 +292,7 @@ def plot_ice_shelf_inset(obs_data, pred_params, shelf_name, shelf_index, color, 
         
         # Plot predictions if available
         if pred_params is not None:
-            print(f"    Creating predictions for {shelf_name} with parameters: {pred_params}")
+            logger.debug(f"Creating predictions for {shelf_name} with parameters: {pred_params}")
             
             # Create predictions using original draft values
             pred_melt = create_draft_melt_prediction(plot_draft, pred_params)
@@ -328,12 +302,12 @@ def plot_ice_shelf_inset(obs_data, pred_params, shelf_name, shelf_index, color, 
             if np.abs(pred_melt).max() < 0.01:
                 # If predictions are very small, they might be in kg/m²/s
                 pred_melt_display = pred_melt * 31536000 / 917
-                print(f"    Converted predictions from kg/m²/s to m/yr")
+                logger.debug(f"Converted predictions from kg/m²/s to m/yr")
             else:
                 pred_melt_display = pred_melt
             
-            print(f"    Predicted melt range: [{pred_melt_display.min():.3f}, {pred_melt_display.max():.3f}] m/yr")
-            print(f"    Observed melt range: [{plot_melt_display.min():.3f}, {plot_melt_display.max():.3f}] m/yr")
+            logger.debug(f"Predicted melt range: [{pred_melt_display.min():.3f}, {pred_melt_display.max():.3f}] m/yr")
+            logger.debug(f"Observed melt range: [{plot_melt_display.min():.3f}, {plot_melt_display.max():.3f}] m/yr")
             
             # Plot predicted data
             inset_ax.scatter(pred_melt_display, plot_draft, c=color, s=1, alpha=0.8)
@@ -392,7 +366,7 @@ def process_and_cache_data(parameter_set_name, parameter_test_dir, cache_file,
     """
     Process all ice shelf data and cache results for faster subsequent runs.
     """
-    print(f"Processing data for parameter set: {parameter_set_name}")
+    logger.info(f"Processing data for parameter set: {parameter_set_name}")
     
     # Set up directories
     if parameter_test_dir is None:
@@ -400,11 +374,11 @@ def process_and_cache_data(parameter_set_name, parameter_test_dir, cache_file,
     parameter_test_dir = Path(parameter_test_dir)
     
     # Load data
-    print("Loading satellite observation data...")
+    logger.info("Loading satellite observation data...")
     satobs = xr.open_dataset(config.FILE_PAOLO23_SATOBS_PREPARED)
     satobs = write_crs(satobs, config.CRS_TARGET)
     
-    print("Loading ice shelf masks...")
+    logger.info("Loading ice shelf masks...")
     icems = gpd.read_file(config.FILE_ICESHELFMASKS)
     icems = icems.to_crs(config.CRS_TARGET)
     
@@ -416,7 +390,7 @@ def process_and_cache_data(parameter_set_name, parameter_test_dir, cache_file,
     if max_shelves is not None:
         ice_shelf_indices = ice_shelf_indices[:max_shelves]
     
-    print(f"Processing {len(ice_shelf_indices)} ice shelves starting from index {start_index}")
+    logger.info(f"Processing {len(ice_shelf_indices)} ice shelves starting from index {start_index}")
     
     # Process each ice shelf
     processed_data = {
@@ -432,7 +406,7 @@ def process_and_cache_data(parameter_set_name, parameter_test_dir, cache_file,
         shelf_name = icems.iloc[ice_shelf_idx].name
         ice_shelf_geom = icems.iloc[ice_shelf_idx].geometry
         
-        print(f"Processing {shelf_name}...")
+        logger.info(f"Processing {shelf_name}...")
         
         try:
             # Load observational and prediction data
@@ -451,11 +425,11 @@ def process_and_cache_data(parameter_set_name, parameter_test_dir, cache_file,
             processed_data['centroids'].append((centroid_x, centroid_y))
             
         except Exception as e:
-            print(f"Error processing {shelf_name}: {e}")
+            logger.error(f"Error processing {shelf_name}: {e}")
             continue
     
     # Cache the processed data
-    print(f"Caching processed data to: {cache_file}")
+    logger.info(f"Caching processed data to: {cache_file}")
     with open(cache_file, 'wb') as f:
         pickle.dump(processed_data, f)
     
@@ -465,7 +439,7 @@ def load_cached_data(cache_file):
     """
     Load previously processed and cached data.
     """
-    print(f"Loading cached data from: {cache_file}")
+    logger.info(f"Loading cached data from: {cache_file}")
     with open(cache_file, 'rb') as f:
         return pickle.load(f)
 
@@ -476,7 +450,7 @@ def create_draft_dependence_map_visualization(parameter_set_name, parameter_test
     Create Antarctica map with colored ice shelf regions and scatter plot insets.
     """
     
-    print(f"Creating draft dependence map visualization for parameter set: {parameter_set_name}")
+    logger.info(f"Creating draft dependence map visualization for parameter set: {parameter_set_name}")
     
     # Set up directories
     if parameter_test_dir is None:
@@ -506,7 +480,7 @@ def create_draft_dependence_map_visualization(parameter_set_name, parameter_test
     
     # Filter to ice shelves we have data for
     n_shelves = len(processed_data['ice_shelves'])
-    print(f"Creating visualization for {n_shelves} ice shelves")
+    logger.info(f"Creating visualization for {n_shelves} ice shelves")
     
     # Create color map for ice shelves (fixed color generation)
     if n_shelves <= 5:
@@ -537,21 +511,21 @@ def create_draft_dependence_map_visualization(parameter_set_name, parameter_test
     # Use the stored ice shelf indices directly (with backwards compatibility)
     if 'ice_shelf_indices' in processed_data:
         ice_shelf_indices = processed_data['ice_shelf_indices']
-        print(f"Using stored ice shelf indices: {ice_shelf_indices}")
+        logger.info(f"Using stored ice shelf indices: {ice_shelf_indices}")
     else:
         # Backwards compatibility: reconstruct indices for old cache files
-        print("Old cache format detected, reconstructing ice shelf indices...")
+        logger.info("Old cache format detected, reconstructing ice shelf indices...")
         ice_shelf_indices = []
         for i, shelf_name in enumerate(processed_data['ice_shelves']):
             try:
                 idx = icems[icems['name'] == shelf_name].index[0]
                 ice_shelf_indices.append(idx)
             except:
-                print(f"Warning: Could not find index for {shelf_name}")
+                logger.warning(f"Could not find index for {shelf_name}")
                 # Calculate based on start_index + position
                 calculated_idx = start_index + i
                 ice_shelf_indices.append(calculated_idx)
-        print(f"Reconstructed ice shelf indices: {ice_shelf_indices}")
+        logger.info(f"Reconstructed ice shelf indices: {ice_shelf_indices}")
     
     # Calculate geographically-aware inset positions
     inset_positions = calculate_geographic_inset_positions(
@@ -568,7 +542,7 @@ def create_draft_dependence_map_visualization(parameter_set_name, parameter_test
     ):
         
         if obs_data is None:
-            print(f"  {shelf_name}: Skipping inset - no observational data")
+            logger.debug(f"{shelf_name}: Skipping inset - no observational data")
             continue
         
         shelf_color = colors[processed_count] if isinstance(colors[0], str) else colors[processed_count]
@@ -588,7 +562,7 @@ def create_draft_dependence_map_visualization(parameter_set_name, parameter_test
         
         processed_count += 1
     
-    print(f"Plotted colored ice shelves: {plotted_ice_shelves}")
+    logger.info(f"Plotted colored ice shelves: {plotted_ice_shelves}")
     
     # Add title and labels
     ax_map.set_title(f'Draft Dependence Analysis: {parameter_set_name}\n'
@@ -608,9 +582,9 @@ def create_draft_dependence_map_visualization(parameter_set_name, parameter_test
     
     # Save plot
     output_file = output_dir / f"draft_dependence_map_{parameter_set_name}.png"
-    print(f"Saving plot to: {output_file}")
+    logger.info(f"Saving plot to: {output_file}")
     plt.savefig(output_file, dpi=200, bbox_inches='tight')
-    print(f"Map visualization saved to: {output_file}")
+    logger.info(f"Map visualization saved to: {output_file}")
     
     # Save high-res version  
     output_file_hires = output_dir / f"draft_dependence_map_{parameter_set_name}_hires.png"
@@ -618,7 +592,7 @@ def create_draft_dependence_map_visualization(parameter_set_name, parameter_test
     
     plt.show()
     
-    print(f"Processed {processed_count} ice shelves with data out of {n_shelves} total")
+    logger.info(f"Processed {processed_count} ice shelves with data out of {n_shelves} total")
     
     return output_file
 
@@ -643,8 +617,7 @@ def main():
     
     args = parser.parse_args()
     
-    print("DRAFT DEPENDENCE MAP VISUALIZATION")
-    print("=" * 45)
+    logger.info("DRAFT DEPENDENCE MAP VISUALIZATION")
     
     # Create map visualization
     output_file = create_draft_dependence_map_visualization(
@@ -657,7 +630,7 @@ def main():
         cache_file=args.cache_file
     )
     
-    print("Map visualization complete!")
+    logger.info("Map visualization complete!")
 
 if __name__ == "__main__":
     main()

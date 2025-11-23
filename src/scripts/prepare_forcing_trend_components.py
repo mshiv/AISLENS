@@ -1,76 +1,88 @@
+#!/usr/bin/env python3
+"""
+Detrend ISMIP6 forcing trend components using breakpoint detection.
+
+Processes ISMIP6 forcing data (SSP585, SSP126, etc.) by detrending with polynomial
+fit and breakpoint detection (ruptures algorithm).
+
+Input: NetCDF file with floatingBasalMassBal variable and Time dimension
+Output: NetCDF file with trend component (detrended data)
+
+Usage:
+    python prepare_forcing_trend_components.py input.nc output.nc [--method {vectorized,timeseries}]
+    python prepare_forcing_trend_components.py  # Uses default SSP585 file
+"""
+
+import argparse
+import logging
+from pathlib import Path
+from time import time
+import xarray as xr
+
 from aislens.config import config
 from aislens.dataprep import detrend_with_breakpoints_vectorized, detrend_with_breakpoints_ts
-import xarray as xr
-import numpy as np
-import pandas as pd
-from pathlib import Path
-import ruptures as rpt
+from aislens.utils import setup_logging
+
+logger = logging.getLogger(__name__)
 
 
-def detrend_forcing_trend_components(forcing_file_path):
-    """
-    Detrend the forcing trend components using a polynomial fit.
+def detrend_forcing(forcing_file_path, output_path, method='vectorized'):
+    """Detrend forcing data using breakpoint detection."""
+    logger.info(f"Loading {forcing_file_path}...")
+    ds = xr.open_dataset(forcing_file_path)
+    ds[config.MALI_FLOATINGBMB_VAR] = (ds[config.MALI_FLOATINGBMB_VAR].isel(Time=0) - 
+                                        ds[config.MALI_FLOATINGBMB_VAR])
     
-    Parameters:
-    ds (xarray.Dataset): The dataset containing the forcing trend components.
-    time_dim (str): The name of the time dimension in the dataset.
-    deg (int): The degree of the polynomial to fit for detrending.
+    if method == 'vectorized':
+        logger.info("Detrending (vectorized - all spatial points)...")
+        detrended_data = detrend_with_breakpoints_vectorized(
+            ds[config.MALI_FLOATINGBMB_VAR], dim="Time", deg=1, model="rbf", penalty=10
+        )
+    else:
+        logger.info("Detrending (time series - spatial mean)...")
+        spatial_dims = [dim for dim in ds[config.MALI_FLOATINGBMB_VAR].dims if dim != 'Time']
+        spatial_mean_ts = ds[config.MALI_FLOATINGBMB_VAR].mean(dim=spatial_dims)
+        detrended_data = detrend_with_breakpoints_ts(
+            spatial_mean_ts, dim="Time", deg=1, model="rbf", penalty=10
+        )
     
-    Returns:
-    xarray.Dataset: The dataset with detrended forcing trend components.
-    """
-    # Detrend each variable in the dataset
-    ds = xr.open_dataset(forcing_file_path)#, chunks={config.TIME_DIM: 36})
-    ds[config.MALI_FLOATINGBMB_VAR] = (ds[config.MALI_FLOATINGBMB_VAR].isel(Time=0) - ds[config.MALI_FLOATINGBMB_VAR])
-    detrended_data = detrend_with_breakpoints_vectorized(ds[config.MALI_FLOATINGBMB_VAR],
-                                                         dim="Time",        # Specify the dimension to detrend
-                                                         deg=1,             # Degree of polynomial (e.g., 1 for linear detrending)
-                                                         model="rbf",        # Cost model for ruptures
-                                                         penalty=10         # Penalty value for change point detection
-                                                         )
-    detrended_data = detrended_data.to_dataset(name=config.MALI_FLOATINGBMB_VAR)  # Convert back to Dataset
-    trend_with_breakpoints = ds - detrended_data
-    trend_with_breakpoints = trend_with_breakpoints.rename({config.MALI_FLOATINGBMB_VAR: config.AISLENS_FLOATINGBMB_VAR})
-    trend_with_breakpoints.to_netcdf(Path(config.DIR_MALI_ISMIP6_FORCINGS) / "ISMIP6_SSP585_UKESM_FLOATINGBMB_TREND.nc")
-    print("Detrending complete. Detrended data saved to 'ISMIP6_SSP585_UKESM_FLOATINGBMB_TREND.nc'.")
+    trend = (ds - detrended_data.to_dataset(name=config.MALI_FLOATINGBMB_VAR))
+    trend = trend.rename({config.MALI_FLOATINGBMB_VAR: config.AISLENS_FLOATINGBMB_VAR})
+    
+    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+    trend.to_netcdf(output_path)
+    logger.info(f"Trend saved as {output_path}")
 
-def detrend_forcing_trend_components_ts(forcing_file_path):
-    """
-    Detrend the forcing trend components using a polynomial fit.
-    
-    Parameters:
-    ds (xarray.Dataset): The dataset containing the forcing trend components.
-    time_dim (str): The name of the time dimension in the dataset.
-    deg (int): The degree of the polynomial to fit for detrending.
-    
-    Returns:
-    xarray.Dataset: The dataset with detrended forcing trend components.
-    """
-    # Detrend each variable in the dataset
-    ds = xr.open_dataset(forcing_file_path)#, chunks={config.TIME_DIM: 36})
-    ds[config.MALI_FLOATINGBMB_VAR] = (ds[config.MALI_FLOATINGBMB_VAR].isel(Time=0) - ds[config.MALI_FLOATINGBMB_VAR])
-    
-    # Fix: Take spatial mean (average over x,y dimensions) to create time series
-    # Get all spatial dimensions (everything except Time)
-    spatial_dims = [dim for dim in ds[config.MALI_FLOATINGBMB_VAR].dims if dim != 'Time']
-    
-    # Create spatially-averaged time series
-    spatial_mean_ts = ds[config.MALI_FLOATINGBMB_VAR].mean(dim=spatial_dims)
-    
-    detrended_data = detrend_with_breakpoints_ts(spatial_mean_ts,
-                                                  dim="Time",        # Specify the dimension to detrend
-                                                  deg=1,             # Degree of polynomial (e.g., 1 for linear detrending)
-                                                  model="rbf",        # Cost model for ruptures
-                                                  penalty=10         # Penalty value for change point detection
-                                                  )
-    detrended_data = detrended_data.to_dataset(name=config.MALI_FLOATINGBMB_VAR)  # Convert back to Dataset
-    trend_with_breakpoints = ds - detrended_data
-    trend_with_breakpoints = trend_with_breakpoints.rename({config.MALI_FLOATINGBMB_VAR: config.AISLENS_FLOATINGBMB_VAR})
-    trend_with_breakpoints.to_netcdf(Path(config.DIR_MALI_ISMIP6_FORCINGS) / "ISMIP6_SSP585_TREND.nc")
-    print("Detrending complete. Detrended data saved to 'ISMIP6_SSP585_TREND.nc'.")
 
 if __name__ == "__main__":
-    # Define the path to the forcing file
-    forcing_file_path = config.FILE_ISMIP6_SSP585_FORCING
-    # Call the detrend function
-    detrend_forcing_trend_components(forcing_file_path)
+    parser = argparse.ArgumentParser(description='Detrend ISMIP6 forcing trend components')
+    parser.add_argument('input_file', nargs='?', type=Path,
+                       default=config.FILE_ISMIP6_SSP585_FORCING,
+                       help='Input forcing file (default: SSP585 from config)')
+    parser.add_argument('output_file', nargs='?', type=Path,
+                       help='Output trend file (default: auto-named in ISMIP6 forcings dir)')
+    parser.add_argument('--method', choices=['vectorized', 'timeseries'], default='vectorized',
+                       help='Detrending method (default: vectorized)')
+    args = parser.parse_args()
+    
+    # Auto-generate output name if not provided
+    if args.output_file is None:
+        input_stem = args.input_file.stem
+        output_name = f"{input_stem}_TREND.nc"
+        args.output_file = Path(config.DIR_MALI_ISMIP6_FORCINGS) / output_name
+    
+    setup_logging(args.output_file.parent, "prepare_forcing_trend_components")
+    
+    logger.info("="*60)
+    logger.info("FORCING TREND COMPONENT DETRENDING")
+    logger.info(f"Input: {args.input_file}")
+    logger.info(f"Output: {args.output_file}")
+    logger.info(f"Method: {args.method}")
+    logger.info("="*60)
+    
+    start = time()
+    detrend_forcing(args.input_file, args.output_file, args.method)
+    logger.info("="*60)
+    logger.info(f"COMPLETE ({time() - start:.1f}s)")
+    logger.info("="*60)
+

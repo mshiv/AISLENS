@@ -1,59 +1,61 @@
-# This script preprocesses satellite observation data to calculate and extrapolate 
-# draft dependence parameters.
-# Run this script after running prepare_data.py
-# Steps:
-#   1. Load the satellite observation dataset.
-#   2. Calculate draft dependence parameters (draftDepenBasalMeltAlpha0 and 
-#      draftDepenBasalMeltAlpha1) using the dedraft function.
-#       2.1. This dedrafting is done by first, splitting the dataset into 
-#            different ice shelf regions and calculating draft params separately 
-#            for each one. Do this by using the ice shelf masks.
-#       2.2. Then, the draft params are merged across the entire ice sheet.
-#       2.3. The draft params are then saved to a file.
-#   3. Extrapolate the draft dependence parameters to the entire ice sheet grid.
-#       3.1. This is done by filling NaN values with the nearest neighbor values 
-#            using the fill_nan_with_nearest_neighbor_vectorized function.
-#   4. Save the extrapolated parameters to a specified output path.
+#!/usr/bin/env python3
+"""
+Calculate draft dependence parameters from satellite observations.
 
-from aislens.dataprep import dedraft_catchment
-from aislens.config import config
-from aislens.utils import write_crs
+Processes prepared satellite data to compute draftDepenBasalMeltAlpha parameters
+for each ice shelf region using weighted regression (weight_power=0.25).
+
+Prerequisites: Run prepare_satobs.py or prepare_data.py first
+
+Usage: python calculate_draft_dependence.py
+"""
+
+import logging
+from pathlib import Path
+from time import time
 import xarray as xr
 import geopandas as gpd
 
-# Load the prepared satellite observation dataset
-satobs = xr.open_dataset(config.FILE_PAOLO23_SATOBS_PREPARED)
-satobs = write_crs(satobs, config.CRS_TARGET)
-icems = gpd.read_file(config.FILE_ICESHELFMASKS);
-icems = icems.to_crs({'init': config.CRS_TARGET});
+from aislens.dataprep import dedraft_catchment
+from aislens.utils import write_crs, setup_logging
+from aislens.config import config
 
-# 3 main functions to be run:
-# 1. dedraft_ice_shelf_region: Dedraft the satellite observation data for each ice shelf region.
-# 2. process_ice_shelf_region: Process a single ice shelf region: perform regression, create DataArrays, mask, write output.
-# 3. calculate_draft_dependence: Calculate draft dependence parameters for all ice shelf regions.
-# Dedraft the satellite observation data for each ice shelf region
-# Loop through each ice shelf region defined in the configuration
-# Merge the dedrafted data across the entire ice sheet
+logger = logging.getLogger(__name__)
 
-def calculate_draft_dependence(icems, satobs, config):
-    print("CALCULATING DRAFT DEPENDENCE PARAMETERS FOR SATELLITE OBSERVATIONS...")
-    for i in config.ICE_SHELF_REGIONS:
+
+def calculate_draft_dependence():
+    """Calculate draft dependence parameters for all ice shelf regions."""
+    start_time = time()
+    
+    logger.info("Loading satellite observations and ice shelf masks...")
+    satobs = write_crs(xr.open_dataset(config.FILE_PAOLO23_SATOBS_PREPARED), config.CRS_TARGET)
+    icems = gpd.read_file(config.FILE_ICESHELFMASKS).to_crs({'init': config.CRS_TARGET})
+    logger.debug(f"Processing {len(config.ICE_SHELF_REGIONS)} ice shelves")
+    
+    logger.info("Calculating draft dependence parameters...")
+    for idx, i in enumerate(config.ICE_SHELF_REGIONS, 1):
+        logger.debug(f"  [{idx}/{len(config.ICE_SHELF_REGIONS)}] {icems.name.values[i]}")
         dedraft_catchment(i, icems, satobs, config, 
-                          save_dir=config.DIR_ICESHELF_DEDRAFT_SATOBS,
-                          weights=True,
-                          weight_power=0.25,
-                          save_pred=True,
-                          save_coefs=True
-                          )
-    draft_dependence_params = xr.Dataset()
-    for i in config.ICE_SHELF_REGIONS:
-        draft_dependence_params = xr.merge([draft_dependence_params, xr.open_dataset(config.DIR_ICESHELF_DEDRAFT_SATOBS / 'draftDepenBasalMeltAlpha_{}.nc'.format(icems.name.values[i]))])
-    print("DRAFT DEPENDENCE PARAMETERS CALCULATED AND SAVED FOR SATELLITE OBSERVATIONS.")
-    # Extrapolate draft dependence parameters
-    draft_dependence_params = draft_dependence_params.fillna(0)  # Fill NaN values with 0 before extrapolation
-    # draft_dependence_extrapolated = fill_nan_with_nearest_neighbor_vectorized(draft_dependence_params)
-    # Save the extrapolated parameters
-    draft_dependence_params.to_netcdf(config.FILE_DRAFT_DEPENDENCE)
+                         save_dir=config.DIR_ICESHELF_DEDRAFT_SATOBS,
+                         weights=True, weight_power=0.25,
+                         save_pred=True, save_coefs=True)
+    
+    logger.info("Merging and saving draft dependence parameters...")
+    param_files = [config.DIR_ICESHELF_DEDRAFT_SATOBS / f'draftDepenBasalMeltAlpha_{icems.name.values[i]}.nc'
+                   for i in config.ICE_SHELF_REGIONS]
+    draft_params = xr.merge([xr.open_dataset(f) for f in param_files]).fillna(0)
+    draft_params.to_netcdf(config.FILE_DRAFT_DEPENDENCE)
+    
+    logger.info(f"Complete ({time() - start_time:.1f}s) → {config.FILE_DRAFT_DEPENDENCE}")
+
 
 if __name__ == "__main__":
-    calculate_draft_dependence(icems, satobs, config)
+    output_dir = Path(config.DIR_PROCESSED)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    setup_logging(output_dir, "calculate_draft_dependence")
+    
+    logger.info("="*60)
+    logger.info("DRAFT DEPENDENCE PARAMETER CALCULATION")
+    logger.info("="*60)
+    calculate_draft_dependence()
+    logger.info("="*60)
