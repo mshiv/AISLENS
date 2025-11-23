@@ -391,21 +391,20 @@ def calculate_draft_dependence_comprehensive_fast(
         min_valid_points=min_valid_points
     )
     
-    # Determine which shelves to process
     shelves_to_process = []
     shelves_to_skip = []
     
     for idx, info in shelf_info.items():
         shelf_name = info['name']
         
+        # Check for existing files first (highest priority)
+        if skip_existing and shelf_name in complete_shelves:
+            shelves_to_skip.append((idx, shelf_name, "All files exist"))
+            continue
+        
         # Skip if not processable
         if not info['processable']:
             shelves_to_skip.append((idx, shelf_name, info['reason']))
-            continue
-        
-        # Skip if all files exist (unless skip_existing=False)
-        if skip_existing and shelf_name in complete_shelves:
-            shelves_to_skip.append((idx, shelf_name, "All files exist"))
             continue
         
         shelves_to_process.append((idx, shelf_name, info['valid_points']))
@@ -423,7 +422,8 @@ def calculate_draft_dependence_comprehensive_fast(
     all_draft_params = {}
     
     processed_count = 0
-    skipped_count = len(shelves_to_skip)
+    loaded_count = 0
+    skipped_count = 0
     error_details = {}
     
     logger.info("Processing ice shelves...")
@@ -441,6 +441,9 @@ def calculate_draft_dependence_comprehensive_fast(
                 'skipped': True,
                 'reason': 'Files exist'
             }
+            loaded_count += 1
+        else:
+            skipped_count += 1
     
     iterator = tqdm(shelves_to_process, desc="Processing shelves") if TQDM_AVAILABLE else shelves_to_process
     
@@ -513,11 +516,14 @@ def calculate_draft_dependence_comprehensive_fast(
     processing_time = time() - processing_start
     
     logger.info(f"Processing summary:")
-    logger.info(f"  Successfully processed: {processed_count}, skipped/failed: {skipped_count}, total: {len(shelf_info)}")
+    logger.info(f"  Processed from scratch: {processed_count}")
+    logger.info(f"  Loaded from existing files: {loaded_count}")
+    logger.info(f"  Skipped/failed: {skipped_count}")
+    logger.info(f"  Total shelves: {len(shelf_info)}")
     logger.info(f"  Processing time: {processing_time:.1f}s ({processing_time/60:.1f} min)")
     
     if processed_count > 0:
-        logger.info(f"  Average time per shelf: {processing_time/processed_count:.2f}s")
+        logger.info(f"  Average time per shelf (newly processed): {processing_time/processed_count:.2f}s")
     
     if error_details:
         logger.info(f"  Error breakdown ({len(error_details)} errors):")
@@ -536,8 +542,8 @@ def calculate_draft_dependence_comprehensive_fast(
         if len(error_details) > 5:
             logger.debug(f"    ... and {len(error_details)-5} more")
     
-    if processed_count == 0 and len(all_results) == 0:
-        logger.error("WARNING: No ice shelves were processed successfully")
+    if processed_count == 0 and loaded_count == 0:
+        logger.error("WARNING: No ice shelves were processed or loaded")
         logger.error("Possible causes: missing dependencies, data format issues, insufficient data")
         return {}, {}
     
@@ -782,6 +788,10 @@ Examples:
     
     if args.coarsen > 1:
         logger.warning(f"COARSENING ENABLED (factor={args.coarsen}) - results at reduced resolution for testing only")
+        adjusted_min_points = max(10, args.min_points // (args.coarsen ** 2))
+        if adjusted_min_points != args.min_points:
+            logger.info(f"Adjusting min_points from {args.min_points} to {adjusted_min_points} for coarsened data")
+            args.min_points = adjusted_min_points
     
     if args.test_mode:
         logger.warning(f"TEST MODE - processing only first 10 shelves")
@@ -819,7 +829,7 @@ Examples:
         output_dir=Path(args.output_dir) if args.output_dir else None
     )
     
-    logger.info(f"Processing complete! Processed {len(all_results)} ice shelves")
+    logger.info(f"Processing complete! Total ice shelves: {len(all_results)}")
     logger.info(f"Individual files: {output_dir}")
     logger.info(f"Merged grids: {config.DIR_PROCESSED / 'draft_dependence_changepoint'}")
 
