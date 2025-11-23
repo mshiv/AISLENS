@@ -73,16 +73,12 @@ if __name__ == "__main__":
     
     setup_logging(args.output_file.parent, "prepare_forcing_trend_components")
     
-    logger.info("="*60)
     logger.info("FORCING TREND COMPONENT DETRENDING")
     logger.info(f"Input: {args.input_file}")
     logger.info(f"Output: {args.output_file}")
     logger.info(f"Method: {args.method}")
-    logger.info("="*60)
     
     start = time()
     detrend_forcing(args.input_file, args.output_file, args.method)
-    logger.info("="*60)
     logger.info(f"COMPLETE ({time() - start:.1f}s)")
-    logger.info("="*60)
 

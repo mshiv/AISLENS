@@ -40,15 +40,12 @@ def main():
     
     args = parser.parse_args()
     
-    # Use config defaults if not specified
     start_year = args.start_year if args.start_year is not None else config.SORRM_START_YEAR
     end_year = args.end_year if args.end_year is not None else config.SORRM_END_YEAR
     
-    # Initialize directories if requested
     if args.init_dirs:
         initialize_directories(collect_directories(config))
     
-    # Setup logging
     output_dir = Path(config.DIR_PROCESSED)
     output_dir.mkdir(parents=True, exist_ok=True)
     setup_logging(output_dir, "prepare_model_sim")
@@ -75,7 +72,6 @@ def main():
     logger.info("Deseasonalizing...")
     model_deseasonalized = deseasonalize(model_detrended)
     
-    # Rechunk after deseasonalize to prevent large chunks
     logger.info("Rechunking after deseasonalize...")
     model_deseasonalized = model_deseasonalized.chunk({config.TIME_DIM: 36, 'x': 250, 'y': 250})
     
@@ -96,7 +92,6 @@ def main():
         logger.info(f"Calculating draft dependence ({len(missing)} missing)...")
         config.DIR_ICESHELF_DEDRAFT_MODEL.mkdir(parents=True, exist_ok=True)
         
-        # Load pre-computed time-mean
         temp_mean_file = config.DIR_ICESHELF_DEDRAFT_MODEL / '_temp_time_mean.nc'
         
         if not temp_mean_file.exists():
@@ -108,7 +103,6 @@ def main():
         logger.info(f"Loading pre-computed time-mean from: {temp_mean_file}")
         model_deseasonalized_mean = xr.open_dataset(temp_mean_file)
         
-        # Process ice shelves sequentially
         ice_shelves_to_process = [
             (i, icems.name.values[i]) for i in config.ICE_SHELF_REGIONS
             if not (config.DIR_ICESHELF_DEDRAFT_MODEL / f'draftDepenModelPred_{icems.name.values[i]}.nc').exists()

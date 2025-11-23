@@ -49,13 +49,9 @@ def calculate_draft_dependence():
     logger.info(f"Complete ({time() - start_time:.1f}s) → {config.FILE_DRAFT_DEPENDENCE}")
 
 
-if __name__ == "__main__":
-    output_dir = Path(config.DIR_PROCESSED)
-    output_dir.mkdir(parents=True, exist_ok=True)
-    setup_logging(output_dir, "calculate_draft_dependence")
-    
-    logger.info("="*60)
-    logger.info("DRAFT DEPENDENCE PARAMETER CALCULATION")
-    logger.info("="*60)
-    calculate_draft_dependence()
-    logger.info("="*60)
+output_dir = Path(config.DIR_PROCESSED)
+output_dir.mkdir(parents=True, exist_ok=True)
+setup_logging(output_dir, "calculate_draft_dependence")
+
+logger.info("DRAFT DEPENDENCE PARAMETER CALCULATION")
+calculate_draft_dependence()

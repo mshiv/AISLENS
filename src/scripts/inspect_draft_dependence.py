@@ -51,7 +51,6 @@ def _log_shelf_examples(df, mask, cols, label, threshold_info=""):
 def analyze_classification_criteria(summary_df, min_r2=0.1, min_corr=0.2):
     """Analyze why ice shelves were classified as linear vs constant."""
     logger.info("\nCLASSIFICATION ANALYSIS")
-    logger.info("=" * 50)
     
     total = len(summary_df)
     meaningful = summary_df['is_meaningful'].sum()
@@ -59,7 +58,6 @@ def analyze_classification_criteria(summary_df, min_r2=0.1, min_corr=0.2):
     logger.info(f"Linear: {(summary_df['paramType']==0).sum()} | Constant: {(summary_df['paramType']==1).sum()}")
     logger.info(f"\nThresholds - R²: {min_r2}, Correlation: {min_corr}")
     
-    # Analyze different categories
     cols = ['shelf_name', 'r2', 'correlation', 'paramType']
     low_r2 = (summary_df['r2'] < min_r2) & (~summary_df['r2'].isna())
     low_corr = (np.abs(summary_df['correlation']) < min_corr) & (~summary_df['correlation'].isna())
@@ -74,7 +72,6 @@ def analyze_classification_criteria(summary_df, min_r2=0.1, min_corr=0.2):
 def suggest_parameter_modifications(summary_df, target_pct=None):
     """Suggest parameter modifications to achieve desired classification results."""
     logger.info("\nPARAMETER MODIFICATION SUGGESTIONS")
-    logger.info("=" * 50)
     
     current_pct = (summary_df['paramType'] == 0).sum() / len(summary_df) * 100
     logger.info(f"Current linear: {current_pct:.1f}%" + (f" | Target: {target_pct:.1f}%" if target_pct else ""))
@@ -97,7 +94,6 @@ def suggest_parameter_modifications(summary_df, target_pct=None):
                 min_corr = top['correlation'].abs().min() if not top['correlation'].isna().all() else 0
                 logger.info(f"\n  Suggested: min_r2={min_r2:.3f}, min_corr={min_corr:.3f}")
     
-    # Very low metrics
     for metric, thresh, col in [('R²', 0.01, 'r2'), ('correlation', 0.05, 'correlation')]:
         low = summary_df[summary_df[col].abs() < thresh if col == 'correlation' 
                         else summary_df[col] < thresh]['shelf_name'].tolist()
@@ -117,7 +113,6 @@ def inspect_specific_shelf(summary_df, shelf_name):
     
     r = matches.iloc[0]
     logger.info(f"\nDETAILED ANALYSIS: {r['shelf_name']}")
-    logger.info("=" * 50)
     logger.info(f"{'Meaningful' if r['is_meaningful'] else 'Not meaningful'} | "
                f"{'Linear' if r['paramType']==0 else 'Constant'} parameterization")
     logger.info(f"R²={r['r2']:.4f}, corr={r['correlation']:.4f}, n={r['n_points']}")
@@ -131,7 +126,6 @@ def create_threshold_sensitivity_plot(summary_df, output_dir=None):
     corr_vals = np.arange(0.05, 0.5, 0.02)
     X, Y = np.meshgrid(corr_vals, r2_vals)
     
-    # Calculate linear % for each threshold combination
     linear_pct = np.array([[
         (((summary_df['r2'] >= r2) | summary_df['r2'].isna()) & 
          ((np.abs(summary_df['correlation']) >= corr) | summary_df['correlation'].isna())).sum() / len(summary_df) * 100
@@ -175,9 +169,7 @@ if __name__ == "__main__":
     output_dir = args.output_dir or Path(config.DIR_ICESHELF_DEDRAFT_SATOBS) / "parameter_tests" / args.parameter_set
     setup_logging(output_dir, "inspect_draft_dependence")
     
-    logger.info("=" * 60)
     logger.info("DRAFT DEPENDENCE ANALYSIS INSPECTOR")
-    logger.info("=" * 60)
     
     summary_df = load_analysis_results(args.parameter_set, args.parameter_test_dir)
     if summary_df is None:
@@ -190,9 +182,9 @@ if __name__ == "__main__":
         analyze_classification_criteria(summary_df)
         suggest_parameter_modifications(summary_df, args.target_linear_pct)
     
+    
     if args.create_sensitivity_plot:
         create_threshold_sensitivity_plot(summary_df, args.output_dir)
     
-    logger.info("=" * 60)
     logger.info("INSPECTION COMPLETE")
-    logger.info("=" * 60)
+

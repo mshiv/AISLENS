@@ -33,7 +33,6 @@ def combine_ssp585_forcing_xarray(trend_file_path, forcing_file_path, output_fil
     logger.info(f"Loading forcing file: {forcing_file_path}")
     forcing_ds = xr.open_dataset(forcing_file_path)
     
-    # Check/rename variable if needed
     if "floatingBasalMassBalAdjustment" not in trend_ds.data_vars:
         if "floatingBasalMassBalApplied" in trend_ds.data_vars:
             logger.info("Renaming floatingBasalMassBalApplied → floatingBasalMassBalAdjustment")
@@ -44,10 +43,9 @@ def combine_ssp585_forcing_xarray(trend_file_path, forcing_file_path, output_fil
     if "floatingBasalMassBalAdjustment" not in forcing_ds.data_vars:
         raise ValueError(f"floatingBasalMassBalAdjustment not found. Available: {list(forcing_ds.data_vars.keys())}")
     
-    # Extract time slices (equivalent to ncks -d Time,start,end)
     logger.info("Extracting overlapping time periods...")
-    trend_subset = trend_ds  # All timesteps (2015-2300)
-    forcing_subset = forcing_ds.isel(Time=slice(168, 3600))  # Jan 2015 - Dec 2299
+    trend_subset = trend_ds
+    forcing_subset = forcing_ds.isel(Time=slice(168, 3600))
     
     logger.debug(f"Trend: {len(trend_subset.Time)} timesteps, Forcing: {len(forcing_subset.Time)} timesteps")
     
@@ -65,7 +63,7 @@ def combine_ssp585_forcing_xarray(trend_file_path, forcing_file_path, output_fil
     )
     
     logger.info("Creating final output with early period...")
-    early_period = forcing_ds.isel(Time=slice(0, 168))  # 2000-2014
+    early_period = forcing_ds.isel(Time=slice(0, 168))
     logger.debug(f"Early period: {len(early_period.Time)} timesteps")
     
     try:
@@ -81,13 +79,12 @@ def combine_ssp585_forcing_xarray(trend_file_path, forcing_file_path, output_fil
                 logger.warning(f"Variable {var_name} not in original forcing")
         logger.info("Fallback approach completed")
     
-    # Verify
     logger.info("Verifying final output...")
     final_time_size = len(final_ds.Time)
     if final_time_size == 3600:
-        logger.info(f"✓ Correct Time dimension: {final_time_size}")
+        logger.info(f"Correct Time dimension: {final_time_size}")
     else:
-        logger.warning(f"⚠ Expected 3600 timesteps, got {final_time_size}")
+        logger.warning(f"Expected 3600 timesteps, got {final_time_size}")
     
     if "floatingBasalMassBalAdjustment" not in final_ds.data_vars:
         raise ValueError("Output verification failed - variable missing")
@@ -97,7 +94,7 @@ def combine_ssp585_forcing_xarray(trend_file_path, forcing_file_path, output_fil
     logger.info(f"Saving → {output_file_path}")
     final_ds.to_netcdf(output_file_path)
     
-    logger.info("✓ Processing complete!")
+    logger.info("Processing complete!")
     logger.info("Time breakdown:")
     logger.info("  2000-2014 (0-167): Original forcing")
     logger.info("  2015-2299 (168-3599): Original + SSP585 trend")
@@ -107,9 +104,7 @@ def combine_ssp585_forcing_xarray(trend_file_path, forcing_file_path, output_fil
 
 def process_single_ensemble(ensemble_dir, trend_file_path, ensemble_name, ensemble_num):
     """Process a single ensemble member."""
-    logger.info("=" * 60)
     logger.info(f"Processing {ensemble_name} (Ensemble Member {ensemble_num})")
-    logger.info("=" * 60)
     
     ensemble_path = Path(ensemble_dir) / ensemble_name
     forcing_file = ensemble_path / f"AIS_4to20km_r01_20220907_AISLENS-Forcing_{ensemble_num}.nc"
@@ -125,7 +120,7 @@ def process_single_ensemble(ensemble_dir, trend_file_path, ensemble_name, ensemb
         raise FileNotFoundError(f"Forcing file not found: {forcing_file}")
     
     result = combine_ssp585_forcing_xarray(trend_file_path, forcing_file, output_file)
-    logger.info(f"✓ {ensemble_name} completed successfully!")
+    logger.info(f"{ensemble_name} completed successfully!")
     return result
 
 def process_all_ensembles(ensemble_parent_dir, trend_file_path, ensemble_members=None):
@@ -133,9 +128,7 @@ def process_all_ensembles(ensemble_parent_dir, trend_file_path, ensemble_members
     if ensemble_members is None:
         ensemble_members = ["SSP585-EM1", "SSP585-EM2", "SSP585-EM4", "SSP585-EM6", "SSP585-EM8"]
     
-    logger.info("=" * 60)
     logger.info("SSP585 TREND + AISLENS FORCING COMBINATION (MULTI-ENSEMBLE)")
-    logger.info("=" * 60)
     logger.info(f"Parent directory: {ensemble_parent_dir}")
     logger.info(f"Trend file: {trend_file_path}")
     logger.info(f"Processing {len(ensemble_members)} ensemble members:")
@@ -170,7 +163,6 @@ def process_all_ensembles(ensemble_parent_dir, trend_file_path, ensemble_members
         return True
 
 def main():
-    """Main function with command line interface."""
     parser = argparse.ArgumentParser(description='Combine SSP585 trend with AISLENS forcing files')
     parser.add_argument('--trend-file', required=True,
                        help='Path to SSP585 trend file')

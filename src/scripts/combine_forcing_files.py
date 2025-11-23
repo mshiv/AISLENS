@@ -65,7 +65,6 @@ def combine_forcing_files_nco(file1_path, file2_path, output_path,
         
         logger.info(f"Successfully combined files → {output_path}")
     finally:
-        # Clean up temporary files
         for temp_file in [temp_file1, temp_file2]:
             if temp_file.exists():
                 temp_file.unlink()
@@ -73,7 +72,6 @@ def combine_forcing_files_nco(file1_path, file2_path, output_path,
 
 
 def main():
-    """Main function with example usage."""
     parser = argparse.ArgumentParser(
         description='Combine two forcing NetCDF files using NCO tools'
     )
@@ -93,24 +91,17 @@ def main():
                        help='End time index for file2 (default: 60)')
     args = parser.parse_args()
     
-    # Default file paths
     file1 = args.file1 or config.DIR_MALI_ISMIP6_FORCINGS / "ISMIP6_SSP585_UKESM_FLOATINGBMB_TREND.nc"
     file2 = args.file2 or config.DIR_FORCINGS / "forcing_realization_0.nc"
     output = args.output or config.DIR_MALI_ISMIP6_FORCINGS / "combined_forcing.nc"
     
-    # Setup logging
     output.parent.mkdir(parents=True, exist_ok=True)
     setup_logging(output.parent, "combine_forcing_files")
     
-    logger.info("="*60)
     logger.info("COMBINE FORCING FILES")
-    logger.info("="*60)
-    
     combine_forcing_files_nco(file1, file2, output,
                              args.time1_start, args.time1_end,
                              args.time2_start, args.time2_end)
-    
-    logger.info("="*60)
 
 
 if __name__ == "__main__":

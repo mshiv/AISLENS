@@ -40,9 +40,7 @@ if __name__ == "__main__":
     setup_logging(Path(config.DIR_PROCESSED), "main_workflow")
     Path(config.DIR_PROCESSED).mkdir(parents=True, exist_ok=True)
     
-    logger.info("="*80)
     logger.info("AISLENS WORKFLOW - FULL PIPELINE")
-    logger.info("="*80)
     workflow_start = time()
     
     # Step 0: Initialize directories
@@ -71,6 +69,5 @@ if __name__ == "__main__":
     logger.info("Step 4: Regridding to MALI grid...")
     run_script("regrid_to_mali.py")
     
-    logger.info("="*80)
     logger.info(f"WORKFLOW COMPLETE ({time() - workflow_start:.1f}s)")
-    logger.info("="*80)
+

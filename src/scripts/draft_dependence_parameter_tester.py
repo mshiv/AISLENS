@@ -23,51 +23,12 @@ import logging
 import traceback
 
 from aislens.config import config
-from aislens.utils import write_crs
+from aislens.utils import write_crs, setup_logging
 
-# Import the main calculation function from the scripts directory
 sys.path.insert(0, str(Path(__file__).parent))
 from calculate_draft_dependence_comprehensive import calculate_draft_dependence_comprehensive
 
-# ===== LOGGING CONFIGURATION =====
 logger = logging.getLogger(__name__)
-
-def setup_logging(output_dir, verbose=False):
-    """
-    Configure logging for the parameter testing framework.
-    
-    Args:
-        output_dir: Directory to save log file
-        verbose: If True, set logging level to DEBUG
-    """
-    log_level = logging.DEBUG if verbose else logging.INFO
-    
-    # Create formatter
-    formatter = logging.Formatter(
-        '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        datefmt='%Y-%m-%d %H:%M:%S'
-    )
-    
-    # File handler
-    log_file = Path(output_dir) / f'parameter_testing_{datetime.now().strftime("%Y%m%d_%H%M%S")}.log'
-    log_file.parent.mkdir(parents=True, exist_ok=True)
-    
-    file_handler = logging.FileHandler(log_file)
-    file_handler.setLevel(log_level)
-    file_handler.setFormatter(formatter)
-    
-    # Console handler
-    console_handler = logging.StreamHandler()
-    console_handler.setLevel(log_level)
-    console_handler.setFormatter(formatter)
-    
-    # Configure logger
-    logger.setLevel(log_level)
-    logger.addHandler(file_handler)
-    logger.addHandler(console_handler)
-    
-    logger.info(f"Logging initialized. Log file: {log_file}")
-    return log_file
 
 
 def define_parameter_sets():
@@ -79,7 +40,6 @@ def define_parameter_sets():
     """
     
     parameter_sets = {
-        # Original parameters (as baseline)
         'original': {
             'min_r2_threshold': 0.1,
             'min_correlation': 0.2,
@@ -91,10 +51,9 @@ def define_parameter_sets():
             'description': 'Original parameters from your script'
         },
         
-        # More permissive - catch more shelves as linear
         'permissive': {
-            'min_r2_threshold': 0.05,  # Lower R² threshold
-            'min_correlation': 0.1,    # Lower correlation threshold  
+            'min_r2_threshold': 0.05,
+            'min_correlation': 0.1,
             'ruptures_penalty': 1.0,
             'n_bins': 50,
             'min_points_per_bin': 5,
@@ -103,10 +62,9 @@ def define_parameter_sets():
             'description': 'More permissive thresholds - catch more linear relationships'
         },
         
-        # Very permissive
         'very_permissive': {
-            'min_r2_threshold': 0.02,  # Very low R² threshold
-            'min_correlation': 0.05,   # Very low correlation threshold
+            'min_r2_threshold': 0.02,
+            'min_correlation': 0.05,
             'ruptures_penalty': 1.0,
             'n_bins': 50,
             'min_points_per_bin': 5,
@@ -115,11 +73,10 @@ def define_parameter_sets():
             'description': 'Very permissive - catch almost all as linear'
         },
         
-        # Different ruptures sensitivity
         'sensitive_changepoint': {
             'min_r2_threshold': 0.1,
             'min_correlation': 0.2,
-            'ruptures_penalty': 0.5,   # More sensitive to changepoints
+            'ruptures_penalty': 0.5,
             'n_bins': 50,
             'min_points_per_bin': 5,
             'noisy_fallback': 'zero',
@@ -127,11 +84,10 @@ def define_parameter_sets():
             'description': 'More sensitive changepoint detection'
         },
         
-        # Less sensitive changepoint detection
         'robust_changepoint': {
             'min_r2_threshold': 0.1,
             'min_correlation': 0.2,
-            'ruptures_penalty': 2.0,   # Less sensitive to changepoints
+            'ruptures_penalty': 2.0,
             'n_bins': 50,
             'min_points_per_bin': 5,
             'noisy_fallback': 'zero',
@@ -139,29 +95,27 @@ def define_parameter_sets():
             'description': 'Less sensitive changepoint detection'
         },
         
-        # Different binning strategy
         'fine_binning': {
             'min_r2_threshold': 0.1,
             'min_correlation': 0.2,
             'ruptures_penalty': 1.0,
-            'n_bins': 100,             # More bins
-            'min_points_per_bin': 3,   # Fewer points per bin required
+            'n_bins': 100,
+            'min_points_per_bin': 3,
             'noisy_fallback': 'zero',
             'model_selection': 'best',
             'description': 'Finer binning with more bins'
         },
         
-        # Coarse binning
         'coarse_binning': {
             'min_r2_threshold': 0.1,
             'min_correlation': 0.2,
             'ruptures_penalty': 1.0,
-            'n_bins': 25,              # Fewer bins
-            'min_points_per_bin': 10,  # More points per bin required
+            'n_bins': 25,
+            'min_points_per_bin': 10,
             'noisy_fallback': 'zero',
             'model_selection': 'best',
             'description': 'Coarser binning with fewer bins'
-        }
+        },
     }
     
     return parameter_sets
@@ -189,7 +143,6 @@ def run_parameter_tests(icems, satobs, config, parameter_sets, output_base_dir=N
     
     logger.info(f"Output directory: {output_base_dir}")
     
-    # Save parameter sets for reference
     param_file = output_base_dir / "parameter_sets.json"
     with open(param_file, 'w') as f:
         json.dump(parameter_sets, f, indent=2, default=str)
@@ -200,16 +153,12 @@ def run_parameter_tests(icems, satobs, config, parameter_sets, output_base_dir=N
     failed_sets = 0
     
     for set_name, params in parameter_sets.items():
-        logger.info("="*60)
         logger.info(f"TESTING PARAMETER SET: {set_name}")
         logger.info(f"Description: {params['description']}")
-        logger.info("="*60)
         
-        # Create output directory for this parameter set
         set_output_dir = output_base_dir / set_name
         set_output_dir.mkdir(parents=True, exist_ok=True)
         
-        # Save parameters for this run
         params_file = set_output_dir / "parameters.json"
         run_info = {
             'parameter_set_name': set_name,
@@ -223,21 +172,17 @@ def run_parameter_tests(icems, satobs, config, parameter_sets, output_base_dir=N
         logger.debug(f"Parameters saved to: {params_file}")
         
         try:
-            # Temporarily modify config to save to this parameter set's directory
             original_dir = config.DIR_ICESHELF_DEDRAFT_SATOBS
             config.DIR_ICESHELF_DEDRAFT_SATOBS = set_output_dir
             
-            # Extract parameters (remove description as it's not a function parameter)
             function_params = {k: v for k, v in params.items() if k != 'description'}
             
             logger.info(f"Running analysis with parameters: {function_params}")
             
-            # Run analysis with this parameter set
             all_results, all_draft_params = calculate_draft_dependence_comprehensive(
                 icems, satobs, config, **function_params
             )
             
-            # Store summary statistics
             meaningful_count = sum(1 for r in all_results.values() if r.get('is_meaningful', False))
             total_count = len(all_results)
             
@@ -251,13 +196,13 @@ def run_parameter_tests(icems, satobs, config, parameter_sets, output_base_dir=N
                 'status': 'completed'
             }
             
-            logger.info(f"✓ Completed {set_name}: {meaningful_count}/{total_count} meaningful relationships")
+            logger.info(f"  Completed {set_name}: {meaningful_count}/{total_count} meaningful relationships")
             logger.info(f"  Linear parameterizations: {results_summary[set_name]['linear_param_count']}")
             logger.info(f"  Constant parameterizations: {results_summary[set_name]['constant_param_count']}")
             successful_sets += 1
             
         except FileNotFoundError as e:
-            logger.error(f"✗ File not found in parameter set {set_name}: {e}")
+            logger.error(f"File not found in parameter set {set_name}: {e}")
             results_summary[set_name] = {
                 'status': 'failed',
                 'error': f"File not found: {e}",
@@ -266,7 +211,7 @@ def run_parameter_tests(icems, satobs, config, parameter_sets, output_base_dir=N
             failed_sets += 1
             
         except ValueError as e:
-            logger.error(f"✗ Invalid value in parameter set {set_name}: {e}")
+            logger.error(f"  Invalid value in parameter set {set_name}: {e}")
             results_summary[set_name] = {
                 'status': 'failed',
                 'error': f"Invalid value: {e}",
@@ -275,7 +220,7 @@ def run_parameter_tests(icems, satobs, config, parameter_sets, output_base_dir=N
             failed_sets += 1
             
         except Exception as e:
-            logger.error(f"✗ Error in parameter set {set_name}: {e}")
+            logger.error(f"  Error in parameter set {set_name}: {e}")
             logger.debug(traceback.format_exc())
             results_summary[set_name] = {
                 'status': 'failed',
@@ -285,17 +230,13 @@ def run_parameter_tests(icems, satobs, config, parameter_sets, output_base_dir=N
             failed_sets += 1
         
         finally:
-            # Always restore original config directory
             config.DIR_ICESHELF_DEDRAFT_SATOBS = original_dir
     
-    # Save results summary
     summary_file = output_base_dir / "results_summary.json"
     with open(summary_file, 'w') as f:
         json.dump(results_summary, f, indent=2, default=str)
     
-    logger.info("="*60)
     logger.info("PARAMETER TESTING SUMMARY")
-    logger.info("="*60)
     logger.info(f"Total parameter sets: {len(parameter_sets)}")
     logger.info(f"Successful: {successful_sets}")
     logger.info(f"Failed: {failed_sets}")
@@ -320,21 +261,7 @@ def main():
     
     parser = argparse.ArgumentParser(
         description='Parameter testing framework for draft dependence analysis',
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  # Test all parameter sets
-  python draft_dependence_parameter_tester.py
-  
-  # Test only specific parameter sets
-  python draft_dependence_parameter_tester.py --parameter_sets permissive very_permissive
-  
-  # Custom output directory with verbose logging
-  python draft_dependence_parameter_tester.py --output_dir /path/to/output --verbose
-  
-  # Dry run to see parameter sets without running analysis
-  python draft_dependence_parameter_tester.py --dry_run
-        """
+        formatter_class=argparse.RawDescriptionHelpFormatter
     )
     parser.add_argument('--parameter_sets', nargs='+', default=None,
                         help='Specific parameter set names to test (default: test all)')
@@ -347,29 +274,21 @@ Examples:
     
     args = parser.parse_args()
     
-    # Determine output directory
     if args.output_dir:
         output_dir = Path(args.output_dir)
     else:
         output_dir = config.DIR_ICESHELF_DEDRAFT_SATOBS / "parameter_tests"
     
-    # Setup logging
-    log_file = setup_logging(output_dir, verbose=args.verbose)
+    setup_logging(output_dir, "parameter_testing")
     
-    logger.info("="*80)
     logger.info("DRAFT DEPENDENCE PARAMETER TESTING FRAMEWORK")
-    logger.info("="*80)
     
-    # Define parameter sets to test
     all_parameter_sets = define_parameter_sets()
-    
-    # Filter parameter sets if specific ones requested
     if args.parameter_sets:
         logger.info(f"Filtering to requested parameter sets: {args.parameter_sets}")
         parameter_sets = {name: params for name, params in all_parameter_sets.items() 
                          if name in args.parameter_sets}
         
-        # Check for invalid names
         invalid_names = set(args.parameter_sets) - set(all_parameter_sets.keys())
         if invalid_names:
             logger.error(f"Invalid parameter set names: {invalid_names}")
@@ -382,7 +301,6 @@ Examples:
     for name, params in parameter_sets.items():
         logger.info(f"  {name}: {params['description']}")
     
-    # Dry run mode - just show parameter sets and exit
     if args.dry_run:
         logger.info("\n[DRY RUN MODE] - Parameter sets defined:")
         for name, params in parameter_sets.items():
@@ -393,7 +311,6 @@ Examples:
         logger.info("\nDry run complete. No analysis was performed.")
         return
     
-    # Load data
     try:
         logger.info("\nLoading satellite observation data...")
         satobs = xr.open_dataset(config.FILE_PAOLO23_SATOBS_PREPARED)
@@ -414,13 +331,10 @@ Examples:
         traceback.print_exc()
         sys.exit(1)
     
-    # Run parameter tests
     try:
         results_summary = run_parameter_tests(icems, satobs, config, parameter_sets, output_dir)
         
-        logger.info("\n" + "="*80)
         logger.info("Parameter testing complete!")
-        logger.info("="*80)
         logger.info("\nNext steps:")
         logger.info("1. Review the results_summary.json file")
         logger.info("2. Use visualize_draft_dependence.py to compare outputs:")

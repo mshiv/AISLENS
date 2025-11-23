@@ -46,10 +46,8 @@ def coarsen_dataset(ds, factor, time_dim='Time'):
     
     logger.info(f"Coarsening by factor {factor}...")
     
-    # Build coarsen dict for spatial dimensions only
     coarsen_dict = {'x': factor, 'y': factor}
     
-    # Use boundary='trim' to handle non-divisible dimensions
     ds_coarse = ds.coarsen(dim=coarsen_dict, boundary='trim').mean()
     
     logger.info(f"  Spatial dimensions after coarsening: x={len(ds_coarse.x)}, y={len(ds_coarse.y)}")
@@ -71,13 +69,10 @@ def compute_time_mean_efficient(ds, time_dim, chunk_size=36):
     """
     logger.info("Computing time-mean with optimized chunking...")
     
-    # Rechunk to optimize for time-mean computation
     ds_rechunked = ds.chunk({time_dim: chunk_size, 'x': -1, 'y': -1})
     
-    # Compute mean
     ds_mean = ds_rechunked.mean(dim=time_dim)
     
-    # Compute eagerly to avoid recomputation
     logger.info("  Computing (this may take a moment)...")
     ds_mean = ds_mean.compute()
     
@@ -108,34 +103,26 @@ def main():
     
     args = parser.parse_args()
     
-    # Use config defaults if not specified
     start_year = args.start_year if args.start_year is not None else config.SORRM_START_YEAR
     end_year = args.end_year if args.end_year is not None else config.SORRM_END_YEAR
     
-    # Override output directories if specified
     output_dir = Path(args.output_dir) if args.output_dir else Path(config.DIR_PROCESSED)
     draft_dir = Path(args.draft_dir) if args.draft_dir else Path(config.DIR_ICESHELF_DEDRAFT_MODEL)
     
-    # Create output directories
     output_dir.mkdir(parents=True, exist_ok=True)
     draft_dir.mkdir(parents=True, exist_ok=True)
     
-    # Define output file paths
     file_seasonality = output_dir / "sorrm_seasonality.nc"
     file_variability = output_dir / "sorrm_variability.nc"
     file_seasonality_extrapl = output_dir / "sorrm_seasonality_extrapolated_fillNA.nc"
     file_variability_extrapl = output_dir / "sorrm_variability_extrapolated_fillNA_meanAdjusted.nc"
     
-    # Initialize directories if requested
     if args.init_dirs:
         initialize_directories(collect_directories(config))
     
-    # Setup logging
     setup_logging(output_dir, "prepare_model_sim_fast")
     
-    logger.info("=" * 60)
     logger.info("FAST MPAS-OCEAN MODEL SIMULATION PREPROCESSOR")
-    logger.info("=" * 60)
     logger.info(f"Time range: {start_year}-{end_year}")
     logger.info(f"Coarsening factor: {args.coarsen}")
     logger.info(f"Skip extrapolation: {args.skip_extrapolation}")
@@ -152,7 +139,6 @@ def main():
     logger.info(f"\nStep 1: Loading model data")
     logger.info(f"  File: {config.FILE_MPASO_MODEL}")
     
-    # Use smaller chunks for better parallelization
     model = xr.open_dataset(config.FILE_MPASO_MODEL, 
                            chunks={config.TIME_DIM: 24, 'x': 200, 'y': 200})
     model = write_crs(model, config.CRS_TARGET)
@@ -161,14 +147,12 @@ def main():
     model_subset = subset_dataset_by_time(model, time_dim=config.TIME_DIM,
                                           start_year=start_year, end_year=end_year)
     
-    # Coarsen early if requested
     if args.coarsen > 1:
         model_subset = coarsen_dataset(model_subset, args.coarsen, time_dim=config.TIME_DIM)
-        # Rechunk after coarsening
         model_subset = model_subset.chunk({config.TIME_DIM: 36, 'x': 200, 'y': 200})
     
     step1_time = time()
-    logger.info(f"  ✓ Step 1 complete ({step1_time - start_time:.1f}s)")
+    logger.info(f"  Step 1 complete ({step1_time - start_time:.1f}s)")
     
     # ========================================================================
     # Step 2: Detrend
@@ -180,11 +164,10 @@ def main():
         model_subset[config.SORRM_FLUX_VAR], dim=config.TIME_DIM, deg=1
     )
     
-    # Rechunk after detrend to prevent large chunks
     model_detrended = model_detrended.chunk({config.TIME_DIM: 36, 'x': 200, 'y': 200})
     
     step2_time = time()
-    logger.info(f"  ✓ Step 2 complete ({step2_time - step1_time:.1f}s)")
+    logger.info(f"  Step 2 complete ({step2_time - step1_time:.1f}s)")
     
     # ========================================================================
     # Step 3: Deseasonalize
@@ -193,11 +176,10 @@ def main():
     
     model_deseasonalized = deseasonalize(model_detrended)
     
-    # Rechunk after deseasonalize to prevent large chunks
     model_deseasonalized = model_deseasonalized.chunk({config.TIME_DIM: 36, 'x': 200, 'y': 200})
     
     step3_time = time()
-    logger.info(f"  ✓ Step 3 complete ({step3_time - step2_time:.1f}s)")
+    logger.info(f"  Step 3 complete ({step3_time - step2_time:.1f}s)")
     
     # ========================================================================
     # Step 4: Draft dependence calculation
@@ -253,7 +235,7 @@ def main():
         logger.info("  All ice shelves already processed")
     
     step4_time = time()
-    logger.info(f"  ✓ Step 4 complete ({step4_time - step3_time:.1f}s)")
+    logger.info(f"  Step 4 complete ({step4_time - step3_time:.1f}s)")
     
     # ========================================================================
     # Step 5: Merge draft dependence predictions
@@ -264,7 +246,7 @@ def main():
     draft_dependence_pred = draft_dependence_pred.reindex_like(model_deseasonalized)
     
     step5_time = time()
-    logger.info(f"  ✓ Step 5 complete ({step5_time - step4_time:.1f}s)")
+    logger.info(f"  Step 5 complete ({step5_time - step4_time:.1f}s)")
     
     # ========================================================================
     # Step 6: Calculate components
@@ -275,7 +257,7 @@ def main():
     model_seasonality = model_detrended - model_deseasonalized
     
     step6_time = time()
-    logger.info(f"  ✓ Step 6 complete ({step6_time - step5_time:.1f}s)")
+    logger.info(f"  Step 6 complete ({step6_time - step5_time:.1f}s)")
     
     # ========================================================================
     # Step 7: Save intermediate components
@@ -288,7 +270,7 @@ def main():
     model_variability.to_netcdf(file_variability)
     
     step7_time = time()
-    logger.info(f"  ✓ Step 7 complete ({step7_time - step6_time:.1f}s)")
+    logger.info(f"  Step 7 complete ({step7_time - step6_time:.1f}s)")
     
     # ========================================================================
     # Step 8: Extrapolate and save final components
@@ -318,18 +300,16 @@ def main():
         model_seasonality_extrapl.to_netcdf(file_seasonality_extrapl)
         
         step8_time = time()
-        logger.info(f"  ✓ Step 8 complete ({step8_time - step7_time:.1f}s)")
+        logger.info(f"  Step 8 complete ({step8_time - step7_time:.1f}s)")
     
     # ========================================================================
     # Summary
     # ========================================================================
     total_time = time() - start_time
-    logger.info("\n" + "=" * 60)
     logger.info(f"PROCESSING COMPLETE!")
     logger.info(f"Total time: {total_time:.1f}s ({total_time/60:.1f} minutes)")
     logger.info(f"Output directory: {output_dir}")
     logger.info(f"Draft dependence directory: {draft_dir}")
-    logger.info("=" * 60)
 
 
 if __name__ == "__main__":

@@ -46,7 +46,6 @@ def load_and_prepare_data():
     seasonality = xr.open_dataset(config.FILE_SEASONALITY_EXTRAPL, chunks={config.TIME_DIM: 36})
     variability = xr.open_dataset(config.FILE_VARIABILITY_EXTRAPL, chunks={config.TIME_DIM: 36})
     
-    # Standardize time dimension name
     for ds, name in [(variability, "variability"), (seasonality, "seasonality")]:
         if 'Time' in ds.dims:
             ds.rename({"Time": "time"}, inplace=True)
@@ -55,11 +54,10 @@ def load_and_prepare_data():
     if config.SORRM_FLUX_VAR not in variability:
         raise ValueError(f"Variable '{config.SORRM_FLUX_VAR}' not found in variability dataset")
     
-    # Normalize data
     data = variability[config.SORRM_FLUX_VAR]
     logger.info(f"Normalizing data (variable: {config.SORRM_FLUX_VAR})...")
     data_tmean = data.mean('time')
-    data_tstd = data.std('time').where(lambda x: x > 0, 1e-10)  # Avoid division by zero
+    data_tstd = data.std('time').where(lambda x: x > 0, 1e-10)
     data_norm = (data - data_tmean) / data_tstd
     logger.info("Data normalization complete")
     
@@ -105,17 +103,14 @@ def generate_and_save_forcings(model, pcs, nmodes, data_tmean, data_tstd,
         try:
             logger.info(f"Generating realization {i+1}/{n_realizations}...")
             
-            # Generate synthetic variability and unnormalize
             new_data = generate_data(model, new_pcs, i, nmodes, 1)
             new_data = (new_data * data_tstd) + data_tmean
             
-            # Convert to DataArray and combine with seasonality
             new_data = xr.DataArray(new_data, dims=data.dims, coords=data.coords, 
                                    attrs=data.attrs.copy())
             new_data.name = data.name
             forcing = seasonality + new_data
             
-            # Add metadata
             forcing.attrs.update({
                 'creation_date': datetime.now().isoformat(),
                 'source': 'AISLENS forcing generator',
@@ -125,7 +120,6 @@ def generate_and_save_forcings(model, pcs, nmodes, data_tmean, data_tstd,
                               f'decomposition and phase randomization'
             })
             
-            # Save to netCDF
             forcing.to_netcdf(output_dir / f"forcing_realization_{i}.nc")
             logger.debug(f"Saved realization {i}")
             successful_realizations += 1
@@ -139,9 +133,7 @@ def generate_and_save_forcings(model, pcs, nmodes, data_tmean, data_tstd,
 
 def generate_forcings(n_realizations=None, load_existing_eof=False):
     """Main function to generate forcing realizations."""
-    logger.info("="*80)
     logger.info("AISLENS Forcing Generator")
-    logger.info("="*80)
     
     n_realizations = n_realizations or config.N_REALIZATIONS
     logger.info(f"Configuration: {n_realizations} realizations, load_existing_eof={load_existing_eof}")
@@ -151,10 +143,8 @@ def generate_forcings(n_realizations=None, load_existing_eof=False):
     generate_and_save_forcings(model, pcs, nmodes, data_tmean, data_tstd,
                               seasonality, variability[config.SORRM_FLUX_VAR], n_realizations)
     
-    logger.info("="*80)
     logger.info("Forcing generation complete!")
     logger.info(f"Output directory: {config.DIR_FORCINGS}")
-    logger.info("="*80)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(

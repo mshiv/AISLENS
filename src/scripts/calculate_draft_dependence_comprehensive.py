@@ -69,24 +69,10 @@ def calculate_draft_dependence_comprehensive(icems, satobs, config,
     logger.info(f"Settings: method={ruptures_method}, penalty={ruptures_penalty}")
     logger.info(f"Quality thresholds: R2>={min_r2_threshold}, |corr|>={min_correlation}")
     logger.info(f"Model selection: {model_selection}, noisy fallback: {noisy_fallback}")
-    logger.info(f"Processing ice shelves starting from index 33 (Abbott Ice Shelf)")
-
-    # Debug information
-    logger.info(f"Total ice shelves to process: {len(list(icems.name.values[33:]))}")
-    logger.info(f"icems dataframe length: {len(icems)}")
-    logger.info(f"Satellite data shape: {satobs[config.SATOBS_FLUX_VAR].shape}")
-
-    # Check ice shelf names for first few
-    logger.debug("Sample ice shelf names (starting from index 33):")
-    for i, name in enumerate(list(icems.name.values[33:40])):
-        actual_index = i + 33
-        logger.debug(f"  Index {actual_index}: {name}")
-
-    if len(icems) <= 40:
-        logger.warning(f"icems only has {len(icems)} rows, so only {max(0, len(icems) - 33)} ice shelves will be processed")
-    else:
-        expected_count = len(icems) - 33
-        logger.info(f"Expected to process ~{expected_count} ice shelves (from index 33 to {len(icems)-1})")
+    
+    n_shelves = len(icems) - 33
+    logger.info(f"Processing {n_shelves} ice shelves (starting from index 33: {icems.name.values[33]})")
+    logger.debug(f"Satellite data shape: {satobs[config.SATOBS_FLUX_VAR].shape}")
 
     # Create save directory for comprehensive results
     save_dir_comprehensive = config.DIR_ICESHELF_DEDRAFT_SATOBS / "comprehensive"

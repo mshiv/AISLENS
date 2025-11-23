@@ -58,11 +58,8 @@ def compare_results(conservative_params, permissive_params, very_permissive_para
     vperm_lin = count_linear(very_permissive_params)
     total = len(conservative_params)
     
-    logger.info("\n" + "="*60)
-    logger.info("COMPARISON RESULTS")
-    logger.info("="*60)
+    logger.info("\nCOMPARISON RESULTS")
     logger.info(f"{'Parameter Set':<20} {'Linear':<8} {'Constant':<10} {'% Linear':<10}")
-    logger.info("-"*60)
     logger.info(f"{'Conservative':<20} {cons_lin:<8} {total-cons_lin:<10} {cons_lin/total*100:<8.1f}%")
     logger.info(f"{'Permissive':<20} {perm_lin:<8} {total-perm_lin:<10} {perm_lin/total*100:<8.1f}%")
     logger.info(f"{'Very Permissive':<20} {vperm_lin:<8} {total-vperm_lin:<10} {vperm_lin/total*100:<8.1f}%")
@@ -76,9 +73,7 @@ if __name__ == "__main__":
     output_dir.mkdir(parents=True, exist_ok=True)
     setup_logging(output_dir, "compare_parameter_sets")
     
-    logger.info("=" * 60)
     logger.info("DRAFT DEPENDENCE PARAMETER COMPARISON")
-    logger.info("=" * 60)
     
     logger.info("Loading ice shelf masks...")
     icems = gpd.read_file(config.FILE_ICESHELFMASKS).to_crs({'init': config.CRS_TARGET})
@@ -96,15 +91,13 @@ if __name__ == "__main__":
     compare_results(conservative_params, permissive_params, very_permissive_params)
     
     logger.info("\nRecommendations:")
-    logger.info("  Balanced quality/coverage → PERMISSIVE parameters")
-    logger.info("  Maximum linear coverage → VERY PERMISSIVE parameters")
-    logger.info("  Highest quality only → CONSERVATIVE parameters")
+    logger.info("  Balanced quality/coverage -> PERMISSIVE parameters")
+    logger.info("  Maximum linear coverage -> VERY PERMISSIVE parameters")
+    logger.info("  Highest quality only -> CONSERVATIVE parameters")
     
     logger.info("\nNext steps:")
     logger.info("  1. Run: python visualize_draft_dependence.py")
     logger.info("  2. Run: python inspect_draft_dependence.py")
     logger.info("  3. Check individual results in output directories")
     
-    logger.info("=" * 60)
     logger.info("COMPARISON COMPLETE")
-    logger.info("=" * 60)

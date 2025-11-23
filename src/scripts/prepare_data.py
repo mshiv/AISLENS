@@ -53,13 +53,11 @@ def prepare_satellite_observations():
     satobs = xr.open_dataset(config.FILE_PAOLO23_SATOBS)
     logger.info("  Satellite observations loaded")
     
-    # Detrend the data along the time dimension
     logger.info("  Detrending...")
     satobs_deseasonalized = satobs.copy()
     satobs_detrended = detrend_dim(satobs_deseasonalized[config.SATOBS_FLUX_VAR], dim=config.TIME_DIM, deg=1)
     logger.debug("  Detrending complete")
     
-    # Deseasonalize the data
     logger.info("  Deseasonalizing...")
     satobs_deseasonalized[config.SATOBS_FLUX_VAR] = deseasonalize(satobs_detrended)
     logger.debug("  Deseasonalization complete")
@@ -67,7 +65,6 @@ def prepare_satellite_observations():
     # TODO: Take the time-mean of the dataset
     # TODO: Ensure that melt is converted to flux, if not, and is in SI units
 
-    # Save the prepared data
     logger.info(f"  Saving to: {config.FILE_PAOLO23_SATOBS_PREPARED}")
     satobs_deseasonalized.to_netcdf(config.FILE_PAOLO23_SATOBS_PREPARED)
     logger.info("Satellite observations prepared successfully")
@@ -84,13 +81,11 @@ def prepare_model_simulation():
     
     logger.info("Preparing model simulation data...")
     
-    # Load model simulation dataset
     logger.info(f"  Loading model: {config.FILE_MPASO_MODEL}")
     model = xr.open_dataset(config.FILE_MPASO_MODEL, chunks={config.TIME_DIM: 36})
     model = write_crs(model, config.CRS_TARGET)
     logger.debug("  Model loaded")
     
-    # Subset by time
     logger.info(f"  Subsetting to years {config.SORRM_START_YEAR}-{config.SORRM_END_YEAR}...")
     model_subset = subset_dataset_by_time(model,
                                           time_dim=config.TIME_DIM,
@@ -109,7 +104,6 @@ def prepare_model_simulation():
     model_deseasonalized = deseasonalize(model_detrended)
     logger.debug("  Deseasonalization complete")
     
-    # Draft dependence calculation
     logger.info("  Calculating draft dependence...")
     logger.debug("  Loading ice shelf masks...")
     icems = gpd.read_file(config.FILE_ICESHELFMASKS)
@@ -128,19 +122,16 @@ def prepare_model_simulation():
                                                    for i in config.ICE_SHELF_REGIONS])
     logger.debug("  Merge complete")
     
-    # Calculate components
     logger.info("  Calculating variability and seasonality components...")
     model_variability = model_deseasonalized - draft_dependence_pred
     model_seasonality = model_detrended - model_deseasonalized
     
-    # Save intermediate components
     logger.info(f"  Saving components:")
     logger.info(f"    Seasonality: {config.FILE_SEASONALITY.name}")
     logger.info(f"    Variability: {config.FILE_VARIABILITY.name}")
     model_seasonality.to_netcdf(config.FILE_SEASONALITY)
     model_variability.to_netcdf(config.FILE_VARIABILITY)
     
-    # Extrapolate to entire ice sheet grid
     logger.info("  Extrapolating variability to entire grid...")
     model_variability_extrapl = extrapolate_catchment_over_time(model_variability, 
                                                                 icems, config, 
@@ -152,7 +143,6 @@ def prepare_model_simulation():
                                                                 config.SORRM_FLUX_VAR)
     logger.debug("  Extrapolation complete")
     
-    # Save final components
     logger.info(f"  Saving extrapolated components:")
     logger.info(f"    Seasonality: {config.FILE_SEASONALITY_EXTRAPL.name}")
     logger.info(f"    Variability: {config.FILE_VARIABILITY_EXTRAPL.name}")
@@ -177,23 +167,19 @@ def main():
     
     args = parser.parse_args()
     
-    # If no flags specified, default to model processing
     if not args.satobs and not args.model:
         args.model = True
     
-    # Initialize directories if requested
     if args.init_dirs:
         dirs_to_create = collect_directories(config)
         initialize_directories(dirs_to_create)
     
-    # Setup logging
     output_dir = Path(config.DIR_PROCESSED)
     output_dir.mkdir(parents=True, exist_ok=True)
     setup_logging(output_dir, "prepare_data")
     
     logger.info("DATA PREPARATION FOR MALI FORCING GENERATION")
     
-    # Process based on flags
     if args.satobs:
         prepare_satellite_observations()
     
