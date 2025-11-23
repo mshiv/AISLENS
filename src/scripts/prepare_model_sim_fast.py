@@ -133,9 +133,7 @@ def main():
     
     start_time = time()
     
-    # ========================================================================
     # Step 1: Load and subset model data with optimized chunking
-    # ========================================================================
     logger.info(f"\nStep 1: Loading model data")
     logger.info(f"  File: {config.FILE_MPASO_MODEL}")
     
@@ -154,9 +152,7 @@ def main():
     step1_time = time()
     logger.info(f"  Step 1 complete ({step1_time - start_time:.1f}s)")
     
-    # ========================================================================
     # Step 2: Detrend
-    # ========================================================================
     logger.info(f"\nStep 2: Detrending")
     
     model_detrended = model_subset.copy()
@@ -169,9 +165,7 @@ def main():
     step2_time = time()
     logger.info(f"  Step 2 complete ({step2_time - step1_time:.1f}s)")
     
-    # ========================================================================
     # Step 3: Deseasonalize
-    # ========================================================================
     logger.info(f"\nStep 3: Deseasonalizing")
     
     model_deseasonalized = deseasonalize(model_detrended)
@@ -181,9 +175,7 @@ def main():
     step3_time = time()
     logger.info(f"  Step 3 complete ({step3_time - step2_time:.1f}s)")
     
-    # ========================================================================
     # Step 4: Draft dependence calculation
-    # ========================================================================
     logger.info(f"\nStep 4: Draft dependence calculation")
     
     # Load ice shelf masks
@@ -237,9 +229,7 @@ def main():
     step4_time = time()
     logger.info(f"  Step 4 complete ({step4_time - step3_time:.1f}s)")
     
-    # ========================================================================
     # Step 5: Merge draft dependence predictions
-    # ========================================================================
     logger.info(f"\nStep 5: Merging draft dependence predictions")
     
     draft_dependence_pred = merge_catchment_files(pred_files)
@@ -248,9 +238,7 @@ def main():
     step5_time = time()
     logger.info(f"  Step 5 complete ({step5_time - step4_time:.1f}s)")
     
-    # ========================================================================
     # Step 6: Calculate components
-    # ========================================================================
     logger.info(f"\nStep 6: Calculating variability and seasonality components")
     
     model_variability = model_deseasonalized - draft_dependence_pred
@@ -259,9 +247,7 @@ def main():
     step6_time = time()
     logger.info(f"  Step 6 complete ({step6_time - step5_time:.1f}s)")
     
-    # ========================================================================
     # Step 7: Save intermediate components
-    # ========================================================================
     logger.info(f"\nStep 7: Saving intermediate components")
     logger.info(f"  Seasonality: {file_seasonality}")
     logger.info(f"  Variability: {file_variability}")
@@ -272,9 +258,7 @@ def main():
     step7_time = time()
     logger.info(f"  Step 7 complete ({step7_time - step6_time:.1f}s)")
     
-    # ========================================================================
     # Step 8: Extrapolate and save final components
-    # ========================================================================
     if args.skip_extrapolation:
         logger.info(f"\nStep 8: Skipping extrapolation (--skip-extrapolation)")
     else:
@@ -302,9 +286,7 @@ def main():
         step8_time = time()
         logger.info(f"  Step 8 complete ({step8_time - step7_time:.1f}s)")
     
-    # ========================================================================
     # Summary
-    # ========================================================================
     total_time = time() - start_time
     logger.info(f"PROCESSING COMPLETE!")
     logger.info(f"Total time: {total_time:.1f}s ({total_time/60:.1f} minutes)")
