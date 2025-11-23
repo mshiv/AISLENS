@@ -2,28 +2,16 @@
 """
 Fast version of comprehensive draft dependence calculation for Antarctic ice shelves.
 
-This optimized script processes ice shelf draft dependence with the following speedup strategies:
-1. Batch file existence checking (50-100x faster than individual checks)
-2. Pre-computed geometry masks (10-20x faster clipping)
-3. Optional spatial coarsening for faster testing
-4. Progress tracking with visual feedback
-5. Smart shelf filtering (skip unpro cessable shelves early)
-6. Optimized I/O with reduced file operations
-
-Phase 1 optimizations (safe, easy wins) - this version implements these.
-Future phases will add parallel processing for even greater speedups.
+Optimizations:
+- Batch file existence checking (50-100x faster than individual checks)
+- Pre-computed geometry masks (10-20x faster clipping)
+- Optional spatial coarsening for faster testing
+- Progress tracking with visual feedback
+- Smart shelf filtering (skip unprocessable shelves early)
+- Optimized I/O with reduced file operations
 
 Usage:
     python calculate_draft_dependence_comprehensive_fast.py [options]
-    
-    Options:
-        --coarsen N              Coarsen data by factor N for testing (default: 1)
-        --min-points N           Minimum valid points to process shelf (default: 100)
-        --skip-existing          Skip shelves with all 5 parameter files
-        --test-mode              Process only first 10 shelves for testing
-        --output-dir PATH        Custom output directory (overrides config)
-        --start-index N          Start processing from ice shelf index N (default: 33)
-        --end-index N            End processing at ice shelf index N (default: all)
 """
 
 import argparse
@@ -88,10 +76,8 @@ def coarsen_dataset(ds, factor, vars_to_coarsen=None):
     if vars_to_coarsen is None:
         vars_to_coarsen = list(ds.data_vars)
     
-    # Coarsen specified variables
     ds_coarse = ds[vars_to_coarsen].coarsen(dim=coarsen_dict, boundary='trim').mean()
     
-    # Keep coordinates
     for coord in ds.coords:
         if coord not in ds_coarse.coords and coord not in ['x', 'y']:
             ds_coarse.coords[coord] = ds.coords[coord]
@@ -121,20 +107,17 @@ def check_existing_files_batch(save_dir: Path, shelf_names: List[str],
     
     existing_shelves = {}
     
-    # Use glob to find all files matching each parameter pattern
     for param_name in param_names:
         pattern = str(save_dir / f"{param_name}_*.nc")
         existing_files = glob.glob(pattern)
         
         for file_path in existing_files:
-            # Extract shelf name from filename
             shelf_name = Path(file_path).stem.replace(f"{param_name}_", "")
             
             if shelf_name not in existing_shelves:
                 existing_shelves[shelf_name] = []
             existing_shelves[shelf_name].append(param_name)
     
-    # Identify shelves with all 5 parameters
     complete_shelves = {
         name: params for name, params in existing_shelves.items()
         if len(params) == len(param_names)
@@ -183,7 +166,6 @@ def precompute_shelf_masks(icems: gpd.GeoDataFrame, satobs: xr.Dataset,
         shelf_name = icems.name.values[actual_index]
         shelf_geom = icems.iloc[actual_index].geometry
         
-        # Check geometry validity
         if shelf_geom is None or shelf_geom.is_empty:
             shelf_info[actual_index] = {
                 'name': shelf_name,
@@ -194,10 +176,8 @@ def precompute_shelf_masks(icems: gpd.GeoDataFrame, satobs: xr.Dataset,
             skipped_empty += 1
             continue
         
-        # Get bounding box for quick spatial subset
-        bounds = shelf_geom.bounds  # (minx, miny, maxx, maxy)
+        bounds = shelf_geom.bounds
         
-        # Quick check: count valid points in bounding box (for info only, not filtering)
         try:
             subset = satobs.sel(x=slice(bounds[0], bounds[2]), 
                                y=slice(bounds[1], bounds[3]))
@@ -205,12 +185,11 @@ def precompute_shelf_masks(icems: gpd.GeoDataFrame, satobs: xr.Dataset,
             flux_var = config.SATOBS_FLUX_VAR
             valid_count = (~subset[flux_var].isnull()).sum().item()
             
-            # Always processable if geometry is valid - let internal checks decide
             shelf_info[actual_index] = {
                 'name': shelf_name,
                 'bounds': bounds,
                 'valid_points': valid_count,
-                'processable': True,  # Let internal checks handle quality control
+                'processable': True,
                 'reason': 'OK'
             }
             
@@ -298,24 +277,16 @@ def calculate_draft_dependence_comprehensive_fast(
     start_index: int = 33,
     end_index: Optional[int] = None,
     test_mode: bool = False,
-    output_dir: Optional[Path] = None
+    output_dir: Optional[Path] = None,
+    processed_dir: Optional[Path] = None
 ):
     """
     Fast version of comprehensive draft dependence calculation.
-    
-    Implements Phase 1 optimizations:
-    - Batch file existence checking
-    - Pre-computed geometry masks
-    - Smart shelf filtering
-    - Progress tracking
-    - Optional coarsening for testing
     
     Args:
         icems: GeoDataFrame with ice shelf masks
         satobs: xarray Dataset with satellite observations
         config: Configuration object
-        
-        # Standard parameters (same as original)
         n_bins: Number of bins for draft binning (default: 50)
         min_points_per_bin: Minimum points required per bin (default: 5)
         ruptures_method: Ruptures method ('pelt', 'binseg', 'window') (default: 'pelt')
@@ -324,15 +295,14 @@ def calculate_draft_dependence_comprehensive_fast(
         min_correlation: Minimum correlation for meaningful relationship (default: 0.1)
         noisy_fallback: For noisy data ('zero' or 'mean') (default: 'zero')
         model_selection: Which model to use ('best', 'zero_shallow', 'mean_shallow', 'threshold_intercept')
-        
-        # Fast version parameters
         coarsen_factor: Spatial coarsening factor for testing (default: 1 = no coarsening)
         min_valid_points: Minimum valid points to process shelf (default: 100)
         skip_existing: Skip shelves with all 5 parameter files (default: True)
         start_index: Starting ice shelf index (default: 33)
         end_index: Ending ice shelf index (default: None = all)
         test_mode: Process only first 10 shelves (default: False)
-        output_dir: Custom output directory (default: None = use config)
+        output_dir: Full path to interim output directory (default: None = use config)
+        processed_dir: Full path to processed output directory (default: None = use config)
     
     Returns:
         Tuple of (all_results dict, all_draft_params dict)
@@ -346,7 +316,7 @@ def calculate_draft_dependence_comprehensive_fast(
     if output_dir is None:
         save_dir_comprehensive = config.DIR_ICESHELF_DEDRAFT_SATOBS / "comprehensive"
     else:
-        save_dir_comprehensive = Path(output_dir) / "comprehensive"
+        save_dir_comprehensive = Path(output_dir)
     
     save_dir_comprehensive.mkdir(parents=True, exist_ok=True)
     logger.info(f"Output directory: {save_dir_comprehensive}")
@@ -392,17 +362,14 @@ def calculate_draft_dependence_comprehensive_fast(
     for idx, info in shelf_info.items():
         shelf_name = info['name']
         
-        # Check for existing files first (highest priority)
         if skip_existing and shelf_name in complete_shelves:
             shelves_to_skip.append((idx, shelf_name, "All files exist"))
             continue
         
-        # Skip if not processable (empty geometry only - let internal checks handle insufficient data)
         if not info['processable'] and 'Empty' in info['reason']:
             shelves_to_skip.append((idx, shelf_name, info['reason']))
             continue
         
-        # Process even if insufficient data - internal checks will handle it
         shelves_to_process.append((idx, shelf_name, info.get('valid_points', 0)))
     
     logger.info(f"Shelves to process: {len(shelves_to_process)}, to skip: {len(shelves_to_skip)}, total: {len(shelf_info)}")
@@ -453,7 +420,6 @@ def calculate_draft_dependence_comprehensive_fast(
             
             shelf_start = time()
             
-            # Call comprehensive analysis
             result = dedraft_catchment_comprehensive(
                 idx, icems, satobs, config,
                 save_dir=save_dir_comprehensive,
@@ -530,13 +496,6 @@ def calculate_draft_dependence_comprehensive_fast(
         
         for error_type, count in sorted(error_types.items(), key=lambda x: x[1], reverse=True):
             logger.info(f"    {error_type}: {count}")
-        
-        logger.debug(f"  First few specific errors:")
-        for idx, error in list(error_details.items())[:5]:
-            shelf_name = icems.name.values[idx] if idx < len(icems) else f"Index_{idx}"
-            logger.debug(f"    {idx} ({shelf_name}): {error}")
-        if len(error_details) > 5:
-            logger.debug(f"    ... and {len(error_details)-5} more")
     
     if processed_count == 0 and loaded_count == 0:
         logger.error("WARNING: No ice shelves were processed or loaded")
@@ -547,12 +506,10 @@ def calculate_draft_dependence_comprehensive_fast(
     create_comprehensive_summary(all_results, all_draft_params, save_dir_comprehensive)
     
     logger.info("Merging parameters...")
-    merge_comprehensive_parameters(all_draft_params, icems, satobs, config, save_dir_comprehensive)
+    merge_comprehensive_parameters(all_draft_params, icems, satobs, config, save_dir_comprehensive, processed_dir)
     
     total_time = time() - total_start_time
-    
     logger.info(f"Complete! Total runtime: {total_time:.1f}s ({total_time/60:.1f} min)")
-    logger.info(f"Estimated speedup: ~3-5x vs sequential version")
     
     return all_results, all_draft_params
 
@@ -599,8 +556,13 @@ def create_comprehensive_summary(all_results: Dict, all_draft_params: Dict, save
 
 
 def merge_comprehensive_parameters(all_draft_params: Dict, icems: gpd.GeoDataFrame, 
-                                  satobs: xr.Dataset, config, save_dir: Path):
+                                  satobs: xr.Dataset, config, save_dir: Path,
+                                  processed_dir: Path = None):
     logger.info("Merging parameters...")
+    
+    if processed_dir is None:
+        processed_dir = config.DIR_PROCESSED / "draft_dependence_changepoint"
+    processed_dir.mkdir(parents=True, exist_ok=True)
     
     config_param_names = [
         'draftDepenBasalMelt_minDraft', 
@@ -612,10 +574,7 @@ def merge_comprehensive_parameters(all_draft_params: Dict, icems: gpd.GeoDataFra
     
     merge_order = sorted(all_draft_params.keys())
     logger.info(f"  Merge order (alphabetical): {len(merge_order)} shelves")
-    if len(merge_order) > 3:
-        logger.debug(f"    Last: {merge_order[-1]} (highest priority)")
     
-    # Helper function to clean grid_mapping attributes
     def clean_encoding(ds):
         for var in list(ds.data_vars) + list(ds.coords):
             ds[var].attrs.pop('grid_mapping', None)
@@ -623,7 +582,6 @@ def merge_comprehensive_parameters(all_draft_params: Dict, icems: gpd.GeoDataFra
                 ds[var].encoding.pop('grid_mapping', None)
         return ds
     
-    # Merge each parameter
     for param_name in config_param_names:
         logger.info(f"  Merging {param_name}...")
         merged_dataset = xr.Dataset()
@@ -644,7 +602,6 @@ def merge_comprehensive_parameters(all_draft_params: Dict, icems: gpd.GeoDataFra
         
         logger.info(f"    Merged {files_merged} files")
         
-        # Save merged parameter
         if len(merged_dataset.data_vars) > 0:
             var_name = list(merged_dataset.data_vars.keys())[0]
             total_valid = (~merged_dataset[var_name].isnull()).sum().item()
@@ -652,19 +609,18 @@ def merge_comprehensive_parameters(all_draft_params: Dict, icems: gpd.GeoDataFra
             logger.info(f"    Coverage: {total_valid}/{total_size} cells ({total_valid/total_size*100:.1f}%)")
             
             merged_dataset = write_crs(clean_encoding(merged_dataset), config.CRS_TARGET)
-            output_file = config.DIR_PROCESSED / "draft_dependence_changepoint" / f"ruptures_{param_name}.nc"
+            output_file = processed_dir / f"ruptures_{param_name}.nc"
             output_file.parent.mkdir(parents=True, exist_ok=True)
             merged_dataset.to_netcdf(output_file)
             logger.info(f"    Saved to {output_file.name}")
         else:
             logger.warning(f"    No data to save for {param_name}")
     
-    # Create combined dataset with all parameters
     logger.info("  Creating combined parameter dataset...")
     combined_dataset = xr.Dataset()
     
     for param_name in config_param_names:
-        individual_file = config.DIR_PROCESSED / "draft_dependence_changepoint" / f"ruptures_{param_name}.nc"
+        individual_file = processed_dir / f"ruptures_{param_name}.nc"
         if individual_file.exists():
             try:
                 param_ds = clean_encoding(xr.open_dataset(individual_file))
@@ -675,26 +631,22 @@ def merge_comprehensive_parameters(all_draft_params: Dict, icems: gpd.GeoDataFra
             except Exception as e:
                 logger.warning(f"    Could not add {param_name} to combined dataset: {e}")
     
-    # Save combined, filled, and prepped versions
     if len(combined_dataset.data_vars) > 0:
         combined_dataset = write_crs(clean_encoding(combined_dataset), config.CRS_TARGET)
         
-        # Save main combined file
-        combined_file = config.DIR_PROCESSED / "draft_dependence_changepoint" / "ruptures_draftDepenBasalMelt_parameters.nc"
+        combined_file = processed_dir / "ruptures_draftDepenBasalMelt_parameters.nc"
         combined_dataset.to_netcdf(combined_file)
         logger.info(f"  Saved combined parameters: {list(combined_dataset.data_vars.keys())}")
         
-        # Save filled version (NaN -> 0)
         combined_filled = clean_encoding(combined_dataset.fillna(0))
-        combined_file_filled = config.DIR_PROCESSED / "draft_dependence_changepoint" / "ruptures_draftDepenBasalMelt_parameters_filled.nc"
+        combined_file_filled = processed_dir / "ruptures_draftDepenBasalMelt_parameters_filled.nc"
         combined_filled.to_netcdf(combined_file_filled)
         logger.info(f"  Saved filled parameters")
         
-        # Save interpolation-prepped version (x/y -> x1/y1)
         coord_rename = {k: f"{k}1" for k in ['x', 'y'] if k in combined_filled.coords}
         if coord_rename:
             combined_prepped = clean_encoding(combined_filled.rename(coord_rename))
-            combined_file_prepped = config.DIR_PROCESSED / "draft_dependence_changepoint" / "ruptures_draftDepenBasalMelt_parameters_filled_prepped.nc"
+            combined_file_prepped = processed_dir / "ruptures_draftDepenBasalMelt_parameters_filled_prepped.nc"
             combined_prepped.to_netcdf(combined_file_prepped)
             logger.info(f"  Saved interpolation-prepped parameters (renamed: {coord_rename})")
         else:
@@ -723,6 +675,12 @@ Examples:
   # Reprocess all shelves (including those with existing files)
   python calculate_draft_dependence_comprehensive_fast.py --no-skip-existing
   
+  # Use custom directories for testing (e.g., fast version vs original)
+  python calculate_draft_dependence_comprehensive_fast.py \\
+      --interim-dir data/interim/draft_dependence/satobs-fast \\
+      --processed-dir data/processed/draft_dependence_changepoint-fast \\
+      --test-mode
+  
   # Custom parameters for more permissive relationships
   python calculate_draft_dependence_comprehensive_fast.py --min-r2 0.005 --min-corr -0.7
         """
@@ -747,8 +705,10 @@ Examples:
                         help='End processing at ice shelf index N (default: None = all)')
     
     # Output options
-    parser.add_argument('--output-dir', type=str, default=None, metavar='PATH',
-                        help='Custom output directory (default: config.DIR_ICESHELF_DEDRAFT_SATOBS)')
+    parser.add_argument('--interim-dir', type=str, default=None, metavar='PATH',
+                        help='Custom interim directory for individual shelf files (overrides config.DIR_ICESHELF_DEDRAFT_SATOBS)')
+    parser.add_argument('--processed-dir', type=str, default=None, metavar='PATH',
+                        help='Custom processed directory for merged parameter grids (overrides config.DIR_PROCESSED)')
     
     # Draft dependence parameters
     parser.add_argument('--n-bins', type=int, default=50, metavar='N',
@@ -773,14 +733,24 @@ Examples:
     
     args = parser.parse_args()
     
-    # Setup logging
-    output_dir = Path(args.output_dir) if args.output_dir else config.DIR_ICESHELF_DEDRAFT_SATOBS / "comprehensive"
+    # Determine output directories
+    interim_dir = Path(args.interim_dir) if args.interim_dir else config.DIR_ICESHELF_DEDRAFT_SATOBS
+    processed_dir = Path(args.processed_dir) if args.processed_dir else config.DIR_PROCESSED / "draft_dependence_changepoint"
+    
+    output_dir = interim_dir / "comprehensive"
     output_dir.mkdir(parents=True, exist_ok=True)
+    processed_dir.mkdir(parents=True, exist_ok=True)
+    
     setup_logging(output_dir, "calculate_draft_dependence_comprehensive_fast")
     
     logger.info("Fast comprehensive draft dependence calculator")
     logger.info(f"Command: {' '.join(sys.argv)}")
-    logger.info(f"Output directory: {output_dir}")
+    logger.info(f"Interim directory: {output_dir}")
+    logger.info(f"Processed directory: {processed_dir}")
+    if args.interim_dir:
+        logger.info(f"  (Custom interim directory provided)")
+    if args.processed_dir:
+        logger.info(f"  (Custom processed directory provided)")
     
     if args.coarsen > 1:
         logger.warning(f"COARSENING ENABLED (factor={args.coarsen}) - results at reduced resolution for testing only")
@@ -822,12 +792,13 @@ Examples:
         start_index=args.start_index,
         end_index=args.end_index,
         test_mode=args.test_mode,
-        output_dir=Path(args.output_dir) if args.output_dir else None
+        output_dir=output_dir,
+        processed_dir=processed_dir
     )
     
     logger.info(f"Processing complete! Total ice shelves: {len(all_results)}")
     logger.info(f"Individual files: {output_dir}")
-    logger.info(f"Merged grids: {config.DIR_PROCESSED / 'draft_dependence_changepoint'}")
+    logger.info(f"Merged grids: {processed_dir}")
 
 
 if __name__ == "__main__":
