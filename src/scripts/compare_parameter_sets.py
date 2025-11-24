@@ -79,7 +79,8 @@ def create_shelf_comparison_plot(shelf_name: str, shelf_idx: int,
                                  param_grids: Dict[str, xr.Dataset],
                                  icems: gpd.GeoDataFrame,
                                  satobs: xr.Dataset,
-                                 output_dir: Path):
+                                 output_dir: Path,
+                                 base_dir: Path):
     ice_shelf_geom = icems.iloc[shelf_idx].geometry
     if ice_shelf_geom is None or ice_shelf_geom.is_empty:
         return None
@@ -370,7 +371,7 @@ def main():
             try:
                 output_file = create_shelf_comparison_plot(
                     shelf_name, shelf_idx, args.parameter_sets,
-                    summaries, param_grids, icems, satobs, shelf_plots_dir
+                    summaries, param_grids, icems, satobs, shelf_plots_dir, base_dir
                 )
                 if output_file:
                     logger.info(f"  Created: {output_file.name}")
