@@ -215,11 +215,40 @@ def create_shelf_comparison_plot(shelf_name: str, shelf_idx: int,
                 
                 try:
                     ds = xr.open_dataset(shelf_param_file)
-                    
+
                     min_draft = extract_scalar(ds['draftDepenBasalMelt_minDraft'].values)
                     constant_val = extract_scalar(ds['draftDepenBasalMelt_constantMeltValue'].values)
                     alpha0 = extract_scalar(ds['draftDepenBasalMeltAlpha0'].values)
                     alpha1 = extract_scalar(ds['draftDepenBasalMeltAlpha1'].values)
+
+                    # Determine units for the parameter values. The grid files are
+                    # usually in kg m^-2 s^-1 while some scalar files are already
+                    # written in m yr^-1. Inspect variable attributes to decide
+                    # whether we need to convert (kg m^-2 s^-1 -> m yr^-1).
+                    need_convert = True
+                    try:
+                        # Check variable-level units first
+                        var_units = None
+                        for vn in ['draftDepenBasalMelt_constantMeltValue', 'draftDepenBasalMeltAlpha0']:
+                            if vn in ds and hasattr(ds[vn], 'attrs'):
+                                u = ds[vn].attrs.get('units')
+                                if u:
+                                    var_units = u.lower()
+                                    break
+                        # Fall back to global units attribute
+                        if var_units is None and hasattr(ds, 'attrs'):
+                            g = ds.attrs.get('units')
+                            var_units = g.lower() if g else None
+
+                        if var_units:
+                            # If units mention 'kg' we expect kg m^-2 s^-1 and convert.
+                            # If units mention 'm' and 'yr' assume already in m/yr.
+                            if 'kg' in var_units or 'kg m' in var_units:
+                                need_convert = True
+                            elif 'yr' in var_units or 'year' in var_units or 'm/yr' in var_units or 'm yr' in var_units:
+                                need_convert = False
+                    except Exception:
+                        need_convert = True
                     
                     logger.info(f"[{shelf_name} | {param_set}] Parameters: min_draft={min_draft}, "
                               f"constant_val={constant_val}, alpha0={alpha0}, alpha1={alpha1}")
@@ -286,7 +315,10 @@ def create_shelf_comparison_plot(shelf_name: str, shelf_idx: int,
                         pred_melt[deep_mask] = alpha0 + alpha1 * plot_draft[deep_mask]
                     
                     # Convert predicted melt from kg/m²/s to m/yr for visualization
-                    pred_melt_vis = pred_melt * 31536000 / 917
+                    if need_convert:
+                        pred_melt_vis = pred_melt * 31536000 / 917
+                    else:
+                        pred_melt_vis = pred_melt
                     
                     # Plot predicted data
                     plot_shelf_data(ax, plot_melt, plot_draft, pred_melt_vis, is_linear, min_draft)

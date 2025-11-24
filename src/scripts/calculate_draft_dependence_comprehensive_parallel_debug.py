@@ -197,6 +197,13 @@ def process_single_shelf(args_tuple):
                         'draftDepenBasalMelt_paramType': ((), paramType)
                     }
                 )
+                # Add sensible units so downstream tools can interpret scalars
+                scalar_ds['draftDepenBasalMelt_minDraft'].attrs['units'] = 'm'
+                # Parallel pipeline returns scalar melt parameters in m yr^-1
+                scalar_ds['draftDepenBasalMelt_constantMeltValue'].attrs['units'] = 'm yr^-1'
+                scalar_ds['draftDepenBasalMeltAlpha0'].attrs['units'] = 'm yr^-1'
+                scalar_ds['draftDepenBasalMeltAlpha1'].attrs['units'] = 'm yr^-1 m^-1'
+                scalar_ds['draftDepenBasalMelt_paramType'].attrs['description'] = 'parameterization type code (0=linear,1=constant, etc)'
                 scalar_ds.attrs['shelf_name'] = shelf_name
                 # Write to save_dir with a clear scalar filename; keep existing grid outputs untouched
                 scalar_file = Path(save_dir) / f'draftDepenBasalMelt_params_{shelf_name}.nc'
