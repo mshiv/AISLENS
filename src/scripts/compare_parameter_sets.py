@@ -180,6 +180,9 @@ def create_shelf_comparison_plot(shelf_name: str, shelf_idx: int,
                         param_info = f"MSE: {mse:.2e}, R²: {r2:.3f}\nConstant: {constant_val:.3f}"
                 else:
                     logger.warning(f"[{shelf_name} | {param_set}] No valid predictions: plot_melt or pred_melt_vis may be all NaN or non-overlapping.")
+                    logger.warning(f"[{shelf_name} | {param_set}] plot_draft sample: {plot_draft[:10]}")
+                    logger.warning(f"[{shelf_name} | {param_set}] plot_melt sample: {plot_melt[:10]}")
+                    logger.warning(f"[{shelf_name} | {param_set}] pred_melt_vis sample: {pred_melt_vis[:10]}")
                     param_info = "No valid predictions"
                 ax.set_title(f"{param_set}\n{param_info}", fontsize=9, pad=10)
             else:
