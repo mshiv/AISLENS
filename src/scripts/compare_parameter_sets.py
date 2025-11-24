@@ -129,9 +129,8 @@ def create_shelf_comparison_plot(shelf_name: str, shelf_idx: int,
                 if candidate.exists():
                     shelf_param_file = candidate
             if not shelf_param_file:
-                # Fallback: try in base_dir
-                base_dir = processed_dir if processed_dir else Path('.')
-                candidate = base_dir / param_set / 'comprehensive' / f'draftDepenBasalMelt_comprehensive_{shelf_name}.nc'
+                # Fallback: always use the provided base_dir argument
+                candidate = Path(base_dir) / param_set / 'comprehensive' / f'draftDepenBasalMelt_comprehensive_{shelf_name}.nc'
                 debug_candidates.append(str(candidate))
                 if candidate.exists():
                     shelf_param_file = candidate
