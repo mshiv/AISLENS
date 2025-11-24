@@ -208,6 +208,8 @@ def calculate_parallel(icems, satobs, config_obj, param_dict,
         'CRS_TARGET': config_obj.CRS_TARGET,
         'SATOBS_FLUX_VAR': config_obj.SATOBS_FLUX_VAR,
         'SATOBS_DRAFT_VAR': config_obj.SATOBS_DRAFT_VAR,
+        'SORRM_FLUX_VAR': getattr(config_obj, 'SORRM_FLUX_VAR', None),
+        'SORRM_DRAFT_VAR': getattr(config_obj, 'SORRM_DRAFT_VAR', None),
         'TIME_DIM': getattr(config_obj, 'TIME_DIM', 'time')
     }
     
