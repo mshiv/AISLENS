@@ -175,8 +175,7 @@ def create_shelf_comparison_plot(shelf_name: str, shelf_idx: int,
             plot_draft = obs_draft
             plot_melt = obs_melt
         
-        # Plot observed data
-        ax.scatter(plot_melt, plot_draft, c='black', s=2, alpha=0.6, label='Observed')
+    # observed data will be drawn inside plot_shelf_data (so don't draw it twice)
         
         # Plot predictions if available
         if param_set in summaries:
@@ -371,9 +370,20 @@ def create_shelf_comparison_plot(shelf_name: str, shelf_idx: int,
         # Format axis limits and styling
         format_shelf_axis(ax, plot_melt, plot_draft)
         
-        if param_set in summaries and param_set in param_grids:
-            ax.legend(fontsize=7, loc='upper right')
+        # Per-axis legends removed in favor of a single global legend
     
+    # Create a single global legend by collecting unique handles/labels
+    legend_entries = {}
+    for ax in fig.axes:
+        handles, labels = ax.get_legend_handles_labels()
+        for h, l in zip(handles, labels):
+            if l not in legend_entries:
+                legend_entries[l] = h
+
+    if legend_entries:
+        fig.legend(list(legend_entries.values()), list(legend_entries.keys()),
+                   loc='upper right', fontsize=8)
+
     plt.suptitle(f"Ice Shelf: {shelf_name}", fontsize=12, y=0.98)
     output_file = output_dir / f"comparison_{shelf_name}.png"
     plt.savefig(output_file, dpi=150, bbox_inches='tight')
