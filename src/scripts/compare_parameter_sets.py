@@ -84,8 +84,8 @@ def create_shelf_comparison_plot(shelf_name: str, shelf_idx: int,
     if ice_shelf_geom is None or ice_shelf_geom.is_empty:
         return None
     satobs_clipped = satobs.rio.clip([ice_shelf_geom], crs=config.CRS_TARGET, drop=False)
-    draft_data = satobs_clipped[config.SATOBS_DRAFT_VAR].mean(dim='time')
-    melt_data = satobs_clipped[config.SATOBS_FLUX_VAR].mean(dim='time')
+    draft_data = satobs_clipped[config.SATOBS_DRAFT_VAR].mean(dim='Time')
+    melt_data = satobs_clipped[config.SATOBS_FLUX_VAR].mean(dim='Time')
     draft_flat = draft_data.values.flatten()
     melt_flat = melt_data.values.flatten()
     valid_mask = ~np.isnan(draft_flat) & ~np.isnan(melt_flat) & (draft_flat > 0)
