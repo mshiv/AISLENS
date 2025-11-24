@@ -143,10 +143,15 @@ def create_shelf_comparison_plot(shelf_name: str, shelf_idx: int,
                 is_meaningful = row.get('is_meaningful', False)
                 is_linear = row.get('is_linear', False)
                 ds = xr.open_dataset(shelf_param_file)
-                min_draft = float(ds['draftDepenBasalMelt_minDraft'].values)
-                constant_val = float(ds['draftDepenBasalMelt_constantMeltValue'].values)
-                alpha0 = float(ds['draftDepenBasalMeltAlpha0'].values)
-                alpha1 = float(ds['draftDepenBasalMeltAlpha1'].values)
+                def extract_scalar(arr):
+                    arr = np.asarray(arr)
+                    if arr.size == 1:
+                        return arr.item()
+                    return arr.flatten()[0]
+                min_draft = extract_scalar(ds['draftDepenBasalMelt_minDraft'].values)
+                constant_val = extract_scalar(ds['draftDepenBasalMelt_constantMeltValue'].values)
+                alpha0 = extract_scalar(ds['draftDepenBasalMeltAlpha0'].values)
+                alpha1 = extract_scalar(ds['draftDepenBasalMeltAlpha1'].values)
                 # Predicted melt: match the optimized script logic
                 pred_melt = np.full_like(plot_draft, constant_val)
                 if is_linear:
