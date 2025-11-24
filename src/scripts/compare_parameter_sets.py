@@ -121,18 +121,22 @@ def create_shelf_comparison_plot(shelf_name: str, shelf_idx: int,
             shelf_param_file = None
             # Try to find the per-shelf file in processed_dir
             processed_dir = param_grids[param_set].encoding.get('source') if param_set in param_grids else None
+            debug_candidates = []
             if processed_dir:
                 processed_dir = Path(processed_dir).parent
                 candidate = processed_dir / f'draftDepenBasalMelt_comprehensive_{shelf_name}.nc'
+                debug_candidates.append(str(candidate))
                 if candidate.exists():
                     shelf_param_file = candidate
             if not shelf_param_file:
                 # Fallback: try in base_dir
                 base_dir = processed_dir if processed_dir else Path('.')
                 candidate = base_dir / param_set / 'comprehensive' / f'draftDepenBasalMelt_comprehensive_{shelf_name}.nc'
+                debug_candidates.append(str(candidate))
                 if candidate.exists():
                     shelf_param_file = candidate
             if not shelf_param_file:
+                logger.warning(f"Parameter file not found for shelf '{shelf_name}' in parameter set '{param_set}'. Candidates checked: {debug_candidates}")
                 ax.set_title(f"{param_set}\nNo parameter file", fontsize=9, pad=10)
             elif not shelf_data.empty:
                 row = shelf_data.iloc[0]
