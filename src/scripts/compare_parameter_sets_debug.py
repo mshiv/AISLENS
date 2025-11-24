@@ -185,13 +185,18 @@ def create_shelf_comparison_plot(shelf_name: str, shelf_idx: int,
             # Try to find the per-shelf parameter file
             shelf_param_file = None
             
+            # First look for scalar parameter file produced by the parallel pipeline
+            scalar_candidate = Path(base_dir) / param_set / 'comprehensive' / f'draftDepenBasalMelt_params_{shelf_name}.nc'
+            if scalar_candidate.exists():
+                shelf_param_file = scalar_candidate
+
             # First try: in processed_dir (from param_grids)
             if param_set in param_grids:
                 processed_dir = param_grids[param_set].encoding.get('source')
                 if processed_dir:
                     processed_dir = Path(processed_dir).parent
                     candidate = processed_dir / f'draftDepenBasalMelt_comprehensive_{shelf_name}.nc'
-                    if candidate.exists():
+                    if candidate.exists() and shelf_param_file is None:
                         shelf_param_file = candidate
             
             # Second try: in base_dir
@@ -218,6 +223,61 @@ def create_shelf_comparison_plot(shelf_name: str, shelf_idx: int,
                     
                     logger.info(f"[{shelf_name} | {param_set}] Parameters: min_draft={min_draft}, "
                               f"constant_val={constant_val}, alpha0={alpha0}, alpha1={alpha1}")
+
+                    # If any parameter is NaN, try fallbacks: individual param files or summary row
+                    if any([np.isnan(min_draft), np.isnan(constant_val), np.isnan(alpha0), np.isnan(alpha1)]):
+                        logger.warning(f"[{shelf_name} | {param_set}] Detected NaN in parameters, attempting fallbacks...")
+
+                        def try_load_individual(base_dir, param_set, shelf_name):
+                            keys = {
+                                'min_draft': f'draftDepenBasalMelt_minDraft_{shelf_name}.nc',
+                                'constant_val': f'draftDepenBasalMelt_constantMeltValue_{shelf_name}.nc',
+                                'alpha0': f'draftDepenBasalMeltAlpha0_{shelf_name}.nc',
+                                'alpha1': f'draftDepenBasalMeltAlpha1_{shelf_name}.nc'
+                            }
+                            vals = {}
+                            for k, fn in keys.items():
+                                p = Path(base_dir) / param_set / 'comprehensive' / fn
+                                if p.exists():
+                                    try:
+                                        _ds = xr.open_dataset(p)
+                                        var = list(_ds.data_vars)[0]
+                                        vals[k] = extract_scalar(_ds[var].values)
+                                        _ds.close()
+                                    except Exception as e:
+                                        logger.debug(f"Failed reading {p}: {e}")
+                                        vals[k] = np.nan
+                                else:
+                                    vals[k] = np.nan
+                            return vals
+
+                        fb = try_load_individual(base_dir, param_set, shelf_name)
+                        # Replace NaNs with fallback values where available
+                        if np.isnan(min_draft) and not np.isnan(fb.get('min_draft', np.nan)):
+                            min_draft = fb['min_draft']
+                        if np.isnan(constant_val) and not np.isnan(fb.get('constant_val', np.nan)):
+                            constant_val = fb['constant_val']
+                        if np.isnan(alpha0) and not np.isnan(fb.get('alpha0', np.nan)):
+                            alpha0 = fb['alpha0']
+                        if np.isnan(alpha1) and not np.isnan(fb.get('alpha1', np.nan)):
+                            alpha1 = fb['alpha1']
+
+                        # Final fallback: check summary CSV row for parameter columns (if present)
+                        if any([np.isnan(min_draft), np.isnan(constant_val), np.isnan(alpha0), np.isnan(alpha1)]) and not shelf_data.empty:
+                            for col_map, varname in [('minDraft', 'min_draft'), ('constantMeltValue', 'constant_val'), ('alpha0', 'alpha0'), ('alpha1', 'alpha1')]:
+                                if col_map in shelf_data.columns:
+                                    val = shelf_data.iloc[0].get(col_map)
+                                    if not pd.isna(val):
+                                        if varname == 'min_draft' and np.isnan(min_draft):
+                                            min_draft = float(val)
+                                        if varname == 'constant_val' and np.isnan(constant_val):
+                                            constant_val = float(val)
+                                        if varname == 'alpha0' and np.isnan(alpha0):
+                                            alpha0 = float(val)
+                                        if varname == 'alpha1' and np.isnan(alpha1):
+                                            alpha1 = float(val)
+
+                        logger.info(f"[{shelf_name} | {param_set}] After fallbacks: min_draft={min_draft}, constant_val={constant_val}, alpha0={alpha0}, alpha1={alpha1}")
                     
                     # Predicted melt: match the optimized script logic
                     pred_melt = np.full_like(plot_draft, constant_val)

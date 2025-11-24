@@ -178,6 +178,32 @@ def process_single_shelf(args_tuple):
         )
         
         if isinstance(result, dict) and 'full_results' in result and 'draft_params' in result:
+            # Write a small scalar netCDF with aggregated parameters for downstream tools
+            try:
+                params = result.get('draft_params', {})
+                # Ensure keys exist and are scalars (use np.nan if missing)
+                minDraft = float(params.get('minDraft', np.nan)) if params.get('minDraft', None) is not None else np.nan
+                constantValue = float(params.get('constantValue', np.nan)) if params.get('constantValue', None) is not None else np.nan
+                alpha0 = float(params.get('alpha0', np.nan)) if params.get('alpha0', None) is not None else np.nan
+                alpha1 = float(params.get('alpha1', np.nan)) if params.get('alpha1', None) is not None else np.nan
+                paramType = int(params.get('paramType', -1)) if params.get('paramType', None) is not None else -1
+
+                scalar_ds = xr.Dataset(
+                    {
+                        'draftDepenBasalMelt_minDraft': ((), minDraft),
+                        'draftDepenBasalMelt_constantMeltValue': ((), constantValue),
+                        'draftDepenBasalMeltAlpha0': ((), alpha0),
+                        'draftDepenBasalMeltAlpha1': ((), alpha1),
+                        'draftDepenBasalMelt_paramType': ((), paramType)
+                    }
+                )
+                scalar_ds.attrs['shelf_name'] = shelf_name
+                # Write to save_dir with a clear scalar filename; keep existing grid outputs untouched
+                scalar_file = Path(save_dir) / f'draftDepenBasalMelt_params_{shelf_name}.nc'
+                scalar_ds.to_netcdf(scalar_file)
+                scalar_ds.close()
+            except Exception as e:
+                logger.debug(f"Failed to write scalar params for {shelf_name}: {e}")
             return {
                 'success': True,
                 'shelf_name': shelf_name,
@@ -204,7 +230,8 @@ def process_single_shelf(args_tuple):
 
 def calculate_parallel(icems, satobs, config_obj, param_dict, 
                       start_index=33, end_index=None, n_workers=None,
-                      output_dir=None, processed_dir=None, skip_existing=True):
+                      output_dir=None, processed_dir=None, skip_existing=True,
+                      rerun_shelf_names=None):
     """
     Parallel comprehensive draft dependence calculation.
     """
@@ -239,28 +266,49 @@ def calculate_parallel(icems, satobs, config_obj, param_dict,
     if end_index is None:
         end_index = len(icems)
     
+    # Default shelf index selection
     shelf_indices = list(range(start_index, min(end_index, len(icems))))
     shelf_names = [icems.name.values[i] for i in shelf_indices]
+
+    # If a list of shelf names to rerun is provided, override selection to those shelves
+    if rerun_shelf_names:
+        rerun_indices = []
+        rerun_names_clean = [str(s).strip() for s in rerun_shelf_names]
+        for name in rerun_names_clean:
+            matches = list(np.where(icems.name.values == name)[0])
+            if matches:
+                rerun_indices.append(int(matches[0]))
+            else:
+                logger.warning(f"Requested rerun shelf not found in masks: {name}")
+        if len(rerun_indices) == 0:
+            logger.error("No valid rerun shelves found; aborting rerun request")
+        else:
+            shelf_indices = rerun_indices
+            shelf_names = [icems.name.values[i] for i in shelf_indices]
     
     logger.info(f"Processing {len(shelf_indices)} ice shelves (indices {start_index}-{end_index-1})")
-    
+
     if skip_existing:
         logger.info("Checking for existing files...")
         param_names = ['draftDepenBasalMelt_minDraft', 'draftDepenBasalMelt_constantMeltValue',
                       'draftDepenBasalMelt_paramType', 'draftDepenBasalMeltAlpha0', 'draftDepenBasalMeltAlpha1']
-        
+
         shelves_to_skip = []
         for i, (idx, name) in enumerate(zip(shelf_indices, shelf_names)):
             all_exist = all((output_dir / f"{pn}_{name}.nc").exists() for pn in param_names)
+            # If specific rerun_shelf_names provided, do not skip those shelves even when files exist
             if all_exist:
-                shelves_to_skip.append((idx, name))
-        
+                if rerun_shelf_names and name in rerun_shelf_names:
+                    logger.info(f"Forcing recompute for requested shelf: {name}")
+                else:
+                    shelves_to_skip.append((idx, name))
+
         logger.info(f"  Found {len(shelves_to_skip)} shelves with complete files")
-        
+
         skip_indices = {idx for idx, _ in shelves_to_skip}
         shelf_indices = [idx for idx in shelf_indices if idx not in skip_indices]
         shelf_names = [icems.name.values[i] for i in shelf_indices]
-        
+
         logger.info(f"  Will process {len(shelf_indices)} shelves")
     else:
         shelves_to_skip = []
@@ -380,6 +428,10 @@ def main():
                         help='Parameter set names to test (e.g., standard permissive strict)')
     parser.add_argument('--test-all-sets', action='store_true',
                         help='Test all available parameter sets')
+    parser.add_argument('--rerun-shelves', nargs='+', default=None,
+                        help='Specific shelf names to re-run (overrides start/end selection)')
+    parser.add_argument('--rerun-file', type=str, default=None,
+                        help='Path to a file with one shelf name per line to re-run')
     
     args = parser.parse_args()
     
@@ -428,6 +480,17 @@ def main():
         
         param_dict = {k: v for k, v in param_set.items() if k != 'description'}
         
+        # Build rerun list if provided
+        rerun_list = None
+        if args.rerun_file:
+            try:
+                with open(args.rerun_file, 'r') as fh:
+                    rerun_list = [ln.strip() for ln in fh if ln.strip()]
+            except Exception as e:
+                logger.error(f"Failed to read rerun file {args.rerun_file}: {e}")
+        elif args.rerun_shelves:
+            rerun_list = args.rerun_shelves
+
         results, draft_params = calculate_parallel(
             icems, satobs, config,
             param_dict=param_dict,
@@ -436,7 +499,8 @@ def main():
             n_workers=args.n_workers,
             output_dir=set_interim_dir / "comprehensive" if set_interim_dir else None,
             processed_dir=set_processed_dir,
-            skip_existing=args.skip_existing
+            skip_existing=args.skip_existing,
+            rerun_shelf_names=rerun_list
         )
     
     logger.info("\nAll processing complete!")
