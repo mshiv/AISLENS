@@ -84,8 +84,13 @@ def create_shelf_comparison_plot(shelf_name: str, shelf_idx: int,
     if ice_shelf_geom is None or ice_shelf_geom.is_empty:
         return None
     satobs_clipped = satobs.rio.clip([ice_shelf_geom], crs=config.CRS_TARGET, drop=False)
-    draft_data = satobs_clipped[config.SATOBS_DRAFT_VAR].mean(dim='Time')
-    melt_data = satobs_clipped[config.SATOBS_FLUX_VAR].mean(dim='Time')
+    draft_data = satobs_clipped[config.SATOBS_DRAFT_VAR]
+    melt_data = satobs_clipped[config.SATOBS_FLUX_VAR]
+    # Use time mean if available
+    if 'Time' in draft_data.dims:
+        draft_data = draft_data.mean(dim='Time')
+    if 'Time' in melt_data.dims:
+        melt_data = melt_data.mean(dim='Time')
     draft_flat = draft_data.values.flatten()
     melt_flat = melt_data.values.flatten()
     valid_mask = ~np.isnan(draft_flat) & ~np.isnan(melt_flat) & (draft_flat > 0)
@@ -98,39 +103,94 @@ def create_shelf_comparison_plot(shelf_name: str, shelf_idx: int,
     gs = gridspec.GridSpec(1, n_sets, figure=fig, wspace=0.3)
     for idx, param_set in enumerate(parameter_sets):
         ax = fig.add_subplot(gs[0, idx])
-        ax.scatter(obs_draft, obs_melt, c='blue', alpha=0.3, s=10, label='Observed')
+        # Plot observed data: melt vs draft, draft on y-axis
+        n_plot = min(2000, len(obs_draft))
+        if len(obs_draft) > n_plot:
+            plot_idx = np.random.choice(len(obs_draft), n_plot, replace=False)
+            plot_draft = obs_draft[plot_idx]
+            plot_melt = obs_melt[plot_idx]
+        else:
+            plot_draft = obs_draft
+            plot_melt = obs_melt
+        ax.scatter(plot_melt, plot_draft, c='black', s=2, alpha=0.6, label='Observed')
+        # Plot predictions if available
         if param_set in summaries:
             shelf_data = summaries[param_set][summaries[param_set]['shelf_name'] == shelf_name]
             if not shelf_data.empty and param_set in param_grids:
                 row = shelf_data.iloc[0]
                 is_meaningful = row.get('is_meaningful', False)
                 is_linear = row.get('is_linear', False)
-                if is_meaningful:
-                    ds = param_grids[param_set]
+                ds = param_grids[param_set]
+                # Try to select by iceShelfMasks, fallback to index if needed
+                try:
                     min_draft = float(ds['draftDepenBasalMelt_minDraft'].sel(iceShelfMasks=shelf_idx).values)
                     constant_val = float(ds['draftDepenBasalMelt_constantMeltValue'].sel(iceShelfMasks=shelf_idx).values)
                     alpha0 = float(ds['draftDepenBasalMeltAlpha0'].sel(iceShelfMasks=shelf_idx).values)
                     alpha1 = float(ds['draftDepenBasalMeltAlpha1'].sel(iceShelfMasks=shelf_idx).values)
-                    draft_range = np.linspace(obs_draft.min(), obs_draft.max(), 100)
+                except Exception:
+                    # Fallback: select by index
+                    min_draft = float(ds['draftDepenBasalMelt_minDraft'].isel(iceShelfMasks=shelf_idx).values)
+                    constant_val = float(ds['draftDepenBasalMelt_constantMeltValue'].isel(iceShelfMasks=shelf_idx).values)
+                    alpha0 = float(ds['draftDepenBasalMeltAlpha0'].isel(iceShelfMasks=shelf_idx).values)
+                    alpha1 = float(ds['draftDepenBasalMeltAlpha1'].isel(iceShelfMasks=shelf_idx).values)
+                # Predicted melt: match the optimized script logic
+                pred_melt = np.full_like(plot_draft, constant_val)
+                if is_linear:
+                    deep_mask = plot_draft >= min_draft
+                    pred_melt[deep_mask] = alpha0 + alpha1 * plot_draft[deep_mask]
+                # Convert predicted melt from kg/m²/s to m/yr for visualization
+                pred_melt_vis = pred_melt * 31536000 / 917
+                # Plot predicted melt vs draft
+                ax.scatter(pred_melt_vis, plot_draft, c='orange', s=2, alpha=0.8, label='Predicted')
+                # Add threshold line for linear parameterization
+                if is_linear and min_draft > 0:
+                    ax.axhline(min_draft, color='red', linestyle='--', linewidth=1.5, alpha=0.8)
+                # Metrics
+                valid_mask_pred = ~np.isnan(plot_melt) & ~np.isnan(pred_melt_vis)
+                if np.sum(valid_mask_pred) > 0:
+                    melt_valid = plot_melt[valid_mask_pred]
+                    pred_valid = pred_melt_vis[valid_mask_pred]
+                    mse = np.mean((melt_valid - pred_valid)**2)
+                    var_obs = np.var(melt_valid)
+                    r2 = 1 - np.sum((melt_valid - pred_valid)**2) / np.sum((melt_valid - np.mean(melt_valid))**2) if var_obs > 0 else 0.0
                     if is_linear:
-                        pred_shallow = np.full_like(draft_range, constant_val)
-                        pred_deep = alpha0 + alpha1 * draft_range
-                        pred_melt = np.where(draft_range < min_draft, pred_shallow, pred_deep)
-                        ax.plot(draft_range, pred_melt, 'r-', linewidth=2, label='Piecewise Linear')
-                        ax.axvline(min_draft, color='green', linestyle='--', alpha=0.5, label='Breakpoint')
+                        param_info = f"MSE: {mse:.2e}, R²: {r2:.3f}\nThreshold: {min_draft:.1f}m"
                     else:
-                        pred_melt = np.full_like(draft_range, constant_val)
-                        ax.plot(draft_range, pred_melt, 'r-', linewidth=2, label='Constant')
-                    r2 = row.get('r2', np.nan)
-                    corr = row.get('correlation', np.nan)
-                    ax.text(0.05, 0.95, f"R² = {r2:.3f}\nCorr = {corr:.3f}", 
-                           transform=ax.transAxes, verticalalignment='top',
-                           bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
-        ax.set_xlabel('Draft (m)')
-        ax.set_ylabel('Melt Rate (kg m⁻² s⁻¹)')
-        ax.set_title(f'{param_set}')
-        ax.legend(loc='upper right', fontsize=8)
+                        param_info = f"MSE: {mse:.2e}, R²: {r2:.3f}\nConstant: {constant_val:.3f}"
+                else:
+                    param_info = "No valid predictions"
+                ax.set_title(f"{param_set}\n{param_info}", fontsize=9, pad=10)
+            else:
+                ax.set_title(f"{param_set}\nNo predictions", fontsize=9, pad=10)
+        else:
+            ax.set_title(f"{param_set}", fontsize=9, pad=10)
+        ax.set_xlabel('Melt Rate (kg m⁻² s⁻¹)', fontsize=8)
+        ax.set_ylabel('Draft (m)', fontsize=8)
+        # Axis limits and formatting
+        if len(plot_melt) > 0 and len(plot_draft) > 0:
+            melt_range = np.ptp(plot_melt)
+            draft_range_val = np.ptp(plot_draft)
+            if melt_range > 0:
+                melt_margin = 0.1 * melt_range
+                ax.set_xlim(plot_melt.min() - melt_margin, plot_melt.max() + melt_margin)
+            else:
+                margin = 0.1 * abs(plot_melt.mean()) + 0.01
+                ax.set_xlim(plot_melt.mean() - margin, plot_melt.mean() + margin)
+            if draft_range_val > 0:
+                draft_margin = 0.1 * draft_range_val
+                ax.set_ylim(plot_draft.min() - draft_margin, plot_draft.max() + draft_margin)
+            else:
+                margin = 0.1 * abs(plot_draft.mean()) + 10
+                ax.set_ylim(plot_draft.mean() - margin, plot_draft.mean() + margin)
+            ax.invert_yaxis()
+        else:
+            ax.set_xlim(-1, 1)
+            ax.set_ylim(-100, 100)
+            ax.invert_yaxis()
         ax.grid(True, alpha=0.3)
+        ax.tick_params(labelsize=7)
+        if param_set in summaries and param_set in param_grids:
+            ax.legend(fontsize=7, loc='upper right')
     fig.suptitle(f'{shelf_name} - Parameter Set Comparison', fontsize=14, fontweight='bold')
     output_file = output_dir / f"{shelf_name}_comparison.png"
     plt.savefig(output_file, dpi=150, bbox_inches='tight')
