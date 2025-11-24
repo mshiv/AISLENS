@@ -209,8 +209,20 @@ def create_shelf_comparison_plot(shelf_name: str, shelf_idx: int,
                 ax.set_title(f"{param_set}\nNo parameter file", fontsize=9, pad=10)
             elif not shelf_data.empty:
                 row = shelf_data.iloc[0]
-                is_meaningful = row.get('is_meaningful', False)
-                is_linear = row.get('is_linear', False)
+                is_meaningful = bool(row.get('is_meaningful', False))
+                # Prefer explicit 'is_linear' flag if present; otherwise infer from paramType
+                is_linear = bool(row.get('is_linear', False))
+                if not is_linear:
+                    # Try several possible column names that may contain paramType
+                    for pcol in ('paramType', 'param_type', 'draftDepenBasalMelt_paramType'):
+                        if pcol in shelf_data.columns:
+                            try:
+                                pval = shelf_data.iloc[0].get(pcol)
+                                # consider 0 as linear, 1 as constant
+                                is_linear = (float(pval) == 0.0)
+                                break
+                            except Exception:
+                                continue
                 
                 try:
                     ds = xr.open_dataset(shelf_param_file)
