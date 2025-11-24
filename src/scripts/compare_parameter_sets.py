@@ -74,6 +74,11 @@ def create_comparison_table(summaries: Dict[str, pd.DataFrame], output_dir: Path
     return comp_df
 
 def create_shelf_comparison_plot(shelf_name: str, shelf_idx: int, 
+                # ...existing code...
+                min_draft = extract_scalar(ds['draftDepenBasalMelt_minDraft'].values)
+                constant_val = extract_scalar(ds['draftDepenBasalMelt_constantMeltValue'].values)
+                alpha0 = extract_scalar(ds['draftDepenBasalMeltAlpha0'].values)
+                alpha1 = extract_scalar(ds['draftDepenBasalMeltAlpha1'].values)
                 logger.info(f"[{shelf_name} | {param_set}] Parameters: min_draft={min_draft}, constant_val={constant_val}, alpha0={alpha0}, alpha1={alpha1}")
                                  parameter_sets: List[str],
                                  summaries: Dict[str, pd.DataFrame],
