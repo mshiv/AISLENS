@@ -116,23 +116,33 @@ def create_shelf_comparison_plot(shelf_name: str, shelf_idx: int,
         # Plot predictions if available
         if param_set in summaries:
             shelf_data = summaries[param_set][summaries[param_set]['shelf_name'] == shelf_name]
-            if not shelf_data.empty and param_set in param_grids:
+            # Load per-shelf parameter file
+            param_file = (param_grids[param_set].encoding.get('source') if param_set in param_grids else None)
+            shelf_param_file = None
+            # Try to find the per-shelf file in processed_dir
+            processed_dir = param_grids[param_set].encoding.get('source') if param_set in param_grids else None
+            if processed_dir:
+                processed_dir = Path(processed_dir).parent
+                candidate = processed_dir / f'draftDepenBasalMelt_comprehensive_{shelf_name}.nc'
+                if candidate.exists():
+                    shelf_param_file = candidate
+            if not shelf_param_file:
+                # Fallback: try in base_dir
+                base_dir = processed_dir if processed_dir else Path('.')
+                candidate = base_dir / param_set / 'comprehensive' / f'draftDepenBasalMelt_comprehensive_{shelf_name}.nc'
+                if candidate.exists():
+                    shelf_param_file = candidate
+            if not shelf_param_file:
+                ax.set_title(f"{param_set}\nNo parameter file", fontsize=9, pad=10)
+            elif not shelf_data.empty:
                 row = shelf_data.iloc[0]
                 is_meaningful = row.get('is_meaningful', False)
                 is_linear = row.get('is_linear', False)
-                ds = param_grids[param_set]
-                # Try to select by iceShelfMasks, fallback to index if needed
-                try:
-                    min_draft = float(ds['draftDepenBasalMelt_minDraft'].sel(iceShelfMasks=shelf_idx).values)
-                    constant_val = float(ds['draftDepenBasalMelt_constantMeltValue'].sel(iceShelfMasks=shelf_idx).values)
-                    alpha0 = float(ds['draftDepenBasalMeltAlpha0'].sel(iceShelfMasks=shelf_idx).values)
-                    alpha1 = float(ds['draftDepenBasalMeltAlpha1'].sel(iceShelfMasks=shelf_idx).values)
-                except Exception:
-                    # Fallback: select by index
-                    min_draft = float(ds['draftDepenBasalMelt_minDraft'].isel(iceShelfMasks=shelf_idx).values)
-                    constant_val = float(ds['draftDepenBasalMelt_constantMeltValue'].isel(iceShelfMasks=shelf_idx).values)
-                    alpha0 = float(ds['draftDepenBasalMeltAlpha0'].isel(iceShelfMasks=shelf_idx).values)
-                    alpha1 = float(ds['draftDepenBasalMeltAlpha1'].isel(iceShelfMasks=shelf_idx).values)
+                ds = xr.open_dataset(shelf_param_file)
+                min_draft = float(ds['draftDepenBasalMelt_minDraft'].values)
+                constant_val = float(ds['draftDepenBasalMelt_constantMeltValue'].values)
+                alpha0 = float(ds['draftDepenBasalMeltAlpha0'].values)
+                alpha1 = float(ds['draftDepenBasalMeltAlpha1'].values)
                 # Predicted melt: match the optimized script logic
                 pred_melt = np.full_like(plot_draft, constant_val)
                 if is_linear:
