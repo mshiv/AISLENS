@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 def load_summary_data(parameter_sets: List[str], base_dir: Path) -> Dict[str, pd.DataFrame]:
     summaries = {}
     for param_set in parameter_sets:
-        summary_file = base_dir / param_set / "comprehensive" / "draft_dependence_summary.csv"
+        summary_file = base_dir / param_set / "comprehensive" / "comprehensive_summary.csv"
         if not summary_file.exists():
             logger.warning(f"Summary file not found for {param_set}: {summary_file}")
             continue
