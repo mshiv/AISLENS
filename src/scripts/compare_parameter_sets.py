@@ -166,9 +166,11 @@ def create_shelf_comparison_plot(shelf_name: str, shelf_idx: int,
                     ax.axhline(min_draft, color='red', linestyle='--', linewidth=1.5, alpha=0.8)
                 # Metrics
                 valid_mask_pred = ~np.isnan(plot_melt) & ~np.isnan(pred_melt_vis)
+                logger.debug(f"[{shelf_name} | {param_set}] plot_draft range: {plot_draft.min()} to {plot_draft.max()} | plot_melt range: {plot_melt.min()} to {plot_melt.max()} | pred_melt_vis range: {np.nanmin(pred_melt_vis)} to {np.nanmax(pred_melt_vis)} | valid_mask_pred sum: {np.sum(valid_mask_pred)}")
                 if np.sum(valid_mask_pred) > 0:
                     melt_valid = plot_melt[valid_mask_pred]
                     pred_valid = pred_melt_vis[valid_mask_pred]
+                    logger.debug(f"[{shelf_name} | {param_set}] melt_valid sample: {melt_valid[:5]} | pred_valid sample: {pred_valid[:5]}")
                     mse = np.mean((melt_valid - pred_valid)**2)
                     var_obs = np.var(melt_valid)
                     r2 = 1 - np.sum((melt_valid - pred_valid)**2) / np.sum((melt_valid - np.mean(melt_valid))**2) if var_obs > 0 else 0.0
@@ -177,6 +179,7 @@ def create_shelf_comparison_plot(shelf_name: str, shelf_idx: int,
                     else:
                         param_info = f"MSE: {mse:.2e}, R²: {r2:.3f}\nConstant: {constant_val:.3f}"
                 else:
+                    logger.warning(f"[{shelf_name} | {param_set}] No valid predictions: plot_melt or pred_melt_vis may be all NaN or non-overlapping.")
                     param_info = "No valid predictions"
                 ax.set_title(f"{param_set}\n{param_info}", fontsize=9, pad=10)
             else:
