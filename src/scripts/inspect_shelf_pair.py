@@ -36,7 +36,22 @@ def extract_scalar_from_ds(ds, varnames):
 
 def load_params(dirpath: Path, param_set: str, shelf_name: str):
     """Return a dict of parameters for the shelf from scalar file or grid fallback."""
-    base = Path(dirpath) / param_set / 'comprehensive'
+    # Support multiple common layouts:
+    # 1) {dirpath}/{param_set}/comprehensive/  (default layout used by other scripts)
+    # 2) {dirpath}/comprehensive/               (flat layout used by some fast outputs)
+    # 3) {dirpath}                              (directly point to comprehensive folder)
+    cand1 = Path(dirpath) / param_set / 'comprehensive'
+    cand2 = Path(dirpath) / 'comprehensive'
+    cand3 = Path(dirpath)
+
+    if cand1.exists():
+        base = cand1
+    elif cand2.exists():
+        base = cand2
+    else:
+        base = cand3
+
+    logger.debug(f"Using parameter base directory: {base}")
     scalar_file = base / f'draftDepenBasalMelt_params_{shelf_name}.nc'
     grid_file = base / f'draftDepenBasalMelt_comprehensive_{shelf_name}.nc'
     summary_file = base / 'comprehensive_summary.csv'
