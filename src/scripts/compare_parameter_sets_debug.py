@@ -325,9 +325,10 @@ def create_shelf_comparison_plot(shelf_name: str, shelf_idx: int,
                         deep_mask = plot_draft >= min_draft
                         pred_melt[deep_mask] = alpha0 + alpha1 * plot_draft[deep_mask]
                     
-                    # Convert predicted melt from kg/m²/s to m/yr for visualization
+                    # Convert predicted melt from kg m^-2 s^-1 to m yr^-1 for visualization
+                    # Use centralized constants from config so behavior is consistent project-wide
                     if need_convert:
-                        pred_melt_vis = pred_melt * 31536000 / 917
+                        pred_melt_vis = pred_melt * (config.SECONDS_PER_YEAR / config.RHO_ICE)
                     else:
                         pred_melt_vis = pred_melt
                     

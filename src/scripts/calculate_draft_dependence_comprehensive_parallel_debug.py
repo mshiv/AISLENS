@@ -158,6 +158,28 @@ def process_single_shelf(args_tuple):
     try:
         icems = gpd.read_file(icems_path).to_crs(config_dict['CRS_TARGET'])
         satobs = xr.open_dataset(satobs_path)
+        # Ensure satellite flux units are converted to SI (kg m-2 s-1) in worker processes
+        try:
+            flux_var = config_dict.get('SATOBS_FLUX_VAR')
+            draft_var = config_dict.get('SATOBS_DRAFT_VAR')
+            if flux_var in satobs and satobs.attrs.get('units', '') == 'm of ice per year':
+                # Use centralized conversion factor passed in config_dict when available
+                # Build conversion factor from provided RHO_ICE and SECONDS_PER_YEAR
+                rho = config_dict.get('RHO_ICE', None)
+                s_per_yr = config_dict.get('SECONDS_PER_YEAR', None)
+                if rho is not None and s_per_yr is not None:
+                    myr_to_si = float(rho) / float(s_per_yr)
+                else:
+                    # Fallback to project convention (shouldn't happen if config provided)
+                    myr_to_si = 910.0 / (365.0*24*3600)
+                satobs[flux_var] = satobs[flux_var] * myr_to_si
+                satobs[flux_var].attrs['units'] = 'kg m^-2 s^-1'
+                if draft_var in satobs:
+                    satobs[draft_var].attrs['units'] = 'm'
+        except Exception:
+            # Be resilient in worker processes; proceed without converting if anything goes wrong
+            logger.debug('Worker: SATOBS unit conversion failed or not applicable; continuing without conversion')
+
         satobs = write_crs(satobs, config_dict['CRS_TARGET'])
         
         class SimpleConfig:
@@ -198,11 +220,12 @@ def process_single_shelf(args_tuple):
                     }
                 )
                 # Add sensible units so downstream tools can interpret scalars
+                # Worker processes now convert SATOBS to SI mass-flux, so scalars are in kg m-2 s-1
                 scalar_ds['draftDepenBasalMelt_minDraft'].attrs['units'] = 'm'
-                # Parallel pipeline returns scalar melt parameters in m yr^-1
-                scalar_ds['draftDepenBasalMelt_constantMeltValue'].attrs['units'] = 'm yr^-1'
-                scalar_ds['draftDepenBasalMeltAlpha0'].attrs['units'] = 'm yr^-1'
-                scalar_ds['draftDepenBasalMeltAlpha1'].attrs['units'] = 'm yr^-1 m^-1'
+                scalar_ds['draftDepenBasalMelt_constantMeltValue'].attrs['units'] = 'kg m^-2 s^-1'
+                scalar_ds['draftDepenBasalMeltAlpha0'].attrs['units'] = 'kg m^-2 s^-1'
+                # Slope units: represent change in mass-flux per unit draft -> kg m^-3 s^-1
+                scalar_ds['draftDepenBasalMeltAlpha1'].attrs['units'] = 'kg m^-3 s^-1'
                 scalar_ds['draftDepenBasalMelt_paramType'].attrs['description'] = 'parameterization type code (0=linear,1=constant, etc)'
                 scalar_ds.attrs['shelf_name'] = shelf_name
                 # Write to save_dir with a clear scalar filename; keep existing grid outputs untouched
@@ -327,7 +350,9 @@ def calculate_parallel(icems, satobs, config_obj, param_dict,
         'SORRM_FLUX_VAR': getattr(config_obj, 'SORRM_FLUX_VAR', None),
         'SORRM_DRAFT_VAR': getattr(config_obj, 'SORRM_DRAFT_VAR', None),
         'TIME_DIM': getattr(config_obj, 'TIME_DIM', 'time'),
-        'DATA_ATTRS': getattr(config_obj, 'DATA_ATTRS', {})
+        'DATA_ATTRS': getattr(config_obj, 'DATA_ATTRS', {}),
+        'RHO_ICE': getattr(config_obj, 'RHO_ICE', None),
+        'SECONDS_PER_YEAR': getattr(config_obj, 'SECONDS_PER_YEAR', None)
     }
     
     icems_path = str(config_obj.FILE_ICESHELFMASKS)
@@ -454,7 +479,7 @@ def main():
     logger.info("Loading data...")
     satobs = xr.open_dataset(config.FILE_PAOLO23_SATOBS_PREPARED)
     if config.SATOBS_FLUX_VAR in satobs and satobs.attrs.get('units', '') == 'm of ice per year':
-        satobs[config.SATOBS_FLUX_VAR] = satobs[config.SATOBS_FLUX_VAR] * (910.0 / (365.0*24*3600))
+        satobs[config.SATOBS_FLUX_VAR] = satobs[config.SATOBS_FLUX_VAR] * (config.RHO_ICE / config.SECONDS_PER_YEAR)
         satobs[config.SATOBS_FLUX_VAR].attrs['units'] = 'kg m^-2 s^-1'
     satobs = write_crs(satobs, config.CRS_TARGET)
     

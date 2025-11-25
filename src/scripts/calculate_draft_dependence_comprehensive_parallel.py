@@ -211,7 +211,9 @@ def calculate_parallel(icems, satobs, config_obj, param_dict,
         'SORRM_FLUX_VAR': getattr(config_obj, 'SORRM_FLUX_VAR', None),
         'SORRM_DRAFT_VAR': getattr(config_obj, 'SORRM_DRAFT_VAR', None),
         'TIME_DIM': getattr(config_obj, 'TIME_DIM', 'time'),
-        'DATA_ATTRS': getattr(config_obj, 'DATA_ATTRS', {})
+        'DATA_ATTRS': getattr(config_obj, 'DATA_ATTRS', {}),
+        'RHO_ICE': getattr(config_obj, 'RHO_ICE', None),
+        'SECONDS_PER_YEAR': getattr(config_obj, 'SECONDS_PER_YEAR', None)
     }
     
     icems_path = str(config_obj.FILE_ICESHELFMASKS)
@@ -333,7 +335,7 @@ def main():
     logger.info("Loading data...")
     satobs = xr.open_dataset(config.FILE_PAOLO23_SATOBS_PREPARED)
     if config.SATOBS_FLUX_VAR in satobs and satobs.attrs.get('units', '') == 'm of ice per year':
-        satobs[config.SATOBS_FLUX_VAR] = satobs[config.SATOBS_FLUX_VAR] * (910.0 / (365.0*24*3600))
+        satobs[config.SATOBS_FLUX_VAR] = satobs[config.SATOBS_FLUX_VAR] * (config.RHO_ICE / config.SECONDS_PER_YEAR)
         satobs[config.SATOBS_FLUX_VAR].attrs['units'] = 'kg m^-2 s^-1'
     satobs = write_crs(satobs, config.CRS_TARGET)
     

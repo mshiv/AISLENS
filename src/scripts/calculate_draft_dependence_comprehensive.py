@@ -408,7 +408,7 @@ if __name__ == "__main__":
     if config.SATOBS_FLUX_VAR in satobs:
         if satobs.attrs.get('units', '') == 'm of ice per year':
             logger.info("  Converting satellite melt from m/yr to kg/m2/s...")
-            satobs[config.SATOBS_FLUX_VAR] = satobs[config.SATOBS_FLUX_VAR] * (910.0 / (365.0*24*3600))
+            satobs[config.SATOBS_FLUX_VAR] = satobs[config.SATOBS_FLUX_VAR] * (config.RHO_ICE / config.SECONDS_PER_YEAR)
             satobs[config.SATOBS_FLUX_VAR].attrs['units'] = 'kg m^-2 s^-1'
             satobs[config.SATOBS_DRAFT_VAR].attrs['units'] = 'm'
         else:
