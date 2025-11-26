@@ -86,6 +86,58 @@ def define_parameter_sets():
             'model_selection': 'threshold_intercept',
             'description': 'Fine spatial resolution'
         },
+        # Variants derived from fine_binning to reduce noisy fits or adjust resolution
+        'fb_A': {
+            'min_r2_threshold': 0.005,
+            'min_correlation': -0.7,
+            'ruptures_penalty': 0.5,
+            'n_bins': 100,
+            'min_points_per_bin': 5,
+            'noisy_fallback': 'mean',
+            'model_selection': 'threshold_intercept',
+            'description': 'fine_binning variant: higher min_points_per_bin (safer)'
+        },
+        'fb_B': {
+            'min_r2_threshold': 0.005,
+            'min_correlation': -0.7,
+            'ruptures_penalty': 0.5,
+            'n_bins': 75,
+            'min_points_per_bin': 4,
+            'noisy_fallback': 'mean',
+            'model_selection': 'threshold_intercept',
+            'description': 'fine_binning variant: moderate bin count, slightly safer'
+        },
+        'fb_C': {
+            'min_r2_threshold': 0.005,
+            'min_correlation': -0.7,
+            'ruptures_penalty': 0.8,
+            'n_bins': 100,
+            'min_points_per_bin': 3,
+            'noisy_fallback': 'mean',
+            'model_selection': 'threshold_intercept',
+            'description': 'fine_binning variant: stronger changepoint penalty'
+        },
+        # Variants derived from sensitive_changepoint to reduce over-sensitivity
+        'sc_A': {
+            'min_r2_threshold': 0.005,
+            'min_correlation': -0.7,
+            'ruptures_penalty': 0.2,
+            'n_bins': 50,
+            'min_points_per_bin': 5,
+            'noisy_fallback': 'mean',
+            'model_selection': 'threshold_intercept',
+            'description': 'sensitive_changepoint variant: slightly less sensitive'
+        },
+        'sc_B': {
+            'min_r2_threshold': 0.005,
+            'min_correlation': -0.7,
+            'ruptures_penalty': 0.3,
+            'n_bins': 50,
+            'min_points_per_bin': 5,
+            'noisy_fallback': 'mean',
+            'model_selection': 'threshold_intercept',
+            'description': 'sensitive_changepoint variant: moderate penalty and safer bin counts'
+        },
     }
 
 
