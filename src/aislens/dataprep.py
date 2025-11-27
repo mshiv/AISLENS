@@ -155,8 +155,32 @@ def dedraft_catchment(
         save_coefs (bool): Save regression coefficients (obs).
     """
     catchment_name = icems.name.values[i]
-    print(f'Extracting data for catchment {catchment_name}')
-    ds = clip_data(data, i, icems)
+    # Log shelf name and bounds for easier debugging when clipping fails
+    try:
+        geom = icems.loc[i, 'geometry']
+        bounds = getattr(geom, 'bounds', None)
+    except Exception:
+        geom = None
+        bounds = None
+
+    logger.info("Extracting data for catchment %s (index=%s, bounds=%s)", catchment_name, i, bounds)
+
+    # Attempt to clip data to the catchment. If there are no raster pixels inside the
+    # polygon bounds, rioxarray raises NoDataInBounds; catch it, warn, and skip this shelf.
+    try:
+        from rioxarray.exceptions import NoDataInBounds
+    except Exception:
+        NoDataInBounds = Exception
+
+    try:
+        ds = clip_data(data, i, icems)
+    except NoDataInBounds:
+        logger.warning(
+            "No data found inside ice-shelf '%s' (index %s). Skipping dedraft for this shelf.",
+            catchment_name,
+            i,
+        )
+        return
     # Take time-mean if Time dimension exists (for saving coefficients reference)
     ds_tm = ds.mean(dim=config.TIME_DIM) if config.TIME_DIM in ds.dims else ds
     # Choose the correct variable names based on the data type
