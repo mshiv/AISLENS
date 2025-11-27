@@ -856,6 +856,9 @@ def extrapolate_catchment(data, i, icems):
         catchment_name = str(i)
 
     ice_shelf_mask = icems.loc[[i], 'geometry'].apply(mapping)
+    # First clip: reduce the dataset to the catchment bounding polygon before
+    # performing the expensive nearest-neighbor fill. This limits computation to
+    # the shelf area (smaller array) and avoids filling large ocean regions.
     ds = clip_data(data, i, icems)
     # Use the fast ndimage-based fill (Dask-aware) for per-catchment fills
     try:
@@ -873,9 +876,9 @@ def extrapolate_catchment(data, i, icems):
         # If writing CRS fails, allow clip to raise its own informative error
         pass
 
-    # rioxarray may raise NoDataInBounds if the polygon doesn't overlap the
-    # raster grid. Catch that and return a NaN-filled dataset with the same
-    # coords/dims so downstream merging can proceed.
+    # Perform the fill (may write values into previously-NaN locations outside
+    # the polygon since distance-based fills use nearest neighbors). Re-apply
+    # the polygon clip below to ensure values outside the ice-shelf remain NaN.
     try:
         ds_clipped = ds.rio.clip(ice_shelf_mask, icems.crs)
         return ds_clipped

@@ -1,6 +1,11 @@
 import geopandas as gpd
 from shapely.geometry import mapping
 from aislens.utils import fill_nan_with_nearest_neighbor_vectorized
+import logging
+import numpy as np
+import xarray as xr
+
+logger = logging.getLogger(__name__)
 
 def find_ice_shelf_index(ice_shelf_name, icems):
     """
@@ -27,9 +32,32 @@ def clip_data(total_data, basin, icems):
     Returns:
         xarray.DataArray: Clipped data.
     """
-    clipped_data = total_data.rio.clip(icems.loc[[basin], 'geometry'].apply(mapping), icems.crs)
-    clipped_data = clipped_data.drop("month", errors="ignore")
-    return clipped_data
+    try:
+        clipped_data = total_data.rio.clip(icems.loc[[basin], 'geometry'].apply(mapping), icems.crs)
+        clipped_data = clipped_data.drop("month", errors="ignore")
+        return clipped_data
+    except Exception as e:
+        # rioxarray raises NoDataInBounds when the polygon doesn't overlap the raster.
+        # Catch that and return a NaN-filled array/dataset with the same coords/dims so
+        # callers can continue. Log the basin for diagnostics.
+        try:
+            from rioxarray.exceptions import NoDataInBounds
+        except Exception:
+            NoDataInBounds = type('NoDataInBounds', (Exception,), {})
+
+        if isinstance(e, NoDataInBounds) or 'No data found in bounds' in str(e):
+            logger.warning('NoDataInBounds in clip_data for basin %s: returning NaN placeholder', basin)
+            # Create NaN-filled object matching input type
+            if hasattr(total_data, 'data_vars'):
+                ds_nan = total_data.copy(deep=True)
+                for var in ds_nan.data_vars:
+                    ds_nan[var] = xr.full_like(ds_nan[var], np.nan)
+                return ds_nan
+            else:
+                # DataArray
+                return xr.full_like(total_data, np.nan)
+        # otherwise re-raise
+        raise
 
 def process_ice_shelf(ds_data, iceShelfNum, icems):
     """
