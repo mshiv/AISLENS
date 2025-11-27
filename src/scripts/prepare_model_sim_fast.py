@@ -242,8 +242,34 @@ def main():
     # ========================================================================
     logger.info(f"\nStep 5: Merging draft dependence predictions")
     
+    # Merge per-catchment predictions and align to the deseasonalized model grid.
     draft_dependence_pred = merge_catchment_files(pred_files)
-    draft_dependence_pred = draft_dependence_pred.reindex_like(model_deseasonalized)
+    # Prefer interpolation to align grids (avoids lots of NaNs when coords don't match exactly).
+    try:
+        # Try coordinate-based interpolation if x/y coords exist
+        if 'x' in draft_dependence_pred.coords and 'y' in draft_dependence_pred.coords:
+            draft_dependence_pred = draft_dependence_pred.interp(
+                x=model_deseasonalized['x'], y=model_deseasonalized['y'], method='nearest'
+            )
+        else:
+            # Fallback to reindex_like if coordinate names differ
+            draft_dependence_pred = draft_dependence_pred.reindex_like(model_deseasonalized)
+    except Exception as e:
+        logger.warning('Interpolation/reindex of draft_dependence_pred failed (%s). Falling back to reindex_like.', e)
+        try:
+            draft_dependence_pred = draft_dependence_pred.reindex_like(model_deseasonalized)
+        except Exception as e2:
+            logger.error('Failed to reindex draft_dependence_pred: %s', e2)
+
+    # Log NaN fraction to help diagnose alignment issues (do not abort)
+    try:
+        pred_var = next(iter(draft_dependence_pred.data_vars))
+        pred_arr = draft_dependence_pred[pred_var]
+        pred_vals = pred_arr.values
+        nan_frac = float(np.isnan(pred_vals).sum()) / float(pred_vals.size)
+        logger.info('draft_dependence_pred NaN fraction after aligning: %.3f', nan_frac)
+    except Exception:
+        logger.debug('Could not compute NaN fraction for draft_dependence_pred')
     
     step5_time = time()
     logger.info(f"  Step 5 complete ({step5_time - step4_time:.1f}s)")
