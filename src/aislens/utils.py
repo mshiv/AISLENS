@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import geopandas as gpd
 from shapely.geometry import mapping
+from shapely.ops import unary_union
 
 
 import scipy
@@ -405,17 +406,188 @@ def fill_nan_with_nearest_neighbor_ndimage(da):
     Returns:
         xarray.DataArray with NaNs filled
     """
-    data = da.values
+    # Dask-aware: compute if needed, preserve coords/dims/attrs
+    is_xr = hasattr(da, 'values')
+    if is_xr:
+        data = da.compute().values if hasattr(da.data, 'compute') else da.values
+        dims = da.dims
+        coords = {dim: da.coords[dim] for dim in da.dims}
+        attrs = da.attrs
+    else:
+        data = np.asarray(da)
+        dims = None
+        coords = None
+        attrs = None
+
     mask = np.isnan(data)
     if not np.any(mask):
-        return da.copy()  # No NaNs to fill
-    
-    # Find nearest non-NaN for each NaN cell
+        return da.copy() if is_xr else data.copy()
+
+    # Use ndimage distance transform to get nearest-non-NaN indices
     idx = ndimage.distance_transform_edt(mask, return_distances=False, return_indices=True)
     data_filled = data[tuple(idx)]
-    # Return as DataArray with original coords/dims/attrs
-    #return xr.DataArray(filled, coords=da.coords, dims=da.dims, attrs=da.attrs)
+
+    if is_xr:
+        return xr.DataArray(data_filled, dims=dims, coords=coords, attrs=attrs)
     return data_filled
+
+
+def align_mask_to_template(mask_da, template_da):
+    """Align a boolean mask DataArray to a template DataArray.
+    Tries to reindex by nearest coords and transpose dims when needed.
+    Returns a boolean xarray.DataArray with the same dims/coords as template_da.
+    """
+    # If mask is numpy array, convert directly
+    if not hasattr(mask_da, 'values'):
+        arr = np.asarray(mask_da).astype(bool)
+        return xr.DataArray(arr, dims=template_da.dims, coords={d: template_da.coords[d] for d in template_da.dims})
+
+    # Ensure mask is computed if dask-backed
+    if hasattr(mask_da.data, 'compute'):
+        try:
+            mask_da = mask_da.compute()
+        except Exception:
+            pass
+
+    # If shapes and dims already match, ensure ordering matches
+    try:
+        if tuple(mask_da.shape) == tuple(template_da.shape):
+            if mask_da.dims != template_da.dims:
+                # transpose to template dims ordering
+                mask_da = mask_da.transpose(*template_da.dims)
+            return mask_da.astype(bool)
+    except Exception:
+        pass
+
+    # Try reindexing by nearest neighbor on both dims
+    try:
+        mapping = {template_da.dims[0]: template_da.coords[template_da.dims[0]],
+                   template_da.dims[1]: template_da.coords[template_da.dims[1]]}
+        mask_al = mask_da.reindex(mapping, method='nearest', fill_value=False)
+        # ensure dims order
+        if mask_al.dims != template_da.dims:
+            mask_al = mask_al.transpose(*template_da.dims)
+        return mask_al.astype(bool)
+    except Exception:
+        # Fall back to rasterization option upstream
+        raise
+
+
+def rasterize_ice_mask(icems, template_da):
+    """Rasterize geopandas GeoDataFrame `icems` onto the `template_da` grid.
+    Returns a boolean xarray.DataArray aligned to template_da dims/coords.
+    """
+    try:
+        from rasterio.features import rasterize
+    except Exception as e:
+        raise RuntimeError('rasterio is required for rasterize_ice_mask') from e
+
+    # Ensure template has rioxarray transform
+    try:
+        transform = template_da.rio.transform()
+    except Exception as e:
+        raise RuntimeError('template_da must have rioxarray spatial metadata (rio.transform)') from e
+
+    out_shape = tuple(template_da.shape)
+    geoms = [(mapping(g), 1) for g in icems.geometry]
+    mask_arr = rasterize(geoms, out_shape=out_shape, transform=transform, fill=0, dtype='uint8')
+    return xr.DataArray(mask_arr.astype(bool), dims=template_da.dims, coords={d: template_da.coords[d] for d in template_da.dims})
+
+
+def compute_nearest_index_map(mask, cache_path=None, overwrite=False):
+    """Compute (and optionally cache) nearest-index map for filling NaNs.
+
+    Parameters
+    ----------
+    mask : xarray.DataArray or numpy.ndarray
+        Boolean mask where True indicates NaN/missing cells that should be filled.
+        (This matches existing code where mask = np.isnan(data)).
+    cache_path : str or Path, optional
+        If provided, save (or load) the index map to/from this .npz file. When loading,
+        the function returns the cached map unless overwrite=True.
+    overwrite : bool
+        If True and cache_path exists, recompute and overwrite the cached file.
+
+    Returns
+    -------
+    index_map : numpy.ndarray
+        Integer array of shape (ndim, y, x) containing indices of the nearest
+        non-NaN cell for each grid cell. Use as index_map to fill arrays repeatedly.
+    """
+    # Accept xarray or numpy-like
+    if hasattr(mask, 'values'):
+        # If Dask-backed, compute to memory
+        mask_arr = mask.compute().values if hasattr(mask.data, 'compute') else mask.values
+    else:
+        mask_arr = np.asarray(mask)
+
+    # cache handling
+    if cache_path is not None:
+        cache_path = Path(cache_path)
+        if cache_path.exists() and not overwrite:
+            try:
+                npz = np.load(str(cache_path))
+                idx = npz['indices']
+                return idx
+            except Exception:
+                # fall through and recompute
+                pass
+
+    # Use ndimage distance transform to compute nearest non-NaN indices
+    # mask_arr is True where NaN (holes). This matches existing helpers using mask.
+    idx = ndimage.distance_transform_edt(mask_arr, return_distances=False, return_indices=True)
+    # Ensure integer indices for safe indexing
+    idx = idx.astype(np.intp)
+
+    if cache_path is not None:
+        # Save as .npz with key 'indices'
+        np.savez_compressed(str(cache_path), indices=idx)
+
+    return idx
+
+
+def apply_nearest_index_map(arr, index_map):
+    """Apply a precomputed nearest-index map to fill NaNs in a 2D array.
+
+    Parameters
+    ----------
+    arr : xarray.DataArray or numpy.ndarray
+        2D array to fill. If xarray and Dask-backed, compute the slice before calling.
+    index_map : numpy.ndarray
+        Output from compute_nearest_index_map (shape (2, y, x)).
+
+    Returns
+    -------
+    filled : same type as input (numpy array or xarray.DataArray)
+    """
+    is_xr = False
+    if hasattr(arr, 'values'):
+        is_xr = True
+        da = arr
+        data = da.compute().values if hasattr(da.data, 'compute') else da.values
+    else:
+        data = np.asarray(arr)
+
+    mask = np.isnan(data)
+    if not np.any(mask):
+        return arr.copy() if is_xr else data.copy()
+
+    nearest_y = index_map[0]
+    nearest_x = index_map[1]
+    filled = data.copy()
+    filled[mask] = data[nearest_y[mask], nearest_x[mask]]
+
+    if is_xr:
+        return xr.DataArray(filled, dims=da.dims, coords=da.coords, attrs=da.attrs)
+    return filled
+
+
+def fill_with_index_map(da, index_map):
+    """Convenience wrapper: fill an xarray.DataArray using a precomputed index_map.
+
+    This is Dask-aware for per-slice (2D) fills: pass a 2D DataArray (one time slice).
+    """
+    return apply_nearest_index_map(da, index_map)
 
 def delaunay_interp_weights(xy, uv, d=2):
     """
