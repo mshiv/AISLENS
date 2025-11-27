@@ -180,6 +180,32 @@ def dedraft_catchment(
             catchment_name,
             i,
         )
+        # Create placeholder prediction file (zeros) so downstream merging has a file to read.
+        if save_pred:
+            try:
+                # Choose a reference field from the provided `data` to copy spatial coords/dims
+                if config.SORRM_FLUX_VAR in data.data_vars:
+                    ref_var = config.SORRM_FLUX_VAR
+                else:
+                    ref_var = next(iter(data.data_vars))
+
+                if config.TIME_DIM in data[ref_var].dims:
+                    ref_2d = data[ref_var].mean(dim=config.TIME_DIM)
+                else:
+                    # take first timestep or the 2D field as-is
+                    ref_2d = data[ref_var]
+
+                zero_da = xr.DataArray(
+                    np.zeros(ref_2d.shape, dtype=float),
+                    coords=ref_2d.coords,
+                    dims=ref_2d.dims,
+                )
+                zero_da.name = ref_var
+                filename = Path(save_dir) / f'draftDepenModelPred_{catchment_name}.nc'
+                xr.Dataset({zero_da.name: zero_da}).to_netcdf(filename)
+                logger.info('Wrote placeholder zero prediction for %s -> %s', catchment_name, filename)
+            except Exception as e:
+                logger.warning('Failed to write placeholder prediction for %s: %s', catchment_name, e)
         return
     # Take time-mean if Time dimension exists (for saving coefficients reference)
     ds_tm = ds.mean(dim=config.TIME_DIM) if config.TIME_DIM in ds.dims else ds
