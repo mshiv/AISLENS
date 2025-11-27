@@ -195,8 +195,11 @@ def dedraft_catchment(
                     # take first timestep or the 2D field as-is
                     ref_2d = data[ref_var]
 
+                # Use NaN placeholders so we don't introduce false zeros into the
+                # merged dataset; downstream finalization will replace remaining
+                # NaNs with zeros in the final forcing files.
                 zero_da = xr.DataArray(
-                    np.zeros(ref_2d.shape, dtype=float),
+                    np.full(ref_2d.shape, np.nan, dtype=float),
                     coords=ref_2d.coords,
                     dims=ref_2d.dims,
                 )
