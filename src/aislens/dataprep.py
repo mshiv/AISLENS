@@ -866,8 +866,30 @@ def extrapolate_catchment(data, i, icems):
     except Exception:
         # If writing CRS fails, allow clip to raise its own informative error
         pass
-    ds = ds.rio.clip(ice_shelf_mask, icems.crs)
-    return ds
+
+    # rioxarray may raise NoDataInBounds if the polygon doesn't overlap the
+    # raster grid. Catch that and return a NaN-filled dataset with the same
+    # coords/dims so downstream merging can proceed.
+    try:
+        ds_clipped = ds.rio.clip(ice_shelf_mask, icems.crs)
+        return ds_clipped
+    except Exception as e:
+        try:
+            from rioxarray.exceptions import NoDataInBounds
+        except Exception:
+            NoDataInBounds = type('NoDataInBounds', (Exception,), {})
+
+        if isinstance(e, NoDataInBounds) or 'No data found in bounds' in str(e):
+            logger.warning("NoDataInBounds while clipping catchment %s (index %s) — returning NaN placeholder", catchment_name, i)
+            # Create NaN-filled dataset with same coords/dims as ds to preserve alignment
+            ds_nan = ds.copy(deep=True)
+            for var in ds_nan.data_vars:
+                arr = ds_nan[var]
+                nan_arr = xr.full_like(arr, np.nan)
+                ds_nan[var] = nan_arr
+            return ds_nan
+        # otherwise re-raise
+        raise
 
 def extrapolate_catchment_over_time(dataset, icems, config, var_name, use_index_map=False, index_map_cache_path=None):
     """Extrapolate catchment data for each time step.
