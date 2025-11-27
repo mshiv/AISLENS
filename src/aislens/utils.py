@@ -262,7 +262,33 @@ def merge_catchment_data(results):
     Returns:
         xarray.Dataset: Merged dataset.
     """
-    return xr.merge(results)
+    # Conservative merge: prefer non-NaN values from any input dataset.
+    # This avoids placeholder NaNs overwriting real values and keeps merging
+    # deterministic irrespective of input ordering.
+    if not results:
+        return xr.Dataset()
+
+    # Use a deep copy of the first dataset as a template for coords/dims
+    acc = results[0].copy(deep=True)
+    # Initialize accumulator variables to NaN so we can fill from any file
+    for var in acc.data_vars:
+        acc[var] = acc[var] * np.nan
+
+    for ds in results:
+        # Try aligning datasets to the accumulator grid if necessary
+        try:
+            ds_al = ds.reindex_like(acc, method=None)
+        except Exception:
+            ds_al = ds
+
+        for var in ds_al.data_vars:
+            if var not in acc.data_vars:
+                acc[var] = ds_al[var]
+            else:
+                # Where accumulator is NaN and ds has a value, take ds value
+                acc[var] = xr.where(~np.isnan(acc[var]), acc[var], ds_al[var])
+
+    return acc
 
 def merge_catchment_files(filepaths):
     """
@@ -275,9 +301,11 @@ def merge_catchment_files(filepaths):
         xarray.Dataset: Merged dataset.
     """
     datasets = [xr.open_dataset(fp) for fp in filepaths]
-    merged = xr.merge(datasets)
-    for ds in datasets:
-        ds.close()
+    try:
+        merged = merge_catchment_data(datasets)
+    finally:
+        for ds in datasets:
+            ds.close()
     return merged
 
 ##################################################################
