@@ -16,6 +16,7 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import sys
 import os
 import numpy as np
+import itertools
 from netCDF4 import Dataset
 from optparse import OptionParser
 import matplotlib.pyplot as plt
@@ -34,6 +35,9 @@ parser.add_option("-n", dest="fileRegionNames", help="region name filename.  If 
 parser.add_option("-x", "--xlim", dest="xlimits", help="X-axis limits as comma-separated values (e.g., '0,25' for years 0 to 25)", metavar="MIN,MAX")
 parser.add_option("--search-all", dest="searchAll", help="Search all ensemble directories for experiments (ignores -b)", action='store_true', default=False)
 parser.add_option("--list-available", dest="listAvailable", help="List all available experiments and exit", action='store_true', default=False)
+parser.add_option("-c", "--colors", dest="colors", help="Comma-separated list of Matplotlib colors to use for experiments (one per experiment). If fewer colors than experiments are supplied they will be cycled.", metavar="COL1,COL2,...", default=None)
+parser.add_option("--legend-per-experiment", dest="legend_per_experiment", help="Include legend entries for each experiment (default: only first experiment label)", action='store_true', default=False)
+parser.add_option("--colormap", dest="colormap", help="Name of Matplotlib colormap to sample distinct colors for experiments (e.g., 'tab10','viridis'). Overrides ensemble-based coloring when provided.", default=None)
 options, args = parser.parse_args()
 
 print("Using ice density of {} kg/m3 if required for unit conversions".format(rhoi))
@@ -238,57 +242,56 @@ if options.xlimits:
         sys.exit("ERROR: X-axis limits must be numeric values separated by comma (e.g., '0,25')")
 
 # Build string for titles about the runs in use
-ensemble_base_colors = plt.cm.Set1(np.linspace(0, 1, 9))  # Use Set1 colormap for distinct ensemble base colors
-
-# Create mapping of ensembles to colors and experiments to color variations
-ensemble_names_unique = list(set([ensemble for ensemble, _, _, _ in experiment_specs]))
-ensemble_to_base_color = {}
-for i, ensemble in enumerate(sorted(ensemble_names_unique)):
-    ensemble_to_base_color[ensemble] = ensemble_base_colors[i % len(ensemble_base_colors)]
-
-# Group experiments by ensemble to assign color variations within each ensemble
-experiments_by_ensemble = {}
-for ensemble, exp, file_path, display_name in experiment_specs:
-    if ensemble not in experiments_by_ensemble:
-        experiments_by_ensemble[ensemble] = []
-    experiments_by_ensemble[ensemble].append((exp, file_path, display_name))
-
-# Create mapping for color variations within each ensemble
 def create_color_variations(base_color, n_variations):
     """Create n color variations from a base color by adjusting brightness and saturation."""
     import matplotlib.colors as mcolors
-    
-    # Convert to HSV for easier manipulation
-    hsv = mcolors.rgb_to_hsv(base_color[:3])  # Only use RGB, ignore alpha
-    
+    hsv = mcolors.rgb_to_hsv(base_color[:3])
     variations = []
     if n_variations == 1:
         variations.append(base_color)
     else:
-        # Create variations by adjusting value (brightness) and saturation
         for i in range(n_variations):
-            # Adjust brightness: from 0.4 to 1.0
             brightness_factor = 0.4 + (0.6 * i / max(1, n_variations - 1))
-            # Adjust saturation: from 0.6 to 1.0  
             saturation_factor = 0.6 + (0.4 * i / max(1, n_variations - 1))
-            
             new_hsv = hsv.copy()
-            new_hsv[1] = min(1.0, hsv[1] * saturation_factor)  # Saturation
-            new_hsv[2] = min(1.0, hsv[2] * brightness_factor)  # Value/brightness
-            
+            new_hsv[1] = min(1.0, hsv[1] * saturation_factor)
+            new_hsv[2] = min(1.0, hsv[2] * brightness_factor)
             new_rgb = mcolors.hsv_to_rgb(new_hsv)
             variations.append(new_rgb)
-    
     return variations
 
+# Determine colors for each experiment. If user supplied a colors list, use those (cycled if needed).
 experiment_to_color = {}
-for ensemble, experiments in experiments_by_ensemble.items():
-    base_color = ensemble_to_base_color[ensemble]
-    n_experiments = len(experiments)
-    color_variations = create_color_variations(base_color, n_experiments)
-    
-    for i, (exp, file_path, display_name) in enumerate(experiments):
-        experiment_to_color[display_name] = color_variations[i]
+if options.colors:
+    user_colors = [c.strip() for c in options.colors.split(',') if c.strip()]
+    if not user_colors:
+        sys.exit("ERROR: --colors provided but no valid colors parsed")
+    for i, (_, _, _, display_name) in enumerate(experiment_specs):
+        experiment_to_color[display_name] = user_colors[i % len(user_colors)]
+elif options.colormap:
+    # Sample N colors from the requested colormap
+    cmap = plt.cm.get_cmap(options.colormap)
+    N = len(experiment_specs)
+    sampled = [cmap(x) for x in np.linspace(0, 1, N)]
+    for i, (_, _, _, display_name) in enumerate(experiment_specs):
+        experiment_to_color[display_name] = sampled[i]
+else:
+    ensemble_base_colors = plt.cm.Set1(np.linspace(0, 1, 9))  # Use Set1 colormap for distinct ensemble base colors
+    ensemble_names_unique = list(set([ensemble for ensemble, _, _, _ in experiment_specs]))
+    ensemble_to_base_color = {}
+    for i, ensemble in enumerate(sorted(ensemble_names_unique)):
+        ensemble_to_base_color[ensemble] = ensemble_base_colors[i % len(ensemble_base_colors)]
+    experiments_by_ensemble = {}
+    for ensemble, exp, file_path, display_name in experiment_specs:
+        if ensemble not in experiments_by_ensemble:
+            experiments_by_ensemble[ensemble] = []
+        experiments_by_ensemble[ensemble].append((exp, file_path, display_name))
+    for ensemble, experiments in experiments_by_ensemble.items():
+        base_color = ensemble_to_base_color[ensemble]
+        n_experiments = len(experiments)
+        color_variations = create_color_variations(base_color, n_experiments)
+        for i, (exp, file_path, display_name) in enumerate(experiments):
+            experiment_to_color[display_name] = color_variations[i]
 
 runinfo = ""
 for i, (_, _, _, display_name) in enumerate(experiment_specs):
@@ -673,10 +676,10 @@ def plotStat(fname, display_name, color, addToLegend=False):
 
     f.close()
 
-# Plot each experiment with ensemble-specific color variations
+# Plot each experiment with assigned colors
 for i, (ensemble, exp, file_path, display_name) in enumerate(experiment_specs):
     color = experiment_to_color[display_name]
-    add_to_legend = (i == 0)  # Only add to legend for first experiment
+    add_to_legend = True if options.legend_per_experiment else (i == 0)
     plotStat(file_path, display_name, color, addToLegend=add_to_legend)
 
 # Apply x-axis limits to all subplots if specified
