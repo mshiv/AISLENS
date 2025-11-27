@@ -849,6 +849,12 @@ def extrapolate_catchment(data, i, icems):
     Returns:
         xarray.DataArray: Extrapolated data field for the given ice shelf catchment.
     """
+    # identify shelf name for logging
+    try:
+        catchment_name = icems.name.values[i]
+    except Exception:
+        catchment_name = str(i)
+
     ice_shelf_mask = icems.loc[[i], 'geometry'].apply(mapping)
     ds = clip_data(data, i, icems)
     # Use the fast ndimage-based fill (Dask-aware) for per-catchment fills
