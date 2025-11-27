@@ -1,0 +1,387 @@
+#!/usr/bin/env python3
+"""
+Parallel comprehensive draft dependence calculation with multi-parameter testing.
+"""
+
+import argparse
+import logging
+import sys
+from pathlib import Path
+from time import time
+import multiprocessing as mp
+from concurrent.futures import ProcessPoolExecutor, as_completed
+
+import numpy as np
+import xarray as xr
+import geopandas as gpd
+from tqdm import tqdm
+
+from aislens.config import config
+from aislens.utils import write_crs, setup_logging
+from aislens.dataprep import dedraft_catchment_comprehensive
+
+logger = logging.getLogger(__name__)
+
+
+def define_parameter_sets():
+    """Define parameter combinations for testing."""
+    return {
+        'standard': {
+            'min_r2_threshold': 0.005,
+            'min_correlation': -0.7,
+            'ruptures_penalty': 0.5,
+            'n_bins': 50,
+            'min_points_per_bin': 5,
+            'noisy_fallback': 'mean',
+            'model_selection': 'threshold_intercept',
+            'description': 'Standard settings (continuous, permissive)'
+        },
+        'permissive': {
+            'min_r2_threshold': 0.001,
+            'min_correlation': -0.9,
+            'ruptures_penalty': 0.3,
+            'n_bins': 50,
+            'min_points_per_bin': 3,
+            'noisy_fallback': 'mean',
+            'model_selection': 'threshold_intercept',
+            'description': 'Very permissive - catch more linear relationships'
+        },
+        'strict': {
+            'min_r2_threshold': 0.05,
+            'min_correlation': 0.3,
+            'ruptures_penalty': 1.0,
+            'n_bins': 50,
+            'min_points_per_bin': 10,
+            'noisy_fallback': 'zero',
+            'model_selection': 'threshold_intercept',
+            'description': 'Strict quality thresholds'
+        },
+        'sensitive_changepoint': {
+            'min_r2_threshold': 0.005,
+            'min_correlation': -0.7,
+            'ruptures_penalty': 0.1,
+            'n_bins': 50,
+            'min_points_per_bin': 5,
+            'noisy_fallback': 'mean',
+            'model_selection': 'threshold_intercept',
+            'description': 'Very sensitive changepoint detection'
+        },
+        'robust_changepoint': {
+            'min_r2_threshold': 0.005,
+            'min_correlation': -0.7,
+            'ruptures_penalty': 2.0,
+            'n_bins': 50,
+            'min_points_per_bin': 5,
+            'noisy_fallback': 'mean',
+            'model_selection': 'threshold_intercept',
+            'description': 'Robust changepoint detection (fewer breakpoints)'
+        },
+        'fine_binning': {
+            'min_r2_threshold': 0.005,
+            'min_correlation': -0.7,
+            'ruptures_penalty': 0.5,
+            'n_bins': 100,
+            'min_points_per_bin': 3,
+            'noisy_fallback': 'mean',
+            'model_selection': 'threshold_intercept',
+            'description': 'Fine spatial resolution'
+        },
+    }
+
+
+
+def process_single_shelf(args_tuple):
+    """Process a single ice shelf in parallel."""
+    (shelf_idx, shelf_name, icems_path, satobs_path, config_dict, 
+     save_dir, param_dict) = args_tuple
+    
+    try:
+        icems = gpd.read_file(icems_path).to_crs(config_dict['CRS_TARGET'])
+        satobs = xr.open_dataset(satobs_path)
+        satobs = write_crs(satobs, config_dict['CRS_TARGET'])
+        
+        class SimpleConfig:
+            def __init__(self, config_dict):
+                for k, v in config_dict.items():
+                    setattr(self, k, v)
+        
+        cfg = SimpleConfig(config_dict)
+        
+        result = dedraft_catchment_comprehensive(
+            shelf_idx, icems, satobs, cfg,
+            save_dir=save_dir,
+            weights=None,
+            weight_power=0.25,
+            save_pred=True,
+            save_coefs=True,
+            **param_dict
+        )
+        
+        if isinstance(result, dict) and 'full_results' in result and 'draft_params' in result:
+            return {
+                'success': True,
+                'shelf_name': shelf_name,
+                'shelf_idx': shelf_idx,
+                'full_results': result['full_results'],
+                'draft_params': result['draft_params']
+            }
+        else:
+            return {
+                'success': False,
+                'shelf_name': shelf_name,
+                'shelf_idx': shelf_idx,
+                'error': 'Invalid result structure'
+            }
+            
+    except Exception as e:
+        return {
+            'success': False,
+            'shelf_name': shelf_name,
+            'shelf_idx': shelf_idx,
+            'error': str(e)
+        }
+
+
+
+def calculate_parallel(icems, satobs, config_obj, param_dict, 
+                      start_index=33, end_index=None, n_workers=None,
+                      output_dir=None, processed_dir=None, skip_existing=True):
+    """
+    Parallel comprehensive draft dependence calculation.
+    """
+    logger.info("="*80)
+    logger.info("PARALLEL COMPREHENSIVE DRAFT DEPENDENCE CALCULATION")
+    logger.info("="*80)
+    
+    total_start = time()
+    
+    if output_dir is None:
+        output_dir = config_obj.DIR_ICESHELF_DEDRAFT_SATOBS / "comprehensive"
+    else:
+        output_dir = Path(output_dir)
+    
+    if processed_dir is None:
+        processed_dir = config_obj.DIR_PROCESSED / "draft_dependence_changepoint"
+    else:
+        processed_dir = Path(processed_dir)
+    
+    output_dir.mkdir(parents=True, exist_ok=True)
+    processed_dir.mkdir(parents=True, exist_ok=True)
+    
+    logger.info(f"Interim directory: {output_dir}")
+    logger.info(f"Processed directory: {processed_dir}")
+    logger.info(f"Parameters: {param_dict}")
+    
+    if n_workers is None:
+        n_workers = min(mp.cpu_count(), 8)
+    
+    logger.info(f"Using {n_workers} parallel workers")
+    
+    if end_index is None:
+        end_index = len(icems)
+    
+    shelf_indices = list(range(start_index, min(end_index, len(icems))))
+    shelf_names = [icems.name.values[i] for i in shelf_indices]
+    
+    logger.info(f"Processing {len(shelf_indices)} ice shelves (indices {start_index}-{end_index-1})")
+    
+    if skip_existing:
+        logger.info("Checking for existing files...")
+        param_names = ['draftDepenBasalMelt_minDraft', 'draftDepenBasalMelt_constantMeltValue',
+                      'draftDepenBasalMelt_paramType', 'draftDepenBasalMeltAlpha0', 'draftDepenBasalMeltAlpha1']
+        
+        shelves_to_skip = []
+        for i, (idx, name) in enumerate(zip(shelf_indices, shelf_names)):
+            all_exist = all((output_dir / f"{pn}_{name}.nc").exists() for pn in param_names)
+            if all_exist:
+                shelves_to_skip.append((idx, name))
+        
+        logger.info(f"  Found {len(shelves_to_skip)} shelves with complete files")
+        
+        skip_indices = {idx for idx, _ in shelves_to_skip}
+        shelf_indices = [idx for idx in shelf_indices if idx not in skip_indices]
+        shelf_names = [icems.name.values[i] for i in shelf_indices]
+        
+        logger.info(f"  Will process {len(shelf_indices)} shelves")
+    
+    config_dict = {
+        'CRS_TARGET': config_obj.CRS_TARGET,
+        'SATOBS_FLUX_VAR': config_obj.SATOBS_FLUX_VAR,
+        'SATOBS_DRAFT_VAR': config_obj.SATOBS_DRAFT_VAR,
+        'SORRM_FLUX_VAR': getattr(config_obj, 'SORRM_FLUX_VAR', None),
+        'SORRM_DRAFT_VAR': getattr(config_obj, 'SORRM_DRAFT_VAR', None),
+        'TIME_DIM': getattr(config_obj, 'TIME_DIM', 'time'),
+        'DATA_ATTRS': getattr(config_obj, 'DATA_ATTRS', {}),
+        'RHO_ICE': getattr(config_obj, 'RHO_ICE', None),
+        'SECONDS_PER_YEAR': getattr(config_obj, 'SECONDS_PER_YEAR', None)
+    }
+    
+    icems_path = str(config_obj.FILE_ICESHELFMASKS)
+    satobs_path = str(config_obj.FILE_PAOLO23_SATOBS_PREPARED)
+    
+    args_list = [
+        (idx, name, icems_path, satobs_path, config_dict, output_dir, param_dict)
+        for idx, name in zip(shelf_indices, shelf_names)
+    ]
+    
+    logger.info(f"Starting parallel processing with {n_workers} workers...")
+    all_results = {}
+    all_draft_params = {}
+    
+    processed_count = 0
+    failed_count = 0
+    
+    with ProcessPoolExecutor(max_workers=n_workers) as executor:
+        future_to_shelf = {executor.submit(process_single_shelf, args): args[1] for args in args_list}
+        
+        for future in tqdm(as_completed(future_to_shelf), total=len(args_list), desc="Processing shelves"):
+            shelf_name = future_to_shelf[future]
+            try:
+                result = future.result()
+                
+                if result['success']:
+                    all_results[result['shelf_name']] = result['full_results']
+                    all_draft_params[result['shelf_name']] = result['draft_params']
+                    processed_count += 1
+                else:
+                    logger.warning(f"Failed: {result['shelf_name']} - {result['error']}")
+                    failed_count += 1
+                    
+            except Exception as e:
+                logger.error(f"Exception processing {shelf_name}: {e}")
+                failed_count += 1
+    
+    if skip_existing and shelves_to_skip:
+        logger.info(f"Loading {len(shelves_to_skip)} shelves from existing files...")
+        for idx, name in shelves_to_skip:
+            all_results[name] = {
+                'is_meaningful': False,
+                'correlation': np.nan,
+                'r2': np.nan,
+                'shelf_name': name,
+                'skipped': True
+            }
+            all_draft_params[name] = {
+                'minDraft': 0.0,
+                'constantValue': 0.0,
+                'paramType': 1,
+                'alpha0': 0.0,
+                'alpha1': 0.0
+            }
+    
+    total_time = time() - total_start
+    
+    logger.info("="*80)
+    logger.info(f"PROCESSING COMPLETE")
+    logger.info(f"  Processed: {processed_count}")
+    logger.info(f"  Loaded from existing: {len(shelves_to_skip) if skip_existing else 0}")
+    logger.info(f"  Failed: {failed_count}")
+    logger.info(f"  Total time: {total_time:.1f}s ({total_time/60:.1f} min)")
+    if processed_count > 0:
+        logger.info(f"  Average time per shelf: {total_time/processed_count:.2f}s")
+    logger.info("="*80)
+    
+    if all_results:
+        from calculate_draft_dependence_comprehensive_fast import (
+            create_comprehensive_summary, merge_comprehensive_parameters
+        )
+        
+        logger.info("Creating summary...")
+        create_comprehensive_summary(all_results, all_draft_params, output_dir)
+        
+        logger.info("Merging parameters...")
+        merge_comprehensive_parameters(all_draft_params, icems, satobs, config_obj, output_dir, processed_dir)
+    
+    return all_results, all_draft_params
+
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description='Parallel comprehensive draft dependence calculation',
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    
+    parser.add_argument('--n-workers', type=int, default=None,
+                        help='Number of parallel workers (default: auto-detect, max 8)')
+    parser.add_argument('--start-index', type=int, default=33,
+                        help='Start processing from ice shelf index (default: 33)')
+    parser.add_argument('--end-index', type=int, default=None,
+                        help='End processing at ice shelf index (default: None = all)')
+    parser.add_argument('--skip-existing', dest='skip_existing', action='store_true', default=True,
+                        help='Skip shelves with existing files (default: True)')
+    parser.add_argument('--no-skip-existing', dest='skip_existing', action='store_false',
+                        help='Reprocess all shelves')
+    parser.add_argument('--interim-dir', type=str, default=None,
+                        help='Custom interim directory')
+    parser.add_argument('--processed-dir', type=str, default=None,
+                        help='Custom processed directory')
+    parser.add_argument('--parameter-sets', nargs='+', default=None,
+                        help='Parameter set names to test (e.g., standard permissive strict)')
+    parser.add_argument('--test-all-sets', action='store_true',
+                        help='Test all available parameter sets')
+    
+    args = parser.parse_args()
+    
+    interim_dir = Path(args.interim_dir) if args.interim_dir else config.DIR_ICESHELF_DEDRAFT_SATOBS
+    output_dir = interim_dir / "comprehensive"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
+    setup_logging(output_dir, "calculate_draft_dependence_comprehensive_parallel")
+    
+    logger.info("PARALLEL COMPREHENSIVE DRAFT DEPENDENCE CALCULATOR")
+    logger.info(f"Command: {' '.join(sys.argv)}")
+    
+    logger.info("Loading data...")
+    satobs = xr.open_dataset(config.FILE_PAOLO23_SATOBS_PREPARED)
+    if config.SATOBS_FLUX_VAR in satobs and satobs.attrs.get('units', '') == 'm of ice per year':
+        satobs[config.SATOBS_FLUX_VAR] = satobs[config.SATOBS_FLUX_VAR] * (config.RHO_ICE / config.SECONDS_PER_YEAR)
+        satobs[config.SATOBS_FLUX_VAR].attrs['units'] = 'kg m^-2 s^-1'
+    satobs = write_crs(satobs, config.CRS_TARGET)
+    
+    icems = gpd.read_file(config.FILE_ICESHELFMASKS).to_crs(config.CRS_TARGET)
+    
+    all_param_sets = define_parameter_sets()
+    
+    if args.test_all_sets:
+        param_set_names = list(all_param_sets.keys())
+    elif args.parameter_sets:
+        param_set_names = args.parameter_sets
+    else:
+        param_set_names = ['standard']
+    
+    logger.info(f"Will process {len(param_set_names)} parameter set(s): {', '.join(param_set_names)}")
+    
+    for set_name in param_set_names:
+        if set_name not in all_param_sets:
+            logger.error(f"Unknown parameter set: {set_name}")
+            continue
+        
+        param_set = all_param_sets[set_name]
+        logger.info(f"\n{'='*80}")
+        logger.info(f"PARAMETER SET: {set_name}")
+        logger.info(f"Description: {param_set['description']}")
+        logger.info(f"{'='*80}\n")
+        
+        set_interim_dir = interim_dir / set_name if len(param_set_names) > 1 else interim_dir
+        set_processed_dir = (Path(args.processed_dir) / set_name) if args.processed_dir and len(param_set_names) > 1 else args.processed_dir
+        
+        param_dict = {k: v for k, v in param_set.items() if k != 'description'}
+        
+        results, draft_params = calculate_parallel(
+            icems, satobs, config,
+            param_dict=param_dict,
+            start_index=args.start_index,
+            end_index=args.end_index,
+            n_workers=args.n_workers,
+            output_dir=set_interim_dir / "comprehensive" if set_interim_dir else None,
+            processed_dir=set_processed_dir,
+            skip_existing=args.skip_existing
+        )
+    
+    logger.info("\nAll processing complete!")
+
+
+
+if __name__ == "__main__":
+    main()

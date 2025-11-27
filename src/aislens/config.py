@@ -100,5 +100,12 @@ class Config:
 
     })
 
+    # Physical/constants used for unit conversions
+    RHO_ICE: float = 910.0  # kg m^-3 (project convention)
+    SECONDS_PER_YEAR: float = 365.0 * 24.0 * 3600.0
+
+    # Note: conversion factor (meters-of-ice-per-year -> kg m-2 s-1) can be
+    # computed as RHO_ICE / SECONDS_PER_YEAR when needed by callers.
+
 # Instantiate the configuration
 config = Config()
