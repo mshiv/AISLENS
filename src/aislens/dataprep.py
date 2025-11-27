@@ -13,8 +13,21 @@ from sklearn.linear_model import LinearRegression
 import ruptures as rpt
 from aislens.config import config
 from aislens.geospatial import clip_data
-from aislens.utils import fill_nan_with_nearest_neighbor_vectorized, fill_nan_with_nearest_neighbor_vectorized_balltree, fill_nan_with_nearest_neighbor_ndimage, merge_catchment_data, copy_subset_data, write_crs
+from aislens.utils import (
+    fill_nan_with_nearest_neighbor_vectorized,
+    fill_nan_with_nearest_neighbor_vectorized_balltree,
+    fill_nan_with_nearest_neighbor_ndimage,
+    merge_catchment_data,
+    copy_subset_data,
+    write_crs,
+    align_mask_to_template,
+    rasterize_ice_mask,
+)
+from aislens.utils import compute_nearest_index_map, fill_with_index_map
 from aislens.utils import draft_weight
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def detrend_dim(data, dim, deg):
@@ -785,37 +798,124 @@ def extrapolate_catchment(data, i, icems):
     """
     ice_shelf_mask = icems.loc[[i], 'geometry'].apply(mapping)
     ds = clip_data(data, i, icems)
-    #ds = ds.map(fill_nan_with_nearest_neighbor_vectorized, keep_attrs=True)
-    ds = ds.map(fill_nan_with_nearest_neighbor_vectorized_balltree, keep_attrs=True)
-    #ds = ds.map(fill_nan_with_nearest_neighbor_ndimage, keep_attrs=True)
+    # Use the fast ndimage-based fill (Dask-aware) for per-catchment fills
+    try:
+        ds = ds.map(fill_nan_with_nearest_neighbor_ndimage, keep_attrs=True)
+    except Exception:
+        # Fallback to vectorized KDTree if ndimage fails for some variable
+        ds = ds.map(fill_nan_with_nearest_neighbor_vectorized, keep_attrs=True)
     ds = ds.rio.clip(ice_shelf_mask, icems.crs)
     return ds
 
-def extrapolate_catchment_over_time(dataset, icems, config, var_name):
-    """
-    Extrapolate catchment data for each time step.
+def extrapolate_catchment_over_time(dataset, icems, config, var_name, use_index_map=False, index_map_cache_path=None):
+    """Extrapolate catchment data for each time step.
+
+    Implementation notes:
+    - Per-catchment filling uses scipy.ndimage.distance_transform_edt (fast nearest-neighbor fill)
+      via the Dask-aware helper `fill_nan_with_nearest_neighbor_ndimage` in `aislens.utils`.
+    - A rasterized ice-shelf union mask is produced on the model template grid and applied to
+      the merged extrapolated result to ensure ocean cells outside ice shelves are set to 0.
+
     Returns an xarray.Dataset with filled values.
     """
+
     times = dataset[var_name].coords[config.TIME_DIM]
     shape = dataset[var_name].shape
     extrap_array = np.full(shape, np.nan)
 
-    extrap_ds = xr.DataArray(
+    extrap_da = xr.DataArray(
         extrap_array,
         coords=dataset[var_name].coords,
         dims=dataset[var_name].dims,
-        attrs=dataset[var_name].attrs
-        
+        attrs=dataset[var_name].attrs,
     )
-    extrap_ds = xr.Dataset({var_name: extrap_ds})
+    extrap_ds = xr.Dataset({var_name: extrap_da})
+
+    # Prepare a spatial template (first time slice) and compute a rasterized ice mask once
+    try:
+        template_da = (
+            dataset[var_name].isel({config.TIME_DIM: 0}).compute()
+            if config.TIME_DIM in dataset[var_name].dims
+            else dataset[var_name].isel({0}).compute()
+        )
+    except Exception:
+        # Fallback: take the raw DataArray without compute
+        template_da = (
+            dataset[var_name].isel({config.TIME_DIM: 0})
+            if config.TIME_DIM in dataset[var_name].dims
+            else dataset[var_name].isel({0})
+        )
+
+    # Rasterize the full ice-shelf union onto the template grid to produce a strict mask
+    try:
+        ice_mask_r = rasterize_ice_mask(icems, template_da)
+    except Exception:
+        ice_mask_r = None
+        logger.warning(
+            "Could not rasterize ice-shelf geometries to template grid. Ocean zeroing will be skipped."
+        )
+
+    logger.info(
+        "Extrapolation configuration: per-catchment fill=ndimage, rasterized_mask_applied=%s",
+        ice_mask_r is not None,
+    )
+
+    # Optional: precompute nearest-index map for the template to apply repeatedly
+    index_map = None
+    if use_index_map:
+        try:
+            mask_for_map = np.isnan(template_da.values)
+            logger.info("Computing nearest-index map for template (this may use cache)")
+            index_map = compute_nearest_index_map(mask_for_map, cache_path=index_map_cache_path)
+            logger.info("Index map ready; will be reused for all time slices")
+        except Exception as e:
+            logger.warning(
+                "Failed to compute or load index_map (%s); falling back to ndimage per-slice",
+                e,
+            )
+            index_map = None
 
     for t in range(len(times)):
-        ds_data = dataset.isel({config.TIME_DIM: t}) #.rename({'x': 'x1', 'y': 'y1'})
+        ds_data = dataset.isel({config.TIME_DIM: t})
+        # Extrapolate each catchment (fast ndimage fills inside extrapolate_catchment)
         results = [extrapolate_catchment(ds_data, i, icems) for i in config.ICE_SHELF_REGIONS]
         merged_ds = merge_catchment_data(results)
         result_ds = copy_subset_data(ds_data, merged_ds)
-        extrap_ds[var_name][t] = result_ds[var_name]
+
+        # Ensure output is aligned to the template and apply rasterized mask to zero-out ocean
+        try:
+            # If we precomputed an index_map, use it to fill missing values on the merged result
+            if index_map is not None:
+                try:
+                    filled_once = fill_with_index_map(result_ds[var_name], index_map)
+                    result_ds[var_name] = filled_once
+                except Exception:
+                    logger.debug(
+                        "fill_with_index_map failed for time %d; falling back to existing filled result",
+                        t,
+                    )
+
+            if ice_mask_r is not None:
+                # Align mask dims/ordering if needed
+                if tuple(ice_mask_r.shape) != tuple(result_ds[var_name].shape):
+                    try:
+                        ice_mask_al = align_mask_to_template(ice_mask_r, result_ds[var_name])
+                    except Exception:
+                        ice_mask_al = align_mask_to_template(ice_mask_r, template_da)
+                else:
+                    ice_mask_al = ice_mask_r
+                # Apply mask: outside ice -> 0
+                result_filled = result_ds[var_name].where(ice_mask_al, other=0)
+                logger.debug("Applied rasterized mask for time %d", t)
+            else:
+                result_filled = result_ds[var_name]
+        except Exception:
+            # If anything fails, fallback to raw result
+            result_filled = result_ds[var_name]
+
+        extrap_ds[var_name][t] = result_filled
         print(f"Completed {var_name} time step {t}")
+
     return extrap_ds
 
 def detect_breakpoints(arr, model="l2", penalty=10):
