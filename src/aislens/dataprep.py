@@ -857,6 +857,15 @@ def extrapolate_catchment(data, i, icems):
     except Exception:
         # Fallback to vectorized KDTree if ndimage fails for some variable
         ds = ds.map(fill_nan_with_nearest_neighbor_vectorized, keep_attrs=True)
+    # Ensure dataset has CRS metadata for rioxarray.clip; some slices may lose
+    # rio metadata after selection. Write CRS from the icems GeoDataFrame or
+    # fall back to the configured target CRS.
+    try:
+        target_crs = getattr(icems, 'crs', None) or config.CRS_TARGET
+        ds = write_crs(ds, target_crs)
+    except Exception:
+        # If writing CRS fails, allow clip to raise its own informative error
+        pass
     ds = ds.rio.clip(ice_shelf_mask, icems.crs)
     return ds
 
