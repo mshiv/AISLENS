@@ -119,8 +119,7 @@ def robust_ndimage_fill_2d(arr2d):
         return a.copy(), 'failed'
 
 
-def simple_extrapolate_all_times(dataset, var_name, time_dim='Time', use_index_map=False, index_map_cache_path=None,
-                                icems=None, config_obj=None, shelf_mask_cache=None, overwrite_shelf_mask_cache=False, shelf_indices=None):
+def simple_extrapolate_all_times(dataset, var_name, time_dim='Time'):
     """Simple, low-dependency per-time nearest-neighbour fill.
 
     For each time slice (2D) in dataset[var_name], fill NaNs with nearest
@@ -144,27 +143,12 @@ def simple_extrapolate_all_times(dataset, var_name, time_dim='Time', use_index_m
     -------
     xarray.Dataset
     """
-    # If caller provided icems and config_obj, prefer the per-catchment implementation
-    # (matches the notebook behavior: clip per-shelf, fill inside shelves, merge)
-    if icems is not None and config_obj is not None:
-        try:
-            # Delegate to the per-catchment over-time function which already implements
-            # clip->per-shelf fill->merge logic and supports index-map/shelf-mask caching.
-            return extrapolate_catchment_over_time(
-                dataset,
-                icems,
-                config_obj,
-                var_name,
-                use_index_map=use_index_map,
-                index_map_cache_path=index_map_cache_path,
-                shelf_mask_cache=shelf_mask_cache,
-                overwrite_shelf_mask_cache=overwrite_shelf_mask_cache,
-                shelf_indices=shelf_indices,
-            )
-        except Exception:
-            # If delegation fails, fall back to local simple behavior below
-            logger.warning('Delegation to extrapolate_catchment_over_time failed; falling back to simple global fill')
+    """Simple, low-dependency per-time nearest-neighbour fill.
 
+    For each time slice (2D) in dataset[var_name], fill NaNs with nearest
+    non-NaN via robust_ndimage_fill_2d. Returns an xarray.Dataset with the
+    same coords/dims as the input but with NaNs filled.
+    """
     if var_name not in dataset:
         raise KeyError(f"Variable {var_name} not found in dataset")
 
@@ -175,34 +159,9 @@ def simple_extrapolate_all_times(dataset, var_name, time_dim='Time', use_index_m
     if time_dim in da.dims:
         out = np.full_like(vals, np.nan, dtype=float)
         nt = da.sizes[time_dim]
-
-        index_map = None
-        if use_index_map:
-            try:
-                # Build a template mask from the first time slice (True where NaN)
-                template = da.isel({time_dim: 0}).values
-                mask_for_map = np.isnan(template)
-                index_map = compute_nearest_index_map(mask_for_map, cache_path=index_map_cache_path)
-                logger.info('Loaded/created index_map for simple_extrapolate_all_times; reusing for %d time slices', nt)
-            except Exception as e:
-                logger.warning('Failed to compute/load index_map (%s); falling back to per-slice ndimage', e)
-                index_map = None
-
         for t in range(nt):
-            slice2d = da.isel({time_dim: t})
-            # If we have an index_map, use the faster fill_with_index_map path
-            if index_map is not None:
-                try:
-                    filled_da = fill_with_index_map(slice2d, index_map)
-                    # ensure numpy array for assignment
-                    out[t] = filled_da.values.astype(float)
-                    continue
-                except Exception:
-                    # fallback to robust ndimage per-slice
-                    pass
-
-            slice2d_np = slice2d.values.astype(float)
-            filled, method = robust_ndimage_fill_2d(slice2d_np)
+            slice2d = da.isel({time_dim: t}).values.astype(float)
+            filled, method = robust_ndimage_fill_2d(slice2d)
             out[t] = filled
         out_da = xr.DataArray(out, coords=da.coords, dims=da.dims, attrs=da.attrs)
     else:
@@ -1174,7 +1133,7 @@ def extrapolate_catchment(data, i, icems, precomputed_masks=None):
         raise
 
 def extrapolate_catchment_over_time(dataset, icems, config, var_name, use_index_map=False, index_map_cache_path=None,
-                                    shelf_mask_cache=None, overwrite_shelf_mask_cache=False, shelf_indices=None):
+                                    shelf_mask_cache=None, overwrite_shelf_mask_cache=False):
     """Extrapolate catchment data for each time step.
 
     Implementation notes:
@@ -1252,17 +1211,6 @@ def extrapolate_catchment_over_time(dataset, icems, config, var_name, use_index_
             cache_path=shelf_mask_cache,
             overwrite=overwrite_shelf_mask_cache,
         )
-        # If the caller provided a list of shelf indices to process, filter the
-        # precomputed masks to that subset so we only use/cache the relevant
-        # shelves (this avoids confusing logs and unnecessary processing).
-        if shelf_indices is not None:
-            # Ensure shelf_indices is an iterable of ints
-            try:
-                idxs = list(shelf_indices)
-            except Exception:
-                idxs = [shelf_indices]
-            filtered = {i: precomputed_masks[i] for i in idxs if i in precomputed_masks}
-            precomputed_masks = filtered
         logger.info('Precomputed per-shelf windows/masks for %d shelves', len(precomputed_masks))
     except TypeError as e:
         # Some tests or older stubs may monkeypatch a simplified two-arg version of
@@ -1279,13 +1227,10 @@ def extrapolate_catchment_over_time(dataset, icems, config, var_name, use_index_
         logger.warning('Failed to precompute shelf windows/masks: %s. Falling back to clip-based method.', e)
         precomputed_masks = None
 
-    # Determine which shelf indices to iterate over for processing
-    shelf_iter = shelf_indices if shelf_indices is not None else config.ICE_SHELF_REGIONS
-
     for t in range(len(times)):
         ds_data = dataset.isel({config.TIME_DIM: t})
         # Extrapolate each catchment (fast ndimage fills inside extrapolate_catchment)
-        results = [extrapolate_catchment(ds_data, i, icems, precomputed_masks=precomputed_masks) for i in shelf_iter]
+        results = [extrapolate_catchment(ds_data, i, icems, precomputed_masks=precomputed_masks) for i in config.ICE_SHELF_REGIONS]
         merged_ds = merge_catchment_data(results)
         result_ds = copy_subset_data(ds_data, merged_ds)
 
