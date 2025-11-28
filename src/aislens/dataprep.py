@@ -119,12 +119,29 @@ def robust_ndimage_fill_2d(arr2d):
         return a.copy(), 'failed'
 
 
-def simple_extrapolate_all_times(dataset, var_name, time_dim='Time'):
+def simple_extrapolate_all_times(dataset, var_name, time_dim='Time', use_index_map=False, index_map_cache_path=None):
     """Simple, low-dependency per-time nearest-neighbour fill.
 
     For each time slice (2D) in dataset[var_name], fill NaNs with nearest
-    non-NaN via robust_ndimage_fill_2d. Returns an xarray.Dataset with the
-    same coords/dims as the input but with NaNs filled.
+    non-NaN. This function supports an optional precomputed nearest-index
+    map that can be reused across time slices to avoid repeated distance
+    transforms.
+
+    Parameters
+    ----------
+    dataset : xarray.Dataset
+    var_name : str
+    time_dim : str
+    use_index_map : bool
+        If True, attempt to compute or load a nearest-index map once and
+        use `fill_with_index_map` for per-slice filling.
+    index_map_cache_path : str or Path, optional
+        Path to save/load the precomputed index map (.npz). Passed to
+        `compute_nearest_index_map`.
+
+    Returns
+    -------
+    xarray.Dataset
     """
     if var_name not in dataset:
         raise KeyError(f"Variable {var_name} not found in dataset")
@@ -136,9 +153,34 @@ def simple_extrapolate_all_times(dataset, var_name, time_dim='Time'):
     if time_dim in da.dims:
         out = np.full_like(vals, np.nan, dtype=float)
         nt = da.sizes[time_dim]
+
+        index_map = None
+        if use_index_map:
+            try:
+                # Build a template mask from the first time slice (True where NaN)
+                template = da.isel({time_dim: 0}).values
+                mask_for_map = np.isnan(template)
+                index_map = compute_nearest_index_map(mask_for_map, cache_path=index_map_cache_path)
+                logger.info('Loaded/created index_map for simple_extrapolate_all_times; reusing for %d time slices', nt)
+            except Exception as e:
+                logger.warning('Failed to compute/load index_map (%s); falling back to per-slice ndimage', e)
+                index_map = None
+
         for t in range(nt):
-            slice2d = da.isel({time_dim: t}).values.astype(float)
-            filled, method = robust_ndimage_fill_2d(slice2d)
+            slice2d = da.isel({time_dim: t})
+            # If we have an index_map, use the faster fill_with_index_map path
+            if index_map is not None:
+                try:
+                    filled_da = fill_with_index_map(slice2d, index_map)
+                    # ensure numpy array for assignment
+                    out[t] = filled_da.values.astype(float)
+                    continue
+                except Exception:
+                    # fallback to robust ndimage per-slice
+                    pass
+
+            slice2d_np = slice2d.values.astype(float)
+            filled, method = robust_ndimage_fill_2d(slice2d_np)
             out[t] = filled
         out_da = xr.DataArray(out, coords=da.coords, dims=da.dims, attrs=da.attrs)
     else:
