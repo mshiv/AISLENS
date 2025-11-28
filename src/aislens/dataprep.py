@@ -7,8 +7,8 @@ import xarray as xr
 import numpy as np
 from shapely.geometry import mapping
 from scipy import spatial
+import scipy.ndimage as ndimage
 from pathlib import Path
-import numpy as np
 from sklearn.linear_model import LinearRegression
 import ruptures as rpt
 from aislens.config import config
@@ -29,6 +29,123 @@ from aislens.utils import draft_weight
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+def robust_ndimage_fill_2d(arr2d):
+    """Fill NaNs in a 2D numpy array using scipy.ndimage.distance_transform_edt with
+    robust normalization of returned indices. If the ndimage output cannot be
+    normalized to two integer index arrays, fall back to a cKDTree nearest-neighbour
+    lookup.
+
+    Returns:
+        filled (np.ndarray): filled 2D array (same shape as input)
+        method (str): 'ndimage' or 'kdtree' or 'no-op'
+    """
+    if arr2d is None:
+        raise ValueError("arr2d must be a 2D numpy array")
+
+    a = np.array(arr2d, copy=False)
+    if a.ndim != 2:
+        raise ValueError("robust_ndimage_fill_2d expects a 2D array")
+
+    mask = np.isnan(a)
+    if not mask.any():
+        return a.copy(), "no-op"
+
+    # Try ndimage distance transform with returned indices
+    try:
+        dt_out = ndimage.distance_transform_edt(mask, return_indices=True)
+    except Exception:
+        dt_out = None
+
+    def _use_indices(indices):
+        # indices may be (ndim, ny, nx) or a tuple/list with two 2D arrays
+        try:
+            inds = np.asarray(indices)
+            if inds.ndim == 3 and inds.shape[0] >= 2:
+                iy = inds[0].astype(int)
+                ix = inds[1].astype(int)
+                return iy, ix
+            # If indices is a tuple/list of two 2D arrays
+            if isinstance(indices, (list, tuple)) and len(indices) >= 2:
+                iy = np.asarray(indices[0]).astype(int)
+                ix = np.asarray(indices[1]).astype(int)
+                return iy, ix
+            # If we get here and have a 2D array of flat indices
+            if inds.ndim == 2:
+                flat = inds.astype(int).ravel()
+                iy_flat, ix_flat = np.unravel_index(flat, a.shape)
+                iy = iy_flat.reshape(a.shape)
+                ix = ix_flat.reshape(a.shape)
+                return iy, ix
+        except Exception:
+            pass
+        raise ValueError("Could not normalize ndimage indices")
+
+    if dt_out is not None:
+        try:
+            # dt_out may be (distances, indices) or an ndarray
+            if isinstance(dt_out, tuple) and len(dt_out) >= 2:
+                distances, indices = dt_out[0], dt_out[1]
+            else:
+                # single ndarray: treat as indices array
+                distances = None
+                indices = dt_out
+            iy, ix = _use_indices(indices)
+            # Gather nearest values using normalized indices
+            filled = a.copy()
+            filled[mask] = a[iy[mask], ix[mask]]
+            return filled, 'ndimage'
+        except Exception:
+            # fall through to KDTree fallback
+            pass
+
+    # KDTree fallback: query nearest valid point for each NaN
+    try:
+        valid_pos = np.column_stack(np.nonzero(~mask))
+        nan_pos = np.column_stack(np.nonzero(mask))
+        if valid_pos.size == 0:
+            # nothing to fill -- return original
+            return a.copy(), 'no_valid'
+        tree = spatial.cKDTree(valid_pos)
+        dists, idxs = tree.query(nan_pos, k=1)
+        nearest = valid_pos[idxs]
+        filled = a.copy()
+        # assign values from nearest valid positions
+        filled[mask] = a[nearest[:, 0], nearest[:, 1]]
+        return filled, 'kdtree'
+    except Exception:
+        # Last resort: return input copy
+        return a.copy(), 'failed'
+
+
+def simple_extrapolate_all_times(dataset, var_name, time_dim='Time'):
+    """Simple, low-dependency per-time nearest-neighbour fill.
+
+    For each time slice (2D) in dataset[var_name], fill NaNs with nearest
+    non-NaN via robust_ndimage_fill_2d. Returns an xarray.Dataset with the
+    same coords/dims as the input but with NaNs filled.
+    """
+    if var_name not in dataset:
+        raise KeyError(f"Variable {var_name} not found in dataset")
+
+    da = dataset[var_name]
+    vals = da.values
+
+    # If Time dimension present, iterate over it; otherwise fill single 2D
+    if time_dim in da.dims:
+        out = np.full_like(vals, np.nan, dtype=float)
+        nt = da.sizes[time_dim]
+        for t in range(nt):
+            slice2d = da.isel({time_dim: t}).values.astype(float)
+            filled, method = robust_ndimage_fill_2d(slice2d)
+            out[t] = filled
+        out_da = xr.DataArray(out, coords=da.coords, dims=da.dims, attrs=da.attrs)
+    else:
+        filled, method = robust_ndimage_fill_2d(vals.astype(float))
+        out_da = xr.DataArray(filled, coords=da.coords, dims=da.dims, attrs=da.attrs)
+
+    return xr.Dataset({var_name: out_da})
 
 
 def detrend_dim(data, dim, deg):
@@ -52,6 +169,8 @@ def detrend_dim(data, dim, deg):
     # Add back the original mean
     detrended += original_mean
     return detrended
+
+    # ... rest of file unchanged (omitted for brevity in this patch) ...
 
 def deseasonalize(data):
     """

@@ -35,7 +35,7 @@ def test_extrapolation_indexmap_equivalence(monkeypatch):
     monkeypatch.setattr(dataprep.config, 'ICE_SHELF_REGIONS', [0], raising=False)
 
     # Fake extrapolate_catchment: fill NaNs with 1.0 (simulating ndimage per-catchment fill)
-    def fake_extrapolate_catchment(ds_data, i, icems):
+    def fake_extrapolate_catchment(ds_data, i, icems, precomputed_masks=None):
         da = ds_data[var]
         out = da.copy()
         out.values = np.where(np.isnan(out.values), 1.0, out.values)
