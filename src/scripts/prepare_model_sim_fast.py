@@ -104,6 +104,10 @@ def main():
                         help='Enable precomputed nearest-index map to speed up repeated extrapolation')
     parser.add_argument('--index-map-cache', type=str, default=None,
                         help='Path to load/save a cached nearest-index map (optional)')
+    parser.add_argument('--shelf-mask-cache', type=str, default=None,
+                        help='Directory path to save/load per-shelf window+mask cache (optional)')
+    parser.add_argument('--overwrite-shelf-mask-cache', action='store_true',
+                        help='Overwrite existing shelf-mask cache files if present')
     
     args = parser.parse_args()
     
@@ -281,8 +285,19 @@ def main():
     logger.info(f"\nStep 7: Saving intermediate components")
     logger.info(f"  Seasonality: {file_seasonality}")
     logger.info(f"  Variability: {file_variability}")
-    
-    model_seasonality.to_netcdf(file_seasonality)
+
+    # Save only the primary flux variable for seasonality. Other variables
+    # (e.g., draft) are present in the intermediate datasets but we only need
+    # the SORRM flux field in the seasonality output file. The variability
+    # file is produced after subtracting draft-dependence predictions and
+    # therefore typically contains only the flux variable already.
+    try:
+        model_seasonality[[config.SORRM_FLUX_VAR]].to_netcdf(file_seasonality)
+    except Exception:
+        # Fallback: if selection fails for any reason, write the full dataset
+        # to avoid losing outputs. Log the exception upstream if needed.
+        model_seasonality.to_netcdf(file_seasonality)
+
     model_variability.to_netcdf(file_variability)
     
     step7_time = time()
@@ -301,7 +316,9 @@ def main():
         model_variability_extrapl = extrapolate_catchment_over_time(
             model_variability, icems, config, config.SORRM_FLUX_VAR,
             use_index_map=args.use_index_map,
-            index_map_cache_path=args.index_map_cache
+            index_map_cache_path=args.index_map_cache,
+            shelf_mask_cache=args.shelf_mask_cache,
+            overwrite_shelf_mask_cache=args.overwrite_shelf_mask_cache,
         )
         model_variability_extrapl = model_variability_extrapl.fillna(0)
         
@@ -310,7 +327,9 @@ def main():
         model_seasonality_extrapl = extrapolate_catchment_over_time(
             model_seasonality, icems, config, config.SORRM_FLUX_VAR,
             use_index_map=args.use_index_map,
-            index_map_cache_path=args.index_map_cache
+            index_map_cache_path=args.index_map_cache,
+            shelf_mask_cache=args.shelf_mask_cache,
+            overwrite_shelf_mask_cache=args.overwrite_shelf_mask_cache,
         )
         model_seasonality_extrapl = model_seasonality_extrapl.fillna(0)
         

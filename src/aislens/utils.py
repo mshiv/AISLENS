@@ -22,6 +22,9 @@ from sklearn.linear_model import LinearRegression
 from scipy.signal import savgol_filter, medfilt
 import logging
 from datetime import datetime
+from rasterio.transform import from_origin
+from rasterio.features import rasterize
+from affine import Affine
 
 
 ##################################################################
@@ -574,6 +577,136 @@ def compute_nearest_index_map(mask, cache_path=None, overwrite=False):
     return idx
 
 
+def compute_shelf_windows_and_masks(template_da, icems, cache_path=None, overwrite=False):
+    """Compute per-shelf integer index windows and small rasterized masks on the template grid.
+
+    Returns a dict mapping shelf index -> dict with keys:
+      - 'window': (y0, y1, x0, x1) or None if no overlap
+      - 'mask': xarray.DataArray boolean mask of shape (y1-y0, x1-x0) (if window not None)
+
+    This function tries to keep masks small by rasterizing only inside the shelf bounding
+    window using the template grid spacing and transform. If rasterio is not available
+    or rasterization fails for a shelf, the entry will have window=None.
+    """
+    # Coordinates
+    xcoords = template_da.coords[template_da.dims[1]].values
+    ycoords = template_da.coords[template_da.dims[0]].values
+
+    # Determine resolution (assume roughly uniform grid)
+    if xcoords.size < 2 or ycoords.size < 2:
+        raise ValueError('template_da must have at least 2 points per axis')
+    xres = float(np.abs(xcoords[1] - xcoords[0]))
+    yres = float(np.abs(ycoords[1] - ycoords[0]))
+
+    out = {}
+    # Determine spatial dim names
+    try:
+        if hasattr(template_da.dims, 'keys'):
+            dims_keys = list(template_da.dims.keys())
+        else:
+            dims_keys = list(template_da.dims)
+        y_dim = dims_keys[0]
+        x_dim = dims_keys[1]
+    except Exception:
+        y_dim = 'y'
+        x_dim = 'x'
+
+    # If a cache directory is provided and exists and overwrite is False,
+    # attempt to load per-shelf masks from files named shelf_{i}.npz
+    if cache_path is not None:
+        cache_dir = Path(cache_path)
+        if cache_dir.exists() and not overwrite and cache_dir.is_dir():
+            # Try to load per-shelf files
+            loaded = True
+            for i, geom in enumerate(icems.geometry):
+                shelf_file = cache_dir / f'shelf_{i}.npz'
+                if not shelf_file.exists():
+                    loaded = False
+                    break
+            if loaded:
+                for i, geom in enumerate(icems.geometry):
+                    shelf_file = cache_dir / f'shelf_{i}.npz'
+                    try:
+                        npz = np.load(str(shelf_file), allow_pickle=True)
+                        w = np.asarray(npz['window']).astype(int)
+                        mask_arr = np.asarray(npz['mask']).astype(bool)
+                        y0, y1, x0, x1 = int(w[0]), int(w[1]), int(w[2]), int(w[3])
+                        ys = template_da.coords[y_dim].values[y0:y1]
+                        xs = template_da.coords[x_dim].values[x0:x1]
+                        mask_da = xr.DataArray(mask_arr, coords={y_dim: ys, x_dim: xs}, dims=(y_dim, x_dim))
+                        out[i] = {'window': (y0, y1, x0, x1), 'mask': mask_da}
+                    except Exception:
+                        out[i] = {'window': None, 'mask': None}
+                return out
+    for i, geom in enumerate(icems.geometry):
+        try:
+            minx, miny, maxx, maxy = geom.bounds
+        except Exception:
+            out[i] = {'window': None, 'mask': None}
+            continue
+
+        # Find index ranges that fall within geometry bounds
+        x_inds = np.where((xcoords >= (minx - xres)) & (xcoords <= (maxx + xres)))[0]
+        y_inds = np.where((ycoords >= (miny - yres)) & (ycoords <= (maxy + yres)))[0]
+
+        if x_inds.size == 0 or y_inds.size == 0:
+            out[i] = {'window': None, 'mask': None}
+            continue
+
+        x0, x1 = int(x_inds.min()), int(x_inds.max()) + 1
+        y0, y1 = int(y_inds.min()), int(y_inds.max()) + 1
+
+        # Build window coords
+        xs = xcoords[x0:x1]
+        ys = ycoords[y0:y1]
+
+        # rasterio.from_origin expects top-left corner (xmin, ymax)
+        xmin = float(xs[0])
+        ymax = float(ys[-1]) if ys[0] < ys[-1] else float(ys[0])
+        try:
+            win_transform = from_origin(xmin, ymax, xres, yres)
+            out_shape = (len(ys), len(xs))
+            geoms = [(mapping(geom), 1)]
+            mask_arr = rasterize(geoms, out_shape=out_shape, transform=win_transform, fill=0, dtype='uint8')
+            mask_da = xr.DataArray(mask_arr.astype(bool), dims=(y_dim, x_dim),
+                                   coords={y_dim: ys, x_dim: xs})
+            out[i] = {'window': (y0, y1, x0, x1), 'mask': mask_da}
+        except Exception:
+            out[i] = {'window': (y0, y1, x0, x1), 'mask': None}
+
+    # If cache_path provided, save per-shelf masks into the directory for reuse
+    if cache_path is not None:
+        cache_dir = Path(cache_path)
+        try:
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            for i, val in out.items():
+                w = val.get('window')
+                mask_da = val.get('mask')
+                shelf_file = cache_dir / f'shelf_{i}.npz'
+                tmp_file = cache_dir / f'.shelf_{i}.npz.tmp'
+                try:
+                    if w is None or mask_da is None:
+                        # Save an empty placeholder atomically
+                        np.savez_compressed(str(tmp_file), window=np.array([-1, -1, -1, -1]), mask=np.array([], dtype=np.uint8))
+                    else:
+                        y0, y1, x0, x1 = w
+                        mask_arr = mask_da.values.astype(np.uint8)
+                        np.savez_compressed(str(tmp_file), window=np.array([y0, y1, x0, x1]), mask=mask_arr)
+                    # Atomic move
+                    os.replace(str(tmp_file), str(shelf_file))
+                except Exception:
+                    try:
+                        if tmp_file.exists():
+                            tmp_file.unlink()
+                    except Exception:
+                        pass
+        except Exception:
+            # If caching fails, ignore silently (we still return the computed masks)
+            pass
+
+    return out
+
+
 def apply_nearest_index_map(arr, index_map):
     """Apply a precomputed nearest-index map to fill NaNs in a 2D array.
 
@@ -616,6 +749,51 @@ def fill_with_index_map(da, index_map):
     This is Dask-aware for per-slice (2D) fills: pass a 2D DataArray (one time slice).
     """
     return apply_nearest_index_map(da, index_map)
+
+
+def ensure_dataset_for_var(obj, var_name=None):
+    """Ensure the returned object is an xarray.Dataset containing at least
+    the requested variable name.
+
+    - If obj is a DataArray, wrap it into a Dataset with key `var_name`.
+    - If obj is a Dataset and contains `var_name`, return it unchanged.
+    - If obj is a Dataset with a single data variable, rename that variable
+      to `var_name` and return the Dataset.
+    - Otherwise return the Dataset unchanged (caller may inspect further).
+
+    This helper avoids forcing computation and tries to be non-destructive.
+    """
+    # Determine variable name if not provided
+    if var_name is None:
+        if isinstance(obj, xr.DataArray):
+            var_name = obj.name or 'var'
+        elif isinstance(obj, xr.Dataset):
+            var_name = next(iter(obj.data_vars)) if obj.data_vars else 'var'
+        else:
+            var_name = 'var'
+
+    if isinstance(obj, xr.DataArray):
+        return xr.Dataset({var_name: obj})
+
+    if isinstance(obj, xr.Dataset):
+        if var_name in obj.data_vars:
+            return obj
+        # If single variable, rename to var_name
+        if len(obj.data_vars) == 1:
+            current = next(iter(obj.data_vars))
+            if current != var_name:
+                return obj.rename({current: var_name})
+            return obj
+        # Multiple variables and var_name not present: return as-is
+        return obj
+
+    # Fallback: coerce to DataArray then Dataset
+    try:
+        arr = np.asarray(obj)
+        da = xr.DataArray(arr)
+        return xr.Dataset({var_name: da})
+    except Exception:
+        raise TypeError('Cannot coerce object to xarray Dataset')
 
 def delaunay_interp_weights(xy, uv, d=2):
     """

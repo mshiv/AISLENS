@@ -24,6 +24,7 @@ from aislens.utils import (
     rasterize_ice_mask,
 )
 from aislens.utils import compute_nearest_index_map, fill_with_index_map
+from aislens.utils import compute_shelf_windows_and_masks, ensure_dataset_for_var
 from aislens.utils import draft_weight
 import logging
 
@@ -839,7 +840,7 @@ def save_comprehensive_predictions(result, catchment_name, save_dir, draft_refer
         pred_array.to_netcdf(filename)
         print(f'{catchment_name} {model_name} prediction saved: {filename}')
 
-def extrapolate_catchment(data, i, icems):
+def extrapolate_catchment(data, i, icems, precomputed_masks=None):
     """
     Extrapolate specified data field for a given ice shelf catchment into the interior of the ice sheet.
     Args:
@@ -856,10 +857,59 @@ def extrapolate_catchment(data, i, icems):
         catchment_name = str(i)
 
     ice_shelf_mask = icems.loc[[i], 'geometry'].apply(mapping)
-    # First clip: reduce the dataset to the catchment bounding polygon before
-    # performing the expensive nearest-neighbor fill. This limits computation to
-    # the shelf area (smaller array) and avoids filling large ocean regions.
-    ds = clip_data(data, i, icems)
+    # Determine primary variable name from input so we can return a Dataset
+    # with a consistent variable key.
+    try:
+        if hasattr(data, 'data_vars') and len(getattr(data, 'data_vars', {})) > 0:
+            primary_var = next(iter(data.data_vars))
+        elif hasattr(data, 'name') and data.name is not None:
+            primary_var = data.name
+        else:
+            primary_var = config.SORRM_FLUX_VAR
+    except Exception:
+        primary_var = config.SORRM_FLUX_VAR
+
+    # If a precomputed small window/mask exists for this shelf, use a fast
+    # .isel(slice) + boolean-mask workflow instead of calling rioxarray.clip.
+    pre = None
+    if precomputed_masks is not None:
+        pre = precomputed_masks.get(i)
+    if pre and pre.get('window') is not None:
+        y0, y1, x0, x1 = pre['window']
+        # Slice to the small window (fast, chunk-friendly).
+        # Handle both xarray.Dataset and xarray.DataArray where .dims may be a mapping.
+        try:
+            # dims may be a mapping (Dataset) or tuple-like (DataArray)
+            if hasattr(data, 'dims') and not isinstance(data.dims, (list, tuple)):
+                dims_keys = list(data.dims.keys())
+            else:
+                dims_keys = list(data.dims)
+            y_dim = dims_keys[-2]
+            x_dim = dims_keys[-1]
+        except Exception:
+            # Fallback to common names
+            y_dim = 'y'
+            x_dim = 'x'
+
+        ds_win = data.isel({y_dim: slice(y0, y1), x_dim: slice(x0, x1)})
+
+        # Ensure we have coords consistent with the mask
+        mask_da = pre.get('mask')
+        if mask_da is not None:
+            # Fill nan inside window using ndimage (Dask-aware helper)
+            try:
+                ds_filled = ds_win.map(fill_nan_with_nearest_neighbor_ndimage, keep_attrs=True)
+            except Exception:
+                ds_filled = ds_win.map(fill_nan_with_nearest_neighbor_vectorized, keep_attrs=True)
+            # Apply boolean mask: outside polygon -> NaN
+            ds_masked = ds_filled.where(mask_da, other=np.nan)
+            return ensure_dataset_for_var(ds_masked, var_name=primary_var)
+        else:
+            # If mask was not created for the window, fall back to clip-based path
+            ds = clip_data(data, i, icems)
+    else:
+        # No precomputed window: fall back to clip-based behavior
+        ds = clip_data(data, i, icems)
     # Use the fast ndimage-based fill (Dask-aware) for per-catchment fills
     try:
         ds = ds.map(fill_nan_with_nearest_neighbor_ndimage, keep_attrs=True)
@@ -880,8 +930,13 @@ def extrapolate_catchment(data, i, icems):
     # the polygon since distance-based fills use nearest neighbors). Re-apply
     # the polygon clip below to ensure values outside the ice-shelf remain NaN.
     try:
-        ds_clipped = ds.rio.clip(ice_shelf_mask, icems.crs)
-        return ds_clipped
+        ds_filled = ds.map(fill_nan_with_nearest_neighbor_ndimage, keep_attrs=True)
+    except Exception:
+        ds_filled = ds.map(fill_nan_with_nearest_neighbor_vectorized, keep_attrs=True)
+
+    try:
+        ds_clipped = ds_filled.rio.clip(ice_shelf_mask, icems.crs)
+        return ensure_dataset_for_var(ds_clipped, var_name=primary_var)
     except Exception as e:
         try:
             from rioxarray.exceptions import NoDataInBounds
@@ -896,11 +951,12 @@ def extrapolate_catchment(data, i, icems):
                 arr = ds_nan[var]
                 nan_arr = xr.full_like(arr, np.nan)
                 ds_nan[var] = nan_arr
-            return ds_nan
+            return ensure_dataset_for_var(ds_nan, var_name=primary_var)
         # otherwise re-raise
         raise
 
-def extrapolate_catchment_over_time(dataset, icems, config, var_name, use_index_map=False, index_map_cache_path=None):
+def extrapolate_catchment_over_time(dataset, icems, config, var_name, use_index_map=False, index_map_cache_path=None,
+                                    shelf_mask_cache=None, overwrite_shelf_mask_cache=False):
     """Extrapolate catchment data for each time step.
 
     Implementation notes:
@@ -968,10 +1024,36 @@ def extrapolate_catchment_over_time(dataset, icems, config, var_name, use_index_
             )
             index_map = None
 
+    # Precompute per-shelf windows and masks on the template grid to avoid
+    # repeated rioxarray.clip calls. This produces small boolean masks and
+    # integer windows that we can use with .isel + boolean masking.
+    try:
+        precomputed_masks = compute_shelf_windows_and_masks(
+            template_da,
+            icems,
+            cache_path=shelf_mask_cache,
+            overwrite=overwrite_shelf_mask_cache,
+        )
+        logger.info('Precomputed per-shelf windows/masks for %d shelves', len(precomputed_masks))
+    except TypeError as e:
+        # Some tests or older stubs may monkeypatch a simplified two-arg version of
+        # compute_shelf_windows_and_masks (template, icems). Retry without cache
+        # keyword arguments to remain compatible with such stubs.
+        logger.debug('compute_shelf_windows_and_masks did not accept cache kwargs (%s); retrying without cache args', e)
+        try:
+            precomputed_masks = compute_shelf_windows_and_masks(template_da, icems)
+            logger.info('Precomputed per-shelf windows/masks for %d shelves (no-cache-call)', len(precomputed_masks))
+        except Exception as e2:
+            logger.warning('Failed to precompute shelf windows/masks on retry: %s. Falling back to clip-based method.', e2)
+            precomputed_masks = None
+    except Exception as e:
+        logger.warning('Failed to precompute shelf windows/masks: %s. Falling back to clip-based method.', e)
+        precomputed_masks = None
+
     for t in range(len(times)):
         ds_data = dataset.isel({config.TIME_DIM: t})
         # Extrapolate each catchment (fast ndimage fills inside extrapolate_catchment)
-        results = [extrapolate_catchment(ds_data, i, icems) for i in config.ICE_SHELF_REGIONS]
+        results = [extrapolate_catchment(ds_data, i, icems, precomputed_masks=precomputed_masks) for i in config.ICE_SHELF_REGIONS]
         merged_ds = merge_catchment_data(results)
         result_ds = copy_subset_data(ds_data, merged_ds)
 
