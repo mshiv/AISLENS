@@ -901,8 +901,43 @@ def extrapolate_catchment(data, i, icems, precomputed_masks=None):
                 ds_filled = ds_win.map(fill_nan_with_nearest_neighbor_ndimage, keep_attrs=True)
             except Exception:
                 ds_filled = ds_win.map(fill_nan_with_nearest_neighbor_vectorized, keep_attrs=True)
+            # Align the stored mask to the ds_win coordinates to avoid xarray
+            # index mismatch errors (different coord dtypes or labels cause
+            # "indexes along dimension ... are not equal"). Create a mask
+            # DataArray that uses the ds_win coords but retains the boolean
+            # values from the precomputed mask.
+            try:
+                # Determine y/x dim names used by the windowed slice
+                try:
+                    if hasattr(ds_win, 'dims') and not isinstance(ds_win.dims, (list, tuple)):
+                        win_dims = list(ds_win.dims.keys())
+                    else:
+                        win_dims = list(ds_win.dims)
+                    y_dim = win_dims[-2]
+                    x_dim = win_dims[-1]
+                except Exception:
+                    y_dim = 'y'
+                    x_dim = 'x'
+
+                # If mask_da is an xarray.DataArray, get its values; if it's
+                # a numpy array leave as-is.
+                mask_vals = mask_da.values if hasattr(mask_da, 'values') else mask_da
+
+                # Build a DataArray with the window coords so xarray won't try
+                # to align by differing coordinate labels/types.
+                mask_aligned = xr.DataArray(
+                    mask_vals,
+                    coords={y_dim: ds_win.coords[y_dim].values, x_dim: ds_win.coords[x_dim].values},
+                    dims=(y_dim, x_dim),
+                )
+            except Exception:
+                # If anything goes wrong constructing an aligned mask, fall
+                # back to using the original mask and let xarray raise a
+                # helpful error upstream.
+                mask_aligned = mask_da
+
             # Apply boolean mask: outside polygon -> NaN
-            ds_masked = ds_filled.where(mask_da, other=np.nan)
+            ds_masked = ds_filled.where(mask_aligned, other=np.nan)
             return ensure_dataset_for_var(ds_masked, var_name=primary_var)
         else:
             # If mask was not created for the window, fall back to clip-based path
