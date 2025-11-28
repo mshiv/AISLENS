@@ -22,7 +22,13 @@ import geopandas as gpd
 import numpy as np
 from time import time
 
-from aislens.dataprep import detrend_dim, deseasonalize, dedraft_catchment, extrapolate_catchment_over_time
+from aislens.dataprep import (
+    detrend_dim,
+    deseasonalize,
+    dedraft_catchment,
+    extrapolate_catchment_over_time,
+    simple_extrapolate_all_times,
+)
 from aislens.utils import merge_catchment_files, subset_dataset_by_time, initialize_directories, collect_directories, write_crs, setup_logging
 from aislens.config import config
 
@@ -108,6 +114,8 @@ def main():
                         help='Directory path to save/load per-shelf window+mask cache (optional)')
     parser.add_argument('--overwrite-shelf-mask-cache', action='store_true',
                         help='Overwrite existing shelf-mask cache files if present')
+    parser.add_argument('--simple-extrapolate', action='store_true',
+                        help='Use simple per-time nearest-neighbor extrapolation (fast, notebook-style)')
     
     args = parser.parse_args()
     
@@ -308,38 +316,55 @@ def main():
         logger.info(f"\nStep 8: Skipping extrapolation (--skip-extrapolation)")
     else:
         logger.info(f"\nStep 8: Extrapolating components")
-        
-        logger.info("  Extrapolating variability...")
-        logger.info("  Extrapolation algorithm: scipy.ndimage.distance_transform_edt (fast nearest-neighbor).\n"
-                    "  A rasterized ice-shelf union mask will be applied to zero ocean grid points outside ice shelves.\n"
-                    "  This uses Dask-aware helpers in `aislens.utils` for efficiency.")
-        model_variability_extrapl = extrapolate_catchment_over_time(
-            model_variability, icems, config, config.SORRM_FLUX_VAR,
-            use_index_map=args.use_index_map,
-            index_map_cache_path=args.index_map_cache,
-            shelf_mask_cache=args.shelf_mask_cache,
-            overwrite_shelf_mask_cache=args.overwrite_shelf_mask_cache,
-        )
-        model_variability_extrapl = model_variability_extrapl.fillna(0)
-        
-        logger.info("  Extrapolating seasonality...")
-        logger.info("  Extrapolation algorithm (same as above) will be used for seasonality.")
-        model_seasonality_extrapl = extrapolate_catchment_over_time(
-            model_seasonality, icems, config, config.SORRM_FLUX_VAR,
-            use_index_map=args.use_index_map,
-            index_map_cache_path=args.index_map_cache,
-            shelf_mask_cache=args.shelf_mask_cache,
-            overwrite_shelf_mask_cache=args.overwrite_shelf_mask_cache,
-        )
-        model_seasonality_extrapl = model_seasonality_extrapl.fillna(0)
-        
+
+        # Choose the simple per-time nearest-neighbor path if requested.
+        if args.simple_extrapolate:
+            logger.info("  Using simple per-time extrapolation (notebook-style, per-time nearest-neighbor).")
+
+            logger.info("  Extrapolating variability (simple)...")
+            model_variability_extrapl = simple_extrapolate_all_times(
+                model_variability, config.SORRM_FLUX_VAR, time_dim=config.TIME_DIM
+            )
+            model_variability_extrapl = model_variability_extrapl.fillna(0)
+
+            logger.info("  Extrapolating seasonality (simple)...")
+            model_seasonality_extrapl = simple_extrapolate_all_times(
+                model_seasonality, config.SORRM_FLUX_VAR, time_dim=config.TIME_DIM
+            )
+            model_seasonality_extrapl = model_seasonality_extrapl.fillna(0)
+
+        else:
+            logger.info("  Extrapolating variability...")
+            logger.info("  Extrapolation algorithm: scipy.ndimage.distance_transform_edt (fast nearest-neighbor).\n"
+                        "  A rasterized ice-shelf union mask will be applied to zero ocean grid points outside ice shelves.\n"
+                        "  This uses Dask-aware helpers in `aislens.utils` for efficiency.")
+            model_variability_extrapl = extrapolate_catchment_over_time(
+                model_variability, icems, config, config.SORRM_FLUX_VAR,
+                use_index_map=args.use_index_map,
+                index_map_cache_path=args.index_map_cache,
+                shelf_mask_cache=args.shelf_mask_cache,
+                overwrite_shelf_mask_cache=args.overwrite_shelf_mask_cache,
+            )
+            model_variability_extrapl = model_variability_extrapl.fillna(0)
+
+            logger.info("  Extrapolating seasonality...")
+            logger.info("  Extrapolation algorithm (same as above) will be used for seasonality.")
+            model_seasonality_extrapl = extrapolate_catchment_over_time(
+                model_seasonality, icems, config, config.SORRM_FLUX_VAR,
+                use_index_map=args.use_index_map,
+                index_map_cache_path=args.index_map_cache,
+                shelf_mask_cache=args.shelf_mask_cache,
+                overwrite_shelf_mask_cache=args.overwrite_shelf_mask_cache,
+            )
+            model_seasonality_extrapl = model_seasonality_extrapl.fillna(0)
+
         logger.info(f"  Saving extrapolated components...")
         logger.info(f"    Variability: {file_variability_extrapl}")
         logger.info(f"    Seasonality: {file_seasonality_extrapl}")
-        
+
         model_variability_extrapl.to_netcdf(file_variability_extrapl)
         model_seasonality_extrapl.to_netcdf(file_seasonality_extrapl)
-        
+
         step8_time = time()
         logger.info(f"  Step 8 complete ({step8_time - step7_time:.1f}s)")
     
