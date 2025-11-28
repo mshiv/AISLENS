@@ -205,6 +205,18 @@ def main():
         for i in config.ICE_SHELF_REGIONS
     ]
     missing = [f for f in pred_files if not f.exists()]
+    # Log which shelves we're considering and which prediction files are missing
+    try:
+        shelf_names = [icems.name.values[i] for i in config.ICE_SHELF_REGIONS]
+        logger.info('Configured ice-shelf indices to process: %s (count=%d)', shelf_names, len(shelf_names))
+        missing_names = [Path(f).name for f in missing]
+        if missing:
+            logger.info('Missing draft-dependence prediction files (will be created): %s', missing_names)
+        else:
+            logger.info('All draft-dependence prediction files present for configured shelves')
+    except Exception:
+        # Non-fatal: continue
+        pass
     
     if missing:
         logger.info(f"  Processing {len(missing)} ice shelves...")
@@ -332,6 +344,7 @@ def main():
                 config_obj=config,
                 shelf_mask_cache=args.shelf_mask_cache,
                 overwrite_shelf_mask_cache=args.overwrite_shelf_mask_cache,
+                shelf_indices=config.ICE_SHELF_REGIONS,
             )
             model_variability_extrapl = model_variability_extrapl.fillna(0)
 
@@ -346,6 +359,7 @@ def main():
                 config_obj=config,
                 shelf_mask_cache=args.shelf_mask_cache,
                 overwrite_shelf_mask_cache=args.overwrite_shelf_mask_cache,
+                shelf_indices=config.ICE_SHELF_REGIONS,
             )
             model_seasonality_extrapl = model_seasonality_extrapl.fillna(0)
 
@@ -360,6 +374,7 @@ def main():
                 index_map_cache_path=args.index_map_cache,
                 shelf_mask_cache=args.shelf_mask_cache,
                 overwrite_shelf_mask_cache=args.overwrite_shelf_mask_cache,
+                shelf_indices=config.ICE_SHELF_REGIONS,
             )
             model_variability_extrapl = model_variability_extrapl.fillna(0)
 
@@ -371,6 +386,7 @@ def main():
                 index_map_cache_path=args.index_map_cache,
                 shelf_mask_cache=args.shelf_mask_cache,
                 overwrite_shelf_mask_cache=args.overwrite_shelf_mask_cache,
+                shelf_indices=config.ICE_SHELF_REGIONS,
             )
             model_seasonality_extrapl = model_seasonality_extrapl.fillna(0)
 
