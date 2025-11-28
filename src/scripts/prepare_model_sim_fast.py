@@ -323,13 +323,21 @@ def main():
 
             logger.info("  Extrapolating variability (simple)...")
             model_variability_extrapl = simple_extrapolate_all_times(
-                model_variability, config.SORRM_FLUX_VAR, time_dim=config.TIME_DIM
+                model_variability,
+                config.SORRM_FLUX_VAR,
+                time_dim=config.TIME_DIM,
+                use_index_map=args.use_index_map,
+                index_map_cache_path=args.index_map_cache,
             )
             model_variability_extrapl = model_variability_extrapl.fillna(0)
 
             logger.info("  Extrapolating seasonality (simple)...")
             model_seasonality_extrapl = simple_extrapolate_all_times(
-                model_seasonality, config.SORRM_FLUX_VAR, time_dim=config.TIME_DIM
+                model_seasonality,
+                config.SORRM_FLUX_VAR,
+                time_dim=config.TIME_DIM,
+                use_index_map=args.use_index_map,
+                index_map_cache_path=args.index_map_cache,
             )
             model_seasonality_extrapl = model_seasonality_extrapl.fillna(0)
 
