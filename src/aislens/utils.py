@@ -303,12 +303,32 @@ def merge_catchment_files(filepaths):
     Returns:
         xarray.Dataset: Merged dataset.
     """
-    datasets = [xr.open_dataset(fp) for fp in filepaths]
+    # Only open files that actually exist; log missing ones
+    existing_paths = []
+    missing_paths = []
+    for fp in filepaths:
+        p = Path(fp)
+        if p.exists():
+            existing_paths.append(p)
+        else:
+            missing_paths.append(fp)
+
+    if missing_paths:
+        logging.getLogger(__name__).warning("merge_catchment_files: the following files were missing and will be skipped: %s", missing_paths)
+
+    if not existing_paths:
+        # Nothing to merge
+        return xr.Dataset()
+
+    datasets = [xr.open_dataset(fp) for fp in existing_paths]
     try:
         merged = merge_catchment_data(datasets)
     finally:
         for ds in datasets:
-            ds.close()
+            try:
+                ds.close()
+            except Exception:
+                pass
     return merged
 
 ##################################################################
@@ -577,7 +597,7 @@ def compute_nearest_index_map(mask, cache_path=None, overwrite=False):
     return idx
 
 
-def compute_shelf_windows_and_masks(template_da, icems, cache_path=None, overwrite=False):
+def compute_shelf_windows_and_masks(template_da, icems, shelf_indices=None, cache_path=None, overwrite=False):
     """Compute per-shelf integer index windows and small rasterized masks on the template grid.
 
     Returns a dict mapping shelf index -> dict with keys:
@@ -611,6 +631,12 @@ def compute_shelf_windows_and_masks(template_da, icems, cache_path=None, overwri
         y_dim = 'y'
         x_dim = 'x'
 
+    # Determine which shelf indices to process
+    if shelf_indices is None:
+        indices = range(len(icems))
+    else:
+        indices = list(shelf_indices)
+
     # If a cache directory is provided and exists and overwrite is False,
     # attempt to load per-shelf masks from files named shelf_{i}.npz
     if cache_path is not None:
@@ -618,13 +644,13 @@ def compute_shelf_windows_and_masks(template_da, icems, cache_path=None, overwri
         if cache_dir.exists() and not overwrite and cache_dir.is_dir():
             # Try to load per-shelf files
             loaded = True
-            for i, geom in enumerate(icems.geometry):
+            for i in indices:
                 shelf_file = cache_dir / f'shelf_{i}.npz'
                 if not shelf_file.exists():
                     loaded = False
                     break
             if loaded:
-                for i, geom in enumerate(icems.geometry):
+                for i in indices:
                     shelf_file = cache_dir / f'shelf_{i}.npz'
                     try:
                         npz = np.load(str(shelf_file), allow_pickle=True)
@@ -638,7 +664,12 @@ def compute_shelf_windows_and_masks(template_da, icems, cache_path=None, overwri
                     except Exception:
                         out[i] = {'window': None, 'mask': None}
                 return out
-    for i, geom in enumerate(icems.geometry):
+    for i in indices:
+        try:
+            geom = icems.geometry[i]
+        except Exception:
+            out[i] = {'window': None, 'mask': None}
+            continue
         try:
             minx, miny, maxx, maxy = geom.bounds
         except Exception:
@@ -812,29 +843,6 @@ def delaunay_interp_weights(xy, uv, d=2):
     tri = scipy.spatial.Delaunay(xy)
     simplex = tri.find_simplex(uv)
     vertices = np.take(tri.simplices, simplex, axis=0)
-    temp = np.take(tri.transform, simplex, axis=0)
-    delta = uv - temp[:, d]
-    weights = np.einsum('njk,nk->nj', temp[:, :d, :], delta)
-    weights = np.hstack((weights, 1 - weights.sum(axis=1, keepdims=True)))
-    tree = scipy.spatial.cKDTree(xy)
-    return vertices, weights, tree
-
-def nn_interp_weights(xy, uv, d=2):
-    """
-    Compute nearest-neighbor interpolation weights.
-
-    Args:
-        xy (array): Input x, y coordinates.
-        uv (array): Output (MPAS-LI) x, y coordinates.
-        d (int): Dimensionality (default is 2).
-
-    Returns:
-        array: Indices of nearest neighbors.
-    """
-    tree = scipy.spatial.cKDTree(xy)
-    _, idx = tree.query(uv, k=1)
-    return idx
-
 ##################################################################
 # Functions to create final forcing fields required by MALI.
 ##################################################################

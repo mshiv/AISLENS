@@ -1191,7 +1191,8 @@ def extrapolate_catchment_over_time(dataset, icems, config, var_name):
     # repeated rioxarray.clip calls. This produces small boolean masks and
     # integer windows that we can use with .isel + boolean masking.
     try:
-        precomputed_masks = compute_shelf_windows_and_masks(template_da, icems)
+        # Only precompute masks/windows for the configured ice-shelf region indices
+        precomputed_masks = compute_shelf_windows_and_masks(template_da, icems, shelf_indices=config.ICE_SHELF_REGIONS)
         logger.info('Precomputed per-shelf windows/masks for %d shelves', len(precomputed_masks))
     except TypeError as e:
         # Some tests or older stubs may monkeypatch a simplified two-arg version of

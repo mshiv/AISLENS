@@ -257,15 +257,29 @@ def main():
         except Exception as e2:
             logger.error('Failed to reindex draft_dependence_pred: %s', e2)
 
-    # Log NaN fraction to help diagnose alignment issues (do not abort)
+    # Log which pred files exist and the NaN fraction to diagnose alignment issues
     try:
+        existing_preds = [str(p) for p in pred_files if p.exists()]
+        missing_preds = [str(p) for p in pred_files if not p.exists()]
+        logger.info('Merging draft-dependence predictions: found %d files, missing %d files', len(existing_preds), len(missing_preds))
+        if missing_preds:
+            logger.debug('Missing draft-dependence files (examples): %s', missing_preds[:5])
+
         pred_var = next(iter(draft_dependence_pred.data_vars))
         pred_arr = draft_dependence_pred[pred_var]
         pred_vals = pred_arr.values
         nan_frac = float(np.isnan(pred_vals).sum()) / float(pred_vals.size)
         logger.info('draft_dependence_pred NaN fraction after aligning: %.3f', nan_frac)
-    except Exception:
-        logger.debug('Could not compute NaN fraction for draft_dependence_pred')
+
+        # If the merged draft-dependence is nearly empty, fallback to zeros to avoid producing all-NaN variability
+        if nan_frac > 0.9:
+            logger.warning('Merged draft_dependence_pred is >90%% NaN. Falling back to zeros to avoid all-NaN variability outputs.')
+            # Create a zero-filled dataset with same coords/dims as model_deseasonalized
+            zero_da = xr.zeros_like(model_deseasonalized[config.SORRM_FLUX_VAR])
+            draft_dependence_pred = xr.Dataset({pred_var: zero_da})
+            logger.info('Replaced draft_dependence_pred with zeros dataset (var=%s).', pred_var)
+    except Exception as e:
+        logger.debug('Could not compute NaN fraction for draft_dependence_pred (%s)', e)
     
     step5_time = time()
     logger.info(f"  Step 5 complete ({step5_time - step4_time:.1f}s)")
