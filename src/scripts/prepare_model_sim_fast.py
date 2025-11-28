@@ -328,6 +328,10 @@ def main():
                 time_dim=config.TIME_DIM,
                 use_index_map=args.use_index_map,
                 index_map_cache_path=args.index_map_cache,
+                icems=icems,
+                config_obj=config,
+                shelf_mask_cache=args.shelf_mask_cache,
+                overwrite_shelf_mask_cache=args.overwrite_shelf_mask_cache,
             )
             model_variability_extrapl = model_variability_extrapl.fillna(0)
 
@@ -338,6 +342,10 @@ def main():
                 time_dim=config.TIME_DIM,
                 use_index_map=args.use_index_map,
                 index_map_cache_path=args.index_map_cache,
+                icems=icems,
+                config_obj=config,
+                shelf_mask_cache=args.shelf_mask_cache,
+                overwrite_shelf_mask_cache=args.overwrite_shelf_mask_cache,
             )
             model_seasonality_extrapl = model_seasonality_extrapl.fillna(0)
 

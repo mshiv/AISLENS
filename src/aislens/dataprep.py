@@ -119,7 +119,8 @@ def robust_ndimage_fill_2d(arr2d):
         return a.copy(), 'failed'
 
 
-def simple_extrapolate_all_times(dataset, var_name, time_dim='Time', use_index_map=False, index_map_cache_path=None):
+def simple_extrapolate_all_times(dataset, var_name, time_dim='Time', use_index_map=False, index_map_cache_path=None,
+                                icems=None, config_obj=None, shelf_mask_cache=None, overwrite_shelf_mask_cache=False):
     """Simple, low-dependency per-time nearest-neighbour fill.
 
     For each time slice (2D) in dataset[var_name], fill NaNs with nearest
@@ -143,6 +144,26 @@ def simple_extrapolate_all_times(dataset, var_name, time_dim='Time', use_index_m
     -------
     xarray.Dataset
     """
+    # If caller provided icems and config_obj, prefer the per-catchment implementation
+    # (matches the notebook behavior: clip per-shelf, fill inside shelves, merge)
+    if icems is not None and config_obj is not None:
+        try:
+            # Delegate to the per-catchment over-time function which already implements
+            # clip->per-shelf fill->merge logic and supports index-map/shelf-mask caching.
+            return extrapolate_catchment_over_time(
+                dataset,
+                icems,
+                config_obj,
+                var_name,
+                use_index_map=use_index_map,
+                index_map_cache_path=index_map_cache_path,
+                shelf_mask_cache=shelf_mask_cache,
+                overwrite_shelf_mask_cache=overwrite_shelf_mask_cache,
+            )
+        except Exception:
+            # If delegation fails, fall back to local simple behavior below
+            logger.warning('Delegation to extrapolate_catchment_over_time failed; falling back to simple global fill')
+
     if var_name not in dataset:
         raise KeyError(f"Variable {var_name} not found in dataset")
 
