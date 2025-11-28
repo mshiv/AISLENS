@@ -105,14 +105,7 @@ def main():
                         help='Custom output directory for final products (overrides config.DIR_PROCESSED)')
     parser.add_argument('--draft-dir', type=str, default=None,
                         help='Custom directory for draft dependence files (overrides config.DIR_ICESHELF_DEDRAFT_MODEL)')
-    parser.add_argument('--use-index-map', action='store_true',
-                        help='Enable precomputed nearest-index map to speed up repeated extrapolation')
-    parser.add_argument('--index-map-cache', type=str, default=None,
-                        help='Path to load/save a cached nearest-index map (optional)')
-    parser.add_argument('--shelf-mask-cache', type=str, default=None,
-                        help='Directory path to save/load per-shelf window+mask cache (optional)')
-    parser.add_argument('--overwrite-shelf-mask-cache', action='store_true',
-                        help='Overwrite existing shelf-mask cache files if present')
+    # legacy caching flags removed to restore original stable behavior
     
     args = parser.parse_args()
     
@@ -319,22 +312,14 @@ def main():
                     "  A rasterized ice-shelf union mask will be applied to zero ocean grid points outside ice shelves.\n"
                     "  This uses Dask-aware helpers in `aislens.utils` for efficiency.")
         model_variability_extrapl = extrapolate_catchment_over_time(
-            model_variability, icems, config, config.SORRM_FLUX_VAR,
-            use_index_map=args.use_index_map,
-            index_map_cache_path=args.index_map_cache,
-            shelf_mask_cache=args.shelf_mask_cache,
-            overwrite_shelf_mask_cache=args.overwrite_shelf_mask_cache,
+            model_variability, icems, config, config.SORRM_FLUX_VAR
         )
         model_variability_extrapl = model_variability_extrapl.fillna(0)
         
         logger.info("  Extrapolating seasonality...")
         logger.info("  Extrapolation algorithm (same as above) will be used for seasonality.")
         model_seasonality_extrapl = extrapolate_catchment_over_time(
-            model_seasonality, icems, config, config.SORRM_FLUX_VAR,
-            use_index_map=args.use_index_map,
-            index_map_cache_path=args.index_map_cache,
-            shelf_mask_cache=args.shelf_mask_cache,
-            overwrite_shelf_mask_cache=args.overwrite_shelf_mask_cache,
+            model_seasonality, icems, config, config.SORRM_FLUX_VAR
         )
         model_seasonality_extrapl = model_seasonality_extrapl.fillna(0)
         

@@ -68,12 +68,12 @@ def test_extrapolation_indexmap_equivalence(monkeypatch):
 
     # Run without index_map
     t0 = time.perf_counter()
-    out_noidx = dataprep.extrapolate_catchment_over_time(ds, None, config, var, use_index_map=False)
+    out_noidx = dataprep.extrapolate_catchment_over_time(ds, None, config, var)
     t_noidx = time.perf_counter() - t0
 
     # Run with index_map
     t0 = time.perf_counter()
-    out_idx = dataprep.extrapolate_catchment_over_time(ds, None, config, var, use_index_map=True, index_map_cache_path=None)
+    out_idx = dataprep.extrapolate_catchment_over_time(ds, None, config, var)
     t_idx = time.perf_counter() - t0
 
     a = out_noidx[var].values

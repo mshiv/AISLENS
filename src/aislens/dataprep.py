@@ -17,13 +17,15 @@ from aislens.utils import (
     fill_nan_with_nearest_neighbor_vectorized,
     fill_nan_with_nearest_neighbor_vectorized_balltree,
     fill_nan_with_nearest_neighbor_ndimage,
+    compute_nearest_index_map,
+    fill_with_index_map,
     merge_catchment_data,
     copy_subset_data,
     write_crs,
     align_mask_to_template,
     rasterize_ice_mask,
 )
-from aislens.utils import compute_nearest_index_map, fill_with_index_map
+# index-map helpers removed to preserve notebook-style behavior by default
 from aislens.utils import compute_shelf_windows_and_masks, ensure_dataset_for_var
 from aislens.utils import draft_weight
 import logging
@@ -1132,8 +1134,7 @@ def extrapolate_catchment(data, i, icems, precomputed_masks=None):
         # otherwise re-raise
         raise
 
-def extrapolate_catchment_over_time(dataset, icems, config, var_name, use_index_map=False, index_map_cache_path=None,
-                                    shelf_mask_cache=None, overwrite_shelf_mask_cache=False):
+def extrapolate_catchment_over_time(dataset, icems, config, var_name):
     """Extrapolate catchment data for each time step.
 
     Implementation notes:
@@ -1186,43 +1187,19 @@ def extrapolate_catchment_over_time(dataset, icems, config, var_name, use_index_
         ice_mask_r is not None,
     )
 
-    # Optional: precompute nearest-index map for the template to apply repeatedly
-    index_map = None
-    if use_index_map:
-        try:
-            mask_for_map = np.isnan(template_da.values)
-            logger.info("Computing nearest-index map for template (this may use cache)")
-            index_map = compute_nearest_index_map(mask_for_map, cache_path=index_map_cache_path)
-            logger.info("Index map ready; will be reused for all time slices")
-        except Exception as e:
-            logger.warning(
-                "Failed to compute or load index_map (%s); falling back to ndimage per-slice",
-                e,
-            )
-            index_map = None
-
     # Precompute per-shelf windows and masks on the template grid to avoid
     # repeated rioxarray.clip calls. This produces small boolean masks and
     # integer windows that we can use with .isel + boolean masking.
     try:
-        precomputed_masks = compute_shelf_windows_and_masks(
-            template_da,
-            icems,
-            cache_path=shelf_mask_cache,
-            overwrite=overwrite_shelf_mask_cache,
-        )
+        precomputed_masks = compute_shelf_windows_and_masks(template_da, icems)
         logger.info('Precomputed per-shelf windows/masks for %d shelves', len(precomputed_masks))
     except TypeError as e:
         # Some tests or older stubs may monkeypatch a simplified two-arg version of
-        # compute_shelf_windows_and_masks (template, icems). Retry without cache
-        # keyword arguments to remain compatible with such stubs.
-        logger.debug('compute_shelf_windows_and_masks did not accept cache kwargs (%s); retrying without cache args', e)
-        try:
-            precomputed_masks = compute_shelf_windows_and_masks(template_da, icems)
-            logger.info('Precomputed per-shelf windows/masks for %d shelves (no-cache-call)', len(precomputed_masks))
-        except Exception as e2:
-            logger.warning('Failed to precompute shelf windows/masks on retry: %s. Falling back to clip-based method.', e2)
-            precomputed_masks = None
+        # compute_shelf_windows_and_masks (template, icems). If a TypeError occurs,
+        # retry without kwargs (handled above) — but since we already called the
+        # two-arg form, re-raise to fall back.
+        logger.debug('compute_shelf_windows_and_masks raised TypeError: %s; falling back to clip-based method.', e)
+        precomputed_masks = None
     except Exception as e:
         logger.warning('Failed to precompute shelf windows/masks: %s. Falling back to clip-based method.', e)
         precomputed_masks = None
@@ -1236,17 +1213,6 @@ def extrapolate_catchment_over_time(dataset, icems, config, var_name, use_index_
 
         # Ensure output is aligned to the template and apply rasterized mask to zero-out ocean
         try:
-            # If we precomputed an index_map, use it to fill missing values on the merged result
-            if index_map is not None:
-                try:
-                    filled_once = fill_with_index_map(result_ds[var_name], index_map)
-                    result_ds[var_name] = filled_once
-                except Exception:
-                    logger.debug(
-                        "fill_with_index_map failed for time %d; falling back to existing filled result",
-                        t,
-                    )
-
             if ice_mask_r is not None:
                 # Align mask dims/ordering if needed
                 if tuple(ice_mask_r.shape) != tuple(result_ds[var_name].shape):

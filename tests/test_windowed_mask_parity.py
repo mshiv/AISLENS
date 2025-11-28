@@ -94,14 +94,14 @@ def test_windowed_mask_vs_clip_equivalence(monkeypatch):
     # When precomputed masks exist we want to run the normal extrapolate_catchment (fast path)
     # so do NOT monkeypatch dataprep.extrapolate_catchment here.
 
-    out_pre = dataprep.extrapolate_catchment_over_time(ds, icems, config, var, use_index_map=False)
+    out_pre = dataprep.extrapolate_catchment_over_time(ds, icems, config, var)
 
     # Case 2: no precomputed masks -> force old clip-based path by returning None
     monkeypatch.setattr(dataprep, 'compute_shelf_windows_and_masks', lambda template, icems_arg: None)
     # Monkeypatch extrapolate_catchment to the old behavior
     monkeypatch.setattr(dataprep, 'extrapolate_catchment', fake_extrapolate_catchment_old)
 
-    out_fallback = dataprep.extrapolate_catchment_over_time(ds, icems, config, var, use_index_map=False)
+    out_fallback = dataprep.extrapolate_catchment_over_time(ds, icems, config, var)
 
     a = out_pre[var].values
     b = out_fallback[var].values
