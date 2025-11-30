@@ -12,7 +12,7 @@ This script performs a clear, debuggable sequence of steps:
   - save variability & residual
   - compute spatial-mean time-series for all components and plot them together
   - compute simple summary stats and write JSON
-  
+
 Usage:
     python debug_prepare_workflow.py [--start-year YYYY] [--end-year YYYY]
                                      [--start-index SI] [--end-index EI]
@@ -97,7 +97,7 @@ def main():
     parser.add_argument('--skip-dedraft', action='store_true')
     args = parser.parse_args()
 
-    outdir = Path(args.output-dir) if args.output_dir else Path(config.DIR_PROCESSED) / 'debug_workflow'
+    outdir = Path(args.output_dir) if args.output_dir else Path(config.DIR_PROCESSED) / 'debug_workflow'
     outdir.mkdir(parents=True, exist_ok=True)
     setup_logging(outdir, 'debug_prepare_workflow')
 
