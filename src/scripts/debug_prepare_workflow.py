@@ -164,8 +164,24 @@ def main():
             logger.info('Loading precomputed mean: %s', args.precomputed_mean)
             ds_mean = xr.open_dataset(args.precomputed_mean)
         else:
-            logger.info('Computing time-mean of deseasonalized data (this may take a while)')
-            ds_mean = deseas.mean(dim=config.TIME_DIM).compute()
+            logger.info('Computing time-mean for dedraft (flux from deseasonalized, draft from model)')
+            # The dedraft routine expects a Dataset containing both the flux and the draft
+            # variables (so it can access ds[flux_var] and ds[draft_var]). `deseas` here is a
+            # DataArray (only the flux variable), so build a time-mean Dataset that contains
+            # the deseasonalized flux mean and the model draft mean from `ds_sub`.
+            flux_mean = deseas.mean(dim=config.TIME_DIM).compute()
+            # get draft mean from the original subset (ds_sub) so dedraft has draft field
+            if draft_var in ds_sub:
+                draft_mean = ds_sub[draft_var].mean(dim=config.TIME_DIM).compute()
+            else:
+                # fallback: try config name explicitly
+                draft_mean = ds_sub[config.SORRM_DRAFT_VAR].mean(dim=config.TIME_DIM).compute()
+
+            # Ensure both are Datasets and merge into a single Dataset for dedraft_catchment
+            flux_ds = flux_mean.to_dataset(name=flux_var) if isinstance(flux_mean, xr.DataArray) else flux_mean
+            draft_ds = draft_mean.to_dataset(name=draft_var) if isinstance(draft_mean, xr.DataArray) else draft_mean
+            ds_mean = xr.merge([flux_ds, draft_ds])
+
             mean_file = draft_dir / '_temp_time_mean_debug.nc'
             ds_mean.to_netcdf(mean_file)
             logger.info('Saved time-mean to %s', mean_file)
