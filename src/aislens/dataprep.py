@@ -191,7 +191,7 @@ def detrend_dim(data, dim, deg):
     p = data.polyfit(dim=dim, deg=deg)
     fit = xr.polyval(data[dim], p.polyfit_coefficients)
     detrended = data - fit
-    detrended += original_mean
+    #detrended += original_mean
     return detrended
 
 
@@ -208,8 +208,8 @@ def deseasonalize(data):
     data_month = data.groupby("Time.month")
     data_clm = data_month.mean("Time")
     data_anm = data_month - data_clm
-    original_mean = data.mean("Time")
-    data_anm += original_mean
+    #original_mean = data.mean("Time")
+    #data_anm += original_mean
     return data_anm
 
 def dedraft(data, draft, weights=None):
