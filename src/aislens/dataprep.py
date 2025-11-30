@@ -367,10 +367,28 @@ def dedraft_catchment(
         save_pred (bool): Save predicted melt (model).
         save_coefs (bool): Save regression coefficients (obs).
     """
-    catchment_name = icems.name.values[i]
+    # Allow callers to pass either the GeoDataFrame index label or a positional
+    # integer. Many callers use a positional index (0..N-1) while some may
+    # pass index labels; coerce here to the GeoDataFrame label to make the
+    # function robust.
+    orig_i = i
+    if i in icems.index:
+        label = i
+    else:
+        # if integer-like, map positional index -> label
+        try:
+            if isinstance(i, (int, np.integer)) and 0 <= int(i) < len(icems):
+                label = icems.index[int(i)]
+            else:
+                # last resort: try to convert to int then index
+                label = icems.index[int(i)]
+        except Exception:
+            raise KeyError(f"Ice-shelf identifier {i} is not a valid GeoDataFrame index or positional index")
+
+    catchment_name = icems.loc[label, 'name']
     # Log shelf name and bounds for easier debugging when clipping fails
     try:
-        geom = icems.loc[i, 'geometry']
+        geom = icems.loc[label, 'geometry']
         bounds = getattr(geom, 'bounds', None)
     except Exception:
         geom = None
@@ -386,7 +404,8 @@ def dedraft_catchment(
         NoDataInBounds = Exception
 
     try:
-        ds = clip_data(data, i, icems)
+        # clip_data expects an index label; pass the coerced label
+        ds = clip_data(data, label, icems)
     except NoDataInBounds:
         logger.warning(
             "No data found inside ice-shelf '%s' (index %s). Skipping dedraft for this shelf.",
