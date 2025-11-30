@@ -131,7 +131,8 @@ def generate_and_save_forcings(model, pcs, nmodes, data_tmean, data_tstd,
                 'source': 'AISLENS forcing generator',
                 'realization_number': i,
                 'n_eof_modes': nmodes,
-                'seasonality_included': bool(include_seasonality),
+                # store as integer (0/1) to avoid netCDF attribute type issues
+                'seasonality_included': int(bool(include_seasonality)),
                 'description': f'MALI forcing realization {i} generated using EOF '
                               f'decomposition and phase randomization'
             })
