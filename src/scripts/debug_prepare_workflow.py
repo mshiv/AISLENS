@@ -327,6 +327,20 @@ def main():
         logger.info('Saving time-series Dataset -> %s', ts_out)
         ts_ds.to_netcdf(ts_out)
 
+        # Also save the original dataset spatial-mean time series as a standalone
+        # NetCDF so downstream notebooks can load it explicitly. This is the same
+        # `original` series included above but written to its own file for clarity.
+        try:
+            orig_da = ts_ds['original'] if 'original' in ts_ds.data_vars else None
+            if orig_da is not None:
+                orig_out = outdir / 'original_timeseries.nc'
+                orig_da.attrs['provenance'] = 'spatial mean of original model flux (mean over x,y)'
+                orig_da.name = 'original'
+                logger.info('Saving original spatial-mean time series -> %s', orig_out)
+                xr.Dataset({orig_da.name: orig_da}).to_netcdf(orig_out)
+        except Exception:
+            logger.exception('Failed to write original_timeseries.nc; continuing')
+
     # convert to numpy arrays for plotting
     logger.info('Plotting time-series to %s', outdir / 'time_series_components.png')
     fig, ax = plt.subplots(1, 1, figsize=(10, 5))

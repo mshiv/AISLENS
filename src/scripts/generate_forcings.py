@@ -34,18 +34,23 @@ from aislens.config import config
 logger = logging.getLogger(__name__)
 
 
-def load_and_prepare_data():
-    """Load and prepare seasonality and variability datasets."""
+def load_and_prepare_data(seasonality_path=None, variability_path=None):
+    """Load and prepare seasonality and variability datasets.
+
+    If explicit paths are provided they are used, otherwise fallback to config paths.
+    Returns (seasonality, variability, data_norm, data_tmean, data_tstd).
+    """
+    seasonality_file = Path(seasonality_path) if seasonality_path else Path(config.FILE_SEASONALITY_EXTRAPL)
+    variability_file = Path(variability_path) if variability_path else Path(config.FILE_VARIABILITY_EXTRAPL)
+
     logger.info("Loading extrapolated seasonality and variability datasets...")
-    
-    for name, path in [("Seasonality", config.FILE_SEASONALITY_EXTRAPL), 
-                       ("Variability", config.FILE_VARIABILITY_EXTRAPL)]:
-        if not Path(path).exists():
+    for name, path in [("Seasonality", seasonality_file), ("Variability", variability_file)]:
+        if not path.exists():
             raise FileNotFoundError(f"{name} file not found: {path}")
-    
-    seasonality = xr.open_dataset(config.FILE_SEASONALITY_EXTRAPL, chunks={config.TIME_DIM: 36})
-    variability = xr.open_dataset(config.FILE_VARIABILITY_EXTRAPL, chunks={config.TIME_DIM: 36})
-    
+
+    seasonality = xr.open_dataset(seasonality_file, chunks={config.TIME_DIM: 36})
+    variability = xr.open_dataset(variability_file, chunks={config.TIME_DIM: 36})
+
     for ds, name in [(variability, "variability"), (seasonality, "seasonality")]:
         if 'Time' in ds.dims:
             ds.rename({"Time": "time"}, inplace=True)
@@ -88,8 +93,9 @@ def perform_eof_analysis(data_norm, load_existing=False):
     return model, pcs, nmodes
 
 
-def generate_and_save_forcings(model, pcs, nmodes, data_tmean, data_tstd, 
-                               seasonality, data, n_realizations):
+def generate_and_save_forcings(model, pcs, nmodes, data_tmean, data_tstd,
+                               seasonality, data, n_realizations,
+                               include_seasonality=True):
     """Generate ensemble forcing realizations and save to disk."""
     logger.info(f"Generating {n_realizations} ensemble realizations...")
     new_pcs = phase_randomization(pcs.values, n_realizations)
@@ -105,23 +111,33 @@ def generate_and_save_forcings(model, pcs, nmodes, data_tmean, data_tstd,
             
             new_data = generate_data(model, new_pcs, i, nmodes, 1)
             new_data = (new_data * data_tstd) + data_tmean
-            
-            new_data = xr.DataArray(new_data, dims=data.dims, coords=data.coords, 
+
+            new_data = xr.DataArray(new_data, dims=data.dims, coords=data.coords,
                                    attrs=data.attrs.copy())
             new_data.name = data.name
-            forcing = seasonality + new_data
-            
+
+            # Optionally add seasonality. If include_seasonality is False, save
+            # the variability-only realization (useful for experiments).
+            if include_seasonality:
+                forcing = seasonality + new_data
+            else:
+                forcing = new_data
+
             forcing.attrs.update({
                 'creation_date': datetime.now().isoformat(),
                 'source': 'AISLENS forcing generator',
                 'realization_number': i,
                 'n_eof_modes': nmodes,
+                'seasonality_included': bool(include_seasonality),
                 'description': f'MALI forcing realization {i} generated using EOF '
                               f'decomposition and phase randomization'
             })
             
-            forcing.to_netcdf(output_dir / f"forcing_realization_{i}.nc")
-            logger.debug(f"Saved realization {i}")
+            # filename reflects whether seasonality was included
+            suffix = "" if forcing.attrs.get('seasonality_included', True) else "_no_ssn"
+            fname = output_dir / f"forcing_realization_{i}{suffix}.nc"
+            forcing.to_netcdf(fname)
+            logger.debug(f"Saved realization {i} -> {fname}")
             successful_realizations += 1
         except Exception as e:
             logger.error(f"Failed to generate/save realization {i}: {e}")
@@ -131,17 +147,22 @@ def generate_and_save_forcings(model, pcs, nmodes, data_tmean, data_tstd,
         raise RuntimeError("Failed to generate any realizations")
 
 
-def generate_forcings(n_realizations=None, load_existing_eof=False):
+def generate_forcings(n_realizations=None, load_existing_eof=False, include_seasonality=True,
+                      seasonality_file=None, variability_file=None):
     """Main function to generate forcing realizations."""
     logger.info("AISLENS Forcing Generator")
     
     n_realizations = n_realizations or config.N_REALIZATIONS
     logger.info(f"Configuration: {n_realizations} realizations, load_existing_eof={load_existing_eof}")
-    
-    seasonality, variability, data_norm, data_tmean, data_tstd = load_and_prepare_data()
+
+    seasonality, variability, data_norm, data_tmean, data_tstd = load_and_prepare_data(
+        seasonality_path=seasonality_file, variability_path=variability_file
+    )
     model, pcs, nmodes = perform_eof_analysis(data_norm, load_existing=load_existing_eof)
+    # Default: include seasonality. The CLI can toggle this.
     generate_and_save_forcings(model, pcs, nmodes, data_tmean, data_tstd,
-                              seasonality, variability[config.SORRM_FLUX_VAR], n_realizations)
+                              seasonality, variability[config.SORRM_FLUX_VAR], n_realizations,
+                              include_seasonality=include_seasonality)
     
     logger.info("Forcing generation complete!")
     logger.info(f"Output directory: {config.DIR_FORCINGS}")
@@ -159,12 +180,22 @@ if __name__ == "__main__":
                        help=f'Number of realizations (default: {config.N_REALIZATIONS})')
     parser.add_argument('--load-existing-eof', action='store_true',
                        help='Load existing EOF model instead of recomputing')
+    parser.add_argument('--no-seasonality', action='store_true',
+                        help='Do not add seasonality to the generated forcings (produce variability-only forcings)')
+    parser.add_argument('--seasonality-file', type=str, default=None,
+                        help='Path to explicit seasonality NetCDF (overrides config.FILE_SEASONALITY_EXTRAPL)')
+    parser.add_argument('--variability-file', type=str, default=None,
+                        help='Path to explicit variability NetCDF (overrides config.FILE_VARIABILITY_EXTRAPL)')
     args = parser.parse_args()
     
     output_dir = Path(config.DIR_PROCESSED)
     output_dir.mkdir(parents=True, exist_ok=True)
     setup_logging(output_dir, "generate_forcings")
     
-    generate_forcings(n_realizations=args.n_realizations, 
-                     load_existing_eof=args.load_existing_eof)
+    include_seasonality = not args.no_seasonality
+    generate_forcings(n_realizations=args.n_realizations,
+                     load_existing_eof=args.load_existing_eof,
+                     include_seasonality=include_seasonality,
+                     seasonality_file=args.seasonality_file,
+                     variability_file=args.variability_file)
 
