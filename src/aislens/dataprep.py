@@ -228,8 +228,71 @@ def dedraft(data, draft, weights=None):
     # Take time-mean if Time dimension exists, otherwise use data as-is
     data_tm = data.mean(dim='Time') if 'Time' in data.dims else data
     draft_tm = draft.mean(dim='Time') if 'Time' in draft.dims else draft
+
+    # Stack spatial dims
     data_stack = data_tm.stack(z=('x', 'y'))
     draft_stack = draft_tm.stack(z=('x', 'y'))
+
+    # flatten values
+    data_vals = data_stack.values.reshape(-1)
+    draft_vals = draft_stack.values.reshape(-1)
+
+    # Boolean mask of valid pairs
+    valid = np.isfinite(data_vals) & np.isfinite(draft_vals)
+    n_valid = int(np.sum(valid))
+
+    # handle case with no valid samples
+    if n_valid == 0:
+        # return zeros or NaNs consistent with the rest of the pipeline
+        # produce a predicted DataArray full of NaNs with same coords
+        pred_stack = xr.DataArray(np.full(data_stack.shape, np.nan),
+                                  coords=data_stack.coords, dims=data_stack.dims)
+        pred = pred_stack.unstack('z').transpose()
+        return np.array([0.0]), 0.0, pred
+
+    X = draft_vals[valid].reshape(-1, 1)
+    y = data_vals[valid].reshape(-1, 1)
+
+    # weights handling: if weights supplied, stack similarly and select valid
+    sample_weight = None
+    if weights is not None:
+        w_stack = weights.stack(z=('x', 'y'))
+        w_vals = w_stack.values.reshape(-1)
+        sample_weight = w_vals[valid]
+        # if sample_weight all zeros or bad, set to None
+        if np.all(~np.isfinite(sample_weight)) or np.sum(sample_weight) == 0:
+            sample_weight = None
+
+    reg = LinearRegression()
+    reg.fit(X, y, sample_weight=sample_weight)
+
+    # predict only for valid positions (sklearn rejects NaNs in X)
+    pred_valid = reg.predict(X).reshape(-1)
+
+    pred_stack_vals = np.full(data_vals.shape, np.nan)
+    pred_stack_vals[valid] = pred_valid
+
+    pred_stack = xr.DataArray(pred_stack_vals.reshape(data_stack.shape),
+                              coords=data_stack.coords, dims=data_stack.dims)
+
+    data_pred = pred_stack.unstack('z').transpose()
+
+    coef = reg.coef_.ravel()
+    intercept = float(reg.intercept_.ravel()[0])
+    return coef, intercept, data_pred
+
+"""
+
+### OLD VERSION FOR REFERENCE ###
+
+    # Take time-mean if Time dimension exists, otherwise use data as-is
+    data_tm = data.mean(dim='Time') if 'Time' in data.dims else data
+    draft_tm = draft.mean(dim='Time') if 'Time' in draft.dims else draft
+
+    # Stack spatial dims
+    data_stack = data_tm.stack(z=('x', 'y'))
+    draft_stack = draft_tm.stack(z=('x', 'y'))
+
     data_stack_noNaN = data_stack.fillna(0)
     draft_stack_noNaN = draft_stack.fillna(0)
     if weights is not None:
@@ -244,6 +307,7 @@ def dedraft(data, draft, weights=None):
     data_pred_stack = data_pred_stack_noNaN.where(~data_stack.isnull(), np.nan)
     data_pred = data_pred_stack.unstack('z').transpose()
     return reg.coef_, reg.intercept_, data_pred
+""" 
 
 def setup_draft_depen_field(param_ref, param_data, param_name, i, icems):
     """
