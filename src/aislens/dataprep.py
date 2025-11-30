@@ -191,10 +191,7 @@ def detrend_dim(data, dim, deg):
     p = data.polyfit(dim=dim, deg=deg)
     fit = xr.polyval(data[dim], p.polyfit_coefficients)
     detrended = data - fit
-    # Note: do not add back the original mean here by default. The
-    # deseasonalize() function restores the long-term mean once when
-    # producing the deseasonalized field.
-    # detrended += original_mean
+    detrended += original_mean
     return detrended
 
 
