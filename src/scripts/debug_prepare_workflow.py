@@ -188,17 +188,40 @@ def main():
 
         # run dedraft per shelf
         icems = gpd.read_file(config.FILE_ICESHELFMASKS).to_crs({'init': config.CRS_TARGET})
-        shelves = [(i, icems.name.values[i]) for i in config.ICE_SHELF_REGIONS]
-        for idx, (i, name) in enumerate(shelves, 1):
-            logger.info('Dedrafting [%d/%d] %s', idx, len(shelves), name)
-            try:
-                dedraft_catchment(i, icems, ds_mean, config, save_dir=draft_dir, save_pred=True, save_coefs=False)
-            except Exception as e:
-                logger.exception('dedraft_catchment failed for %s: %s', name, e)
 
-        pred_files = [draft_dir / f'draftDepenModelPred_{icems.name.values[i]}.nc' for i in config.ICE_SHELF_REGIONS]
-        logger.info('Merging %d per-catchment predictions', len(pred_files))
-        merged_pred = merge_catchment_files(pred_files)
+        # Map the requested positional indices (config.ICE_SHELF_REGIONS) to the
+        # GeoDataFrame's actual index labels to avoid positional/index mismatches.
+        pos_indices = list(config.ICE_SHELF_REGIONS)
+        labels = []
+        names = []
+        for pos in pos_indices:
+            try:
+                label = icems.index[pos]
+                name = icems.loc[label, 'name']
+                labels.append(label)
+                names.append(name)
+            except Exception:
+                logger.warning('Requested ice-shelf position %s is invalid in masks; skipping', pos)
+
+        shelves = list(zip(labels, names))
+        for idx, (label, name) in enumerate(shelves, 1):
+            logger.info('Dedrafting [%d/%d] %s (index label=%s)', idx, len(shelves), name, label)
+            try:
+                # pass the GeoDataFrame index label to dedraft_catchment (it uses .loc internally)
+                dedraft_catchment(label, icems, ds_mean, config, save_dir=draft_dir, save_pred=True, save_coefs=False)
+            except Exception as e:
+                logger.exception('dedraft_catchment failed for %s (label=%s): %s', name, label, e)
+
+        # Build the list of per-catchment prediction files for the shelves we attempted
+        pred_files = [draft_dir / f'draftDepenModelPred_{name}.nc' for name in names]
+        logger.info('Attempting to merge %d per-catchment predictions (existing files will be used)', len(pred_files))
+        # Only pass existing files to the merge utility; it already logs missing ones.
+        existing_pred_files = [p for p in pred_files if p.exists()]
+        if not existing_pred_files:
+            logger.warning('No per-catchment prediction files found; merged_pred will be empty')
+            merged_pred = xr.Dataset()
+        else:
+            merged_pred = merge_catchment_files(existing_pred_files)
 
         # align and ensure variable name
         try:
