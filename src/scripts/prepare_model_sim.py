@@ -120,7 +120,43 @@ def main():
     # Step 5: Merge draft dependence predictions
     logger.info("Merging draft dependence predictions...")
     draft_dependence_pred = merge_catchment_files(pred_files)
-    draft_dependence_pred = draft_dependence_pred.reindex_like(model_deseasonalized)
+    # Align merged prediction to the deseasonalized model grid. The
+    # merged per-catchment files may use a different variable name
+    # (e.g. the original flux variable name or a generic name). Ensure
+    # the prediction variable matches config.SORRM_FLUX_VAR so dataset
+    # arithmetic below works as expected.
+    try:
+        # If the merged dataset has no coords matching, prefer interp
+        if 'x' in draft_dependence_pred.coords and 'y' in draft_dependence_pred.coords:
+            draft_dependence_pred = draft_dependence_pred.interp(
+                x=model_deseasonalized['x'], y=model_deseasonalized['y'], method='nearest'
+            )
+        else:
+            draft_dependence_pred = draft_dependence_pred.reindex_like(model_deseasonalized)
+    except Exception:
+        # Fallback to reindex_like if interp fails
+        try:
+            draft_dependence_pred = draft_dependence_pred.reindex_like(model_deseasonalized)
+        except Exception:
+            logger.warning('Failed to align draft_dependence_pred to model grid; proceeding with merged dataset as-is')
+
+    # Ensure the prediction variable has the canonical name expected below.
+    if config.SORRM_FLUX_VAR not in draft_dependence_pred.data_vars:
+        try:
+            pred_var = next(iter(draft_dependence_pred.data_vars))
+            draft_dependence_pred = draft_dependence_pred.rename({pred_var: config.SORRM_FLUX_VAR})
+            logger.info('Renamed merged draft-dependence variable %s -> %s', pred_var, config.SORRM_FLUX_VAR)
+        except StopIteration:
+            # No data variables found in merged preds: create a NaN-filled
+            # DataArray with the same coords as the model so downstream
+            # subtraction results in NaNs (later .fillna(0) calls control final zeros).
+            logger.warning('Merged draft-dependence predictions contain no data variables; creating NaN placeholder')
+            zero_da = xr.DataArray(
+                np.full(model_deseasonalized[config.SORRM_FLUX_VAR].shape, np.nan, dtype=float),
+                coords=model_deseasonalized[config.SORRM_FLUX_VAR].coords,
+                dims=model_deseasonalized[config.SORRM_FLUX_VAR].dims,
+            )
+            draft_dependence_pred = xr.Dataset({config.SORRM_FLUX_VAR: zero_da})
     
     # Step 6: Calculate components
     logger.info("Calculating variability and seasonality...")

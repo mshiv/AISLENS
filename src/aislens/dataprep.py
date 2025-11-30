@@ -276,6 +276,12 @@ def dedraft(data, draft, weights=None):
                               coords=data_stack.coords, dims=data_stack.dims)
 
     data_pred = pred_stack.unstack('z').transpose()
+    # preserve variable name from the input data (so save/merge use expected var)
+    try:
+        data_pred.name = data_tm.name if hasattr(data_tm, 'name') and data_tm.name is not None else data.name
+    except Exception:
+        # best-effort: if name cannot be set, leave unnamed
+        pass
 
     coef = reg.coef_.ravel()
     intercept = float(reg.intercept_.ravel()[0])
