@@ -288,6 +288,41 @@ def main():
     ts['variability_pipeline'] = spatial_mean_timeseries(variability)
     ts['residual'] = spatial_mean_timeseries(residual)
 
+    # Build and save a time-series Dataset for exact reproducibility of the plot
+    logger.info('Assembling time-series Dataset and saving to disk')
+    ts_vars = {}
+    for name, arr in ts.items():
+        if arr is None:
+            continue
+        # If it's already an xarray DataArray with time dim, preserve coords
+        if isinstance(arr, xr.DataArray) and config.TIME_DIM in arr.dims:
+            da = xr.DataArray(arr.values, dims=arr.dims, coords=arr.coords, name=name)
+        else:
+            # For scalars or 1D arrays without TIME_DIM, broadcast to the original time
+            if config.TIME_DIM in original.dims:
+                if hasattr(arr, 'values') and getattr(arr, 'values').ndim == 1:
+                    # 1D without TIME_DIM (unlikely) - assume length matches time
+                    vals = arr.values
+                    da = xr.DataArray(vals, dims=[config.TIME_DIM], coords={config.TIME_DIM: original[config.TIME_DIM].values}, name=name)
+                else:
+                    # scalar -> repeat across time
+                    vals = np.repeat(float(arr.values) if hasattr(arr, 'values') else float(arr), len(original[config.TIME_DIM]))
+                    da = xr.DataArray(vals, dims=[config.TIME_DIM], coords={config.TIME_DIM: original[config.TIME_DIM].values}, name=name)
+            else:
+                # No Time dim anywhere; store as 0-d or 1-d as-is
+                if hasattr(arr, 'values'):
+                    da = xr.DataArray(arr.values, name=name)
+                else:
+                    da = xr.DataArray(float(arr), name=name)
+
+        ts_vars[name] = da
+
+    if ts_vars:
+        ts_ds = xr.merge({k: v for k, v in ts_vars.items()})
+        ts_out = outdir / 'time_series_components.nc'
+        logger.info('Saving time-series Dataset -> %s', ts_out)
+        ts_ds.to_netcdf(ts_out)
+
     # convert to numpy arrays for plotting
     logger.info('Plotting time-series to %s', outdir / 'time_series_components.png')
     fig, ax = plt.subplots(1, 1, figsize=(10, 5))
