@@ -318,7 +318,11 @@ def main():
         ts_vars[name] = da
 
     if ts_vars:
-        ts_ds = xr.merge({k: v for k, v in ts_vars.items()})
+        # Build an xarray Dataset directly from the name->DataArray mapping. Using
+        # `xr.merge` with a dict would iterate the dict keys (strings) which is why
+        # merge raised a TypeError in some environments. `xr.Dataset(ts_vars)` is
+        # the correct and explicit construction.
+        ts_ds = xr.Dataset(ts_vars)
         ts_out = outdir / 'time_series_components.nc'
         logger.info('Saving time-series Dataset -> %s', ts_out)
         ts_ds.to_netcdf(ts_out)
