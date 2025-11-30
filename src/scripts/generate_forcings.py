@@ -51,10 +51,13 @@ def load_and_prepare_data(seasonality_path=None, variability_path=None):
     seasonality = xr.open_dataset(seasonality_file, chunks={config.TIME_DIM: 36})
     variability = xr.open_dataset(variability_file, chunks={config.TIME_DIM: 36})
 
-    for ds, name in [(variability, "variability"), (seasonality, "seasonality")]:
-        if 'Time' in ds.dims:
-            ds.rename({"Time": "time"}, inplace=True)
-            logger.debug(f"Renamed 'Time' to 'time' in {name} dataset")
+    # Rename Time -> time on the loaded datasets (assign back to ensure change)
+    if 'Time' in variability.dims:
+        variability = variability.rename({"Time": "time"})
+        logger.debug("Renamed 'Time' to 'time' in variability dataset")
+    if 'Time' in seasonality.dims:
+        seasonality = seasonality.rename({"Time": "time"})
+        logger.debug("Renamed 'Time' to 'time' in seasonality dataset")
     
     if config.SORRM_FLUX_VAR not in variability:
         raise ValueError(f"Variable '{config.SORRM_FLUX_VAR}' not found in variability dataset")
