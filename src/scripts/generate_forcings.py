@@ -23,7 +23,6 @@ import logging
 import sys
 from datetime import datetime
 from pathlib import Path
-import pickle
 import xarray as xr
 import numpy as np
 
@@ -74,25 +73,82 @@ def load_and_prepare_data(seasonality_path=None, variability_path=None):
 
 def perform_eof_analysis(data_norm, load_existing=False):
     """Perform EOF decomposition or load existing EOF model."""
-    pickle_path = Path(config.FILE_EOF_MODEL)
-    
+    nc_path = Path(config.FILE_EOF_MODEL)
+
+    # Minimal wrapper that exposes the methods the rest of the pipeline expects
+    class SimpleEOFModel:
+        def __init__(self, eofs_da: xr.DataArray, pcs_da: xr.DataArray):
+            self.eofs = eofs_da
+            self.pcs = pcs_da
+
+        # eofs and pcs are exposed as attributes on the instance
+
+        @property
+        def neofs(self):
+            return int(self.eofs.sizes.get('mode', self.eofs.shape[0]))
+
+        def reconstruct_randomized_X(self, new_pcs_arr: np.ndarray, mode_slice: slice):
+            # Interpret caller slice as 1-based (match xeofs behaviour) and
+            # convert to Python 0-based indices
+            start = mode_slice.start or 1
+            stop = mode_slice.stop or self.neofs
+            step = mode_slice.step or 1
+            py_start = max(0, int(start) - 1)
+            py_stop = min(int(stop), self.neofs)
+            indices = list(range(py_start, py_stop, int(step)))
+
+            eofs_vals = self.eofs.values[indices, ...]  # (k_sel, y, x)
+            pcs_sel = new_pcs_arr[:, indices]  # (ntime, k_sel)
+            arr = np.tensordot(pcs_sel, eofs_vals, axes=([1], [0]))
+
+            time_dim = self.pcs.dims[0]
+            y_dim = self.eofs.dims[1] if len(self.eofs.dims) > 1 else 'y'
+            x_dim = self.eofs.dims[2] if len(self.eofs.dims) > 2 else 'x'
+            da = xr.DataArray(
+                arr,
+                dims=(time_dim, y_dim, x_dim),
+                coords={time_dim: self.pcs.coords[self.pcs.dims[0]],
+                        y_dim: self.eofs.coords[y_dim],
+                        x_dim: self.eofs.coords[x_dim]},
+            )
+            return da
+
+    # If user requested loading an existing model, only use NetCDF (pickle removed)
     if load_existing:
-        logger.info(f"Loading existing EOF model from {pickle_path}...")
-        if not pickle_path.exists():
-            raise FileNotFoundError(f"EOF model file not found: {pickle_path}")
-        with open(pickle_path, "rb") as f:
-            model = pickle.load(f)
-        pcs, nmodes = model.pcs(), model.neofs
-        logger.info(f"Loaded EOF model with {nmodes} modes")
-    else:
-        logger.info("Performing EOF decomposition...")
-        model, _, pcs, nmodes, _ = eof_decomposition(data_norm)
-        logger.info(f"EOF decomposition complete ({nmodes} modes retained)")
-        pickle_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(pickle_path, 'wb') as f:
-            pickle.dump(model, f)
-        logger.debug(f"EOF model saved to {pickle_path}")
-    
+        if not nc_path.exists():
+            raise FileNotFoundError(f"EOF NetCDF model not found: {nc_path}. Re-run without --load-existing-eof to recompute.")
+        logger.info("Loading EOF model from NetCDF %s", nc_path)
+        ds = xr.open_dataset(nc_path)
+        eofs_da = ds['eofs']
+        pcs_da = ds['pcs']
+        nmodes = int(eofs_da.sizes.get('mode', eofs_da.shape[0]))
+        model = SimpleEOFModel(eofs_da, pcs_da)
+        logger.info("Loaded EOF model (NetCDF) with %d modes", nmodes)
+        return model, pcs_da, nmodes
+
+    # Compute EOF decomposition
+    logger.info("Performing EOF decomposition...")
+    model, eofs, pcs, nmodes, varexpl = eof_decomposition(data_norm)
+    logger.info(f"EOF decomposition complete ({nmodes} modes retained)")
+
+    # Persist a version-neutral NetCDF containing EOFs and PCs
+    try:
+        nc_path.parent.mkdir(parents=True, exist_ok=True)
+        ds_out = xr.Dataset()
+        if not isinstance(eofs, xr.DataArray):
+            eofs = xr.DataArray(eofs)
+        if not isinstance(pcs, xr.DataArray):
+            pcs = xr.DataArray(pcs)
+        ds_out['eofs'] = eofs
+        ds_out['pcs'] = pcs
+        ds_out.attrs['nmodes'] = int(nmodes)
+        ds_out.attrs['explained_variance_ratio'] = np.asarray(varexpl)
+        ds_out.to_netcdf(nc_path)
+        logger.debug(f"EOF model (eofs+pcs) saved to NetCDF {nc_path}")
+    except Exception as e:
+        logger.warning("Failed to save EOF model NetCDF to %s: %s", nc_path, e)
+
+    # Return the xeofs model (existing pipeline expects model object)
     return model, pcs, nmodes
 
 

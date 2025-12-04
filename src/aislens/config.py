@@ -48,7 +48,8 @@ class Config:
 
 
     # Processed file paths
-    FILE_EOF_MODEL: Path = DIR_PROCESSED / "eof_model.pkl" # EOF model persistence
+    #FILE_EOF_MODEL: Path = DIR_PROCESSED / "eof_model.pkl" # EOF model
+    FILE_EOF_MODEL: Path = DIR_PROCESSED / "eof_model.nc" # EOF model as NetCDF
     FILE_PAOLO23_SATOBS_PREPARED: Path = DIR_PROCESSED / "satellite_observations_prepared.nc"
     FILE_PAOLO23_SATOBS_MEAN_IC: Path = DIR_PROCESSED / "satellite_observations_meanfield_ic.nc"
     FILE_MPASO_MODEL_PREPARED: Path = DIR_PROCESSED / "model_simulation_prepared.nc"
