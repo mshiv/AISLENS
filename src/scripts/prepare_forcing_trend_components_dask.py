@@ -45,6 +45,9 @@ def detrend_forcing_dask(forcing_file_path, output_path, method='vectorized',
 
     if method == 'vectorized':
         logger.info('Detrending (vectorized, dask-aware)')
+        # ensure the Time dimension is a single dask chunk - this is required by xarray.apply_ufunc
+        # when using dask='parallelized' with the time dimension.
+        ds[VAR] = ds[VAR].chunk({time_dim: -1})
         detrended = detrend_with_breakpoints_vectorized(ds[VAR], dim=time_dim, deg=1, model='rbf', penalty=10)
     else:
         logger.info('Detrending (timeseries - spatial mean)')
