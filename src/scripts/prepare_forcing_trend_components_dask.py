@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 def detrend_forcing_dask(forcing_file_path, output_path, method='vectorized',
                          time_chunks=12, ny_chunk=100, nx_chunk=100, ncell_chunk=100, compression=4,
-                         use_dask=False, n_workers=4, threads_per_worker=1):
+                         no_compress=False, use_dask=False, n_workers=4, threads_per_worker=1):
     """Detrend forcing data using breakpoint detection (dask-aware).
 
     Parameters
@@ -63,25 +63,33 @@ def detrend_forcing_dask(forcing_file_path, output_path, method='vectorized',
     # Build trend dataset
     trend_ds = (ds - detrended.to_dataset(name=VAR)).rename({VAR: config.AISLENS_FLOATINGBMB_VAR})
 
-    # Prepare encoding for chunked/compressed output
+    # Prepare encoding for chunked output. Chunk time into a single write-friendly chunk
+    # to avoid many small writes which are slow on shared filesystems.
     spatial_dims = [d for d in trend_ds[config.AISLENS_FLOATINGBMB_VAR].dims if d != time_dim]
     # build chunksizes tuple that matches (time, <spatial dims...>)
+    time_len = int(trend_ds.sizes.get(time_dim, 1))
     if len(spatial_dims) == 1:
         # unstructured grid, e.g., dims = (Time, nCells)
-        chunksizes = (1, int(ncell_chunk))
+        chunksizes = (time_len, int(ncell_chunk))
     elif len(spatial_dims) >= 2:
-        # structured grid with two spatial dims (y,x)
-        chunksizes = (1, int(ny_chunk), int(nx_chunk))
+        # structured grid with two spatial dims (Time, y, x)
+        chunksizes = (time_len, int(ny_chunk), int(nx_chunk))
     else:
         # unexpected layout: fall back to time-chunking only
-        chunksizes = (1,)
+        chunksizes = (time_len,)
+
+    # Ensure the dataset is chunked with full time so xarray/dask writes large chunks
+    trend_ds = trend_ds.chunk({time_dim: -1})
 
     enc = {}
     var_out = config.AISLENS_FLOATINGBMB_VAR
-    enc[var_out] = {'zlib': True, 'complevel': int(compression), 'chunksizes': chunksizes, 'dtype': 'float32'}
+    enc_options = {'zlib': not no_compress, 'chunksizes': chunksizes, 'dtype': 'float32'}
+    if not no_compress:
+        enc_options['complevel'] = int(compression)
+    enc[var_out] = enc_options
 
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
-    logger.info(f'Writing trend dataset to {output_path} with chunks {chunksizes} and compression={compression}')
+    logger.info(f'Writing trend dataset to {output_path} with chunks {chunksizes} (no_compress={no_compress})')
     trend_ds.to_netcdf(output_path, encoding=enc)
 
     if use_dask:
@@ -99,6 +107,7 @@ if __name__ == '__main__':
     parser.add_argument('--nx-chunk', type=int, default=100, help='X chunk size for output encoding')
     parser.add_argument('--ncell-chunk', type=int, default=100, help='nCells chunk size for unstructured outputs')
     parser.add_argument('--compression', type=int, default=4, help='zlib compression level (0-9)')
+    parser.add_argument('--no-compress', action='store_true', help='Disable zlib compression for output')
     parser.add_argument('--use-dask', action='store_true', help='Start a local dask cluster for computation')
     parser.add_argument('--n-workers', type=int, default=4, help='Number of dask workers if --use-dask')
     parser.add_argument('--threads-per-worker', type=int, default=1, help='Threads per dask worker')
@@ -120,6 +129,6 @@ if __name__ == '__main__':
     t0 = time()
     detrend_forcing_dask(args.input_file, args.output_file, method=args.method,
                          time_chunks=args.time_chunks, ny_chunk=args.ny_chunk, nx_chunk=args.nx_chunk, ncell_chunk=args.ncell_chunk,
-                         compression=args.compression, use_dask=args.use_dask,
+                         compression=args.compression, no_compress=args.no_compress, use_dask=args.use_dask,
                          n_workers=args.n_workers, threads_per_worker=args.threads_per_worker)
     logger.info(f'COMPLETE ({time() - t0:.1f}s)')
