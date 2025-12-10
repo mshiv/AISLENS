@@ -491,8 +491,45 @@ def process_scenario(flux_path, state_path, masks_path, out_dir, regions=None, s
         except Exception:
             logger.debug('    Could not check/reindex mask_bool; proceeding to xr.where')
 
-        # merge into full-field (where mask==1, use dedrafted_region)
-        dedrafted = xr.where(mask_bool, dedrafted_region, dedrafted)
+        # Merge into full-field (where mask==1, use dedrafted_region).
+        # Build an explicit boolean mask with identical coords to `dedrafted` to avoid
+        # xarray deep-align/index-equality issues. We use numpy broadcasting to
+        # create a (Time, nCells) mask that shares the exact Time index from ds_flux.
+        try:
+            # If mask_bool lacks the Time dim, expand it explicitly across Time.
+            if config.TIME_DIM not in mask_bool.dims:
+                time_vals = ds_flux[config.TIME_DIM].values
+                ntime = int(ds_flux.sizes.get(config.TIME_DIM, 0))
+                # ensure mask_bool has nCells dim
+                if 'nCells' in mask_bool.dims:
+                    mask_vals = mask_bool.values
+                    # broadcast to (Time, nCells)
+                    mask_2d = np.broadcast_to(mask_vals, (ntime, mask_vals.shape[-1]))
+                    mask_expanded = xr.DataArray(mask_2d, coords={config.TIME_DIM: time_vals, 'nCells': ds_flux['nCells'].values}, dims=(config.TIME_DIM, 'nCells'))
+                else:
+                    # unexpected shape; try to broadcast using dedrafted's nCells
+                    mask_vals = mask_bool.values
+                    mask_2d = np.broadcast_to(mask_vals, (ntime, dedrafted.sizes.get('nCells')))
+                    mask_expanded = xr.DataArray(mask_2d, coords={config.TIME_DIM: time_vals, 'nCells': ds_flux['nCells'].values}, dims=(config.TIME_DIM, 'nCells'))
+            else:
+                # If mask already has Time dim, reindex/assign exact Time index from ds_flux
+                try:
+                    mask_expanded = mask_bool.reindex({config.TIME_DIM: ds_flux[config.TIME_DIM].values}, method='nearest', fill_value=False)
+                except Exception:
+                    try:
+                        mask_expanded = mask_bool.assign_coords({config.TIME_DIM: ds_flux.indexes.get(config.TIME_DIM, ds_flux[config.TIME_DIM].values)})
+                    except Exception:
+                        mask_expanded = mask_bool
+
+            # Ensure dims order matches (Time, nCells)
+            if set(mask_expanded.dims) == set(dedrafted.dims) and mask_expanded.dims != dedrafted.dims:
+                mask_expanded = mask_expanded.transpose(*dedrafted.dims)
+
+            dedrafted = xr.where(mask_expanded, dedrafted_region, dedrafted)
+            logger.debug('    Merged dedrafted_region into dedrafted using explicit expanded mask')
+        except Exception:
+            logger.exception('    Failed to merge dedrafted_region via explicit mask; attempting xr.where fallback')
+            dedrafted = xr.where(mask_bool, dedrafted_region, dedrafted)
 
     # For any cells not covered by any region (still NaN), fall back to original flux
     dedrafted = dedrafted.where(np.isfinite(dedrafted), other=flux_da)
