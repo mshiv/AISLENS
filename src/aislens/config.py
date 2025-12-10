@@ -40,6 +40,8 @@ class Config:
     DIR_MALI_FORCINGS: Path = DIR_PROCESSED / "mali_grid/forcings" # Location of the final forcing files converted to MALI grid
     DIR_MALI_DRAFT_DEPENDENCE: Path = DIR_PROCESSED / "mali_grid/draft_dependence" # Location of the final draft dependence fields on the MALI grid
     DIR_MALI_ISMIP6_FORCINGS: Path = DIR_MALI / "ISMIP6" # Location of the final ISMIP6 forcing files converted to MALI grid
+    # Output directory for dedrafted + trend forcing products on the MALI grid
+    DIR_MALI_FORCING_TRENDS: Path = DIR_MALI / "forcing-trend-scenarios"
 
     # File paths
     FILE_PAOLO23_SATOBS: Path = DIR_EXTERNAL / "ANT_G1920V01_IceShelfMeltDraft_Time.nc"

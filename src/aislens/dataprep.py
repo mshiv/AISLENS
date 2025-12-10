@@ -313,7 +313,105 @@ def dedraft(data, draft, weights=None):
     data_pred_stack = data_pred_stack_noNaN.where(~data_stack.isnull(), np.nan)
     data_pred = data_pred_stack.unstack('z').transpose()
     return reg.coef_, reg.intercept_, data_pred
-""" 
+"""
+
+def dedraft_unstructured_region(data_da, draft_da, mask_da, time_dim='Time'):
+    """
+    Compute a simple linear (slope, intercept) draft-dependence for an
+    unstructured grid region and return a DataArray with the predicted
+    draft-dependent component for the full time series.
+
+    Methodology:
+    - Take time-mean across `time_dim` for both `data_da` (melt) and
+      `draft_da` (lowerSurface) to obtain a per-cell summary.
+    - Select cells where `mask_da == 1` for fitting.
+    - Fit a linear regression (Ordinary Least Squares) : melt_tm = slope * draft_tm + intercept
+    - Build the full-time predicted component as slope * draft_da + intercept
+
+    Parameters
+    ----------
+    data_da : xarray.DataArray
+        The melt/floatingBasalMassBalApplied DataArray with dims including `time_dim` and `nCells`.
+    draft_da : xarray.DataArray
+        The draft/lowerSurface DataArray with same spatial dims.
+    mask_da : xarray.DataArray
+        A boolean/integer mask (1 keeps cell) indexed by `nCells`.
+    time_dim : str
+        Name of the time dimension (default: 'Time').
+
+    Returns
+    -------
+    slope : float
+    intercept : float
+    predicted_full : xarray.DataArray
+        A DataArray with same dims as `data_da` containing the predicted
+        draft-dependent component (NaN where mask==0)
+    """
+    # If both have a time dimension and their lengths differ, align draft_da to data_da's time axis
+    if time_dim in data_da.dims and time_dim in draft_da.dims:
+        if data_da.sizes[time_dim] != draft_da.sizes[time_dim] or not np.all(data_da[time_dim].values == draft_da[time_dim].values):
+            # Prefer aligning via daysSinceStart if available (common in these files)
+            try:
+                if 'daysSinceStart' in data_da.coords and 'daysSinceStart' in draft_da.coords:
+                    target_days = data_da['daysSinceStart'].values
+                    # assign daysSinceStart as coord on draft if missing as coord but present as variable
+                    draft_da = draft_da.assign_coords({'daysSinceStart': (time_dim, draft_da['daysSinceStart'].values)}) if 'daysSinceStart' in draft_da else draft_da
+                    # interp draft to target days
+                    draft_da = draft_da.interp({'daysSinceStart': target_days}, method='nearest')
+                else:
+                    # Fallback to Time-based interpolation/reindex
+                    draft_da = draft_da.interp({time_dim: data_da[time_dim].values}, method='nearest')
+            except Exception:
+                try:
+                    draft_da = draft_da.reindex({time_dim: data_da[time_dim].values}, method='nearest')
+                except Exception:
+                    # As a last resort, if dimensions are simply swapped (Time vs nCells), try transpose heuristics
+                    pass
+
+    # compute time-mean per cell (if time present)
+    if time_dim in data_da.dims:
+        data_tm = data_da.mean(dim=time_dim)
+    else:
+        data_tm = data_da
+
+    if time_dim in draft_da.dims:
+        draft_tm = draft_da.mean(dim=time_dim)
+    else:
+        draft_tm = draft_da
+
+    # Ensure mask is boolean
+    mask_bool = (mask_da == 1)
+
+    # Select values where mask==1
+    data_sel = data_tm.where(mask_bool)
+    draft_sel = draft_tm.where(mask_bool)
+
+    # Flatten and take only finite pairs
+    data_vals = data_sel.values.ravel()
+    draft_vals = draft_sel.values.ravel()
+    valid = np.isfinite(data_vals) & np.isfinite(draft_vals)
+
+    if valid.sum() == 0:
+        # Nothing to fit
+        return 0.0, 0.0, xr.full_like(data_da, np.nan)
+
+    X = draft_vals[valid].reshape(-1, 1)
+    y = data_vals[valid].reshape(-1, 1)
+
+    reg = LinearRegression()
+    reg.fit(X, y)
+
+    slope = float(reg.coef_.squeeze())
+    intercept = float(reg.intercept_.squeeze())
+
+    # Build predicted full-time component: slope * draft_da + intercept
+    predicted_full = slope * draft_da + intercept
+
+    # Mask out cells outside the region
+    predicted_full = predicted_full.where(mask_bool)
+
+    return slope, intercept, predicted_full
+
 
 def setup_draft_depen_field(param_ref, param_data, param_name, i, icems):
     """
