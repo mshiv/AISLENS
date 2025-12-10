@@ -470,6 +470,27 @@ def process_scenario(flux_path, state_path, masks_path, out_dir, regions=None, s
         except Exception:
             logger.debug('    reindex_like failed for dedrafted_region; proceeding to xr.where (may error)')
 
+        # Also ensure the boolean mask uses the same Time index (if it has one).
+        try:
+            if config.TIME_DIM in mask_bool.coords:
+                try:
+                    mask_bool = mask_bool.reindex_like(dedrafted, method='nearest', fill_value=False)
+                    logger.debug('    Reindexed mask_bool to match dedrafted (pre-merge)')
+                except Exception:
+                    # Fallback: assign the ds_flux Time index object or values
+                    try:
+                        tf_idx = ds_flux.indexes.get(config.TIME_DIM, None)
+                        if tf_idx is not None:
+                            mask_bool = mask_bool.assign_coords({config.TIME_DIM: tf_idx})
+                            logger.debug('    Assigned ds_flux Time index object to mask_bool (fallback)')
+                        else:
+                            mask_bool = mask_bool.assign_coords({config.TIME_DIM: ds_flux.coords[config.TIME_DIM].values})
+                            logger.debug('    Assigned ds_flux Time values to mask_bool (fallback)')
+                    except Exception:
+                        logger.debug('    Could not align mask_bool Time coord; proceeding (may error)')
+        except Exception:
+            logger.debug('    Could not check/reindex mask_bool; proceeding to xr.where')
+
         # merge into full-field (where mask==1, use dedrafted_region)
         dedrafted = xr.where(mask_bool, dedrafted_region, dedrafted)
 
