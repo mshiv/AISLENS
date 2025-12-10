@@ -26,6 +26,7 @@ import logging
 import numpy as np
 import xarray as xr
 from sklearn.linear_model import LinearRegression
+import os
 
 from aislens.config import config
 from aislens.dataprep import dedraft_unstructured_region, detrend_with_breakpoints_vectorized
@@ -35,6 +36,35 @@ logger = logging.getLogger(__name__)
 
 def process_scenario(flux_path, state_path, masks_path, out_dir, regions=None, stream=False):
     logger.info(f"Processing flux={flux_path} state={state_path}")
+
+    # Debug: log existence and basic info for input/output paths before opening files
+    try:
+        flux_p = Path(flux_path)
+        state_p = Path(state_path)
+        masks_p = Path(masks_path)
+        out_p = Path(out_dir)
+
+        def _exists_info(p):
+            if p.exists():
+                try:
+                    return f"exists=True size={p.stat().st_size} bytes"
+                except Exception:
+                    return "exists=True size=unknown"
+            return "exists=False"
+
+        logger.info(f"INPUT CHECK: flux: {flux_path} -> {_exists_info(flux_p)}")
+        logger.info(f"INPUT CHECK: state: {state_path} -> {_exists_info(state_p)}")
+        logger.info(f"INPUT CHECK: masks: {masks_path} -> {_exists_info(masks_p)}")
+        writability = None
+        if out_p.exists():
+            writability = os.access(str(out_p), os.W_OK)
+        else:
+            # parent directory writable check
+            parent = out_p.parent if out_p.parent.exists() else Path('.')
+            writability = os.access(str(parent), os.W_OK)
+        logger.info(f"OUTPUT CHECK: outdir: {out_dir} -> exists={out_p.exists()} writable_parent={writability}")
+    except Exception:
+        logger.exception('Failed to stat input/output paths for debug logging')
 
     ds_flux = xr.open_dataset(flux_path, chunks={config.TIME_DIM: 12})
     ds_state = xr.open_dataset(state_path, chunks={config.TIME_DIM: 12})
@@ -341,42 +371,40 @@ def main():
     parser.add_argument('--outdir', type=str, default=str(config.DIR_MALI_FORCING_TRENDS), help='Output directory')
     parser.add_argument('--stream', action='store_true', help='Stream write dedrafted output by time-slice (lower memory, slower CPU)')
     parser.add_argument('--regions', nargs='*', type=int, default=None, help='List of region indices (e.g. 33 34 35)')
+    parser.add_argument('--region-start', type=int, default=None, help='Start index for a contiguous region range (inclusive)')
+    parser.add_argument('--region-end', type=int, default=None, help='End index for a contiguous region range (inclusive)')
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO)
 
     mapping = {
-        '126': (str(config.FILE_ISMIP6_SSP126_FORCING), None),
-        '585': (str(config.FILE_ISMIP6_SSP585_FORCING), None),
+        # mapping: scenario -> (flux_path, state_path)
+        '126': (str(config.FILE_ISMIP6_SSP126_FORCING), str(config.FILE_ISMIP6_SSP126_zDRAFT)),
+        '585': (str(config.FILE_ISMIP6_SSP585_FORCING), str(config.FILE_ISMIP6_SSP585_zDRAFT)),
     }
 
     results = {}
     for sc in args.scenarios:
-        flux_path = mapping[sc][0]
-        # derive state path from flux filename by replacing floatingBMB with state equivalent if present in same folder
-        # User-provided layout: the state files are in the same folder with name extracted_state_* matching the forcing
-        # Try a simple guess: replace 'floatingBasalMassBalApplied' in path with 'state' patterns used elsewhere.
-        # Fallback: require user to place matching state files next to the flux files with standard naming.
-        # For now, attempt to infer the state file by replacing 'floatingBasalMassBalApplied' with 'state' substring patterns.
-        state_guess = flux_path.replace('floatingBasalMassBalApplied', 'state')
-        # if guessed file does not exist, look for nearby file pattern by swapping 'flux' <-> 'state' in common naming
-        # Fall back to using the same directory with 'extracted_state' naming
-        try:
-            state_path = state_guess
-        except Exception:
-            state_path = flux_path
-
-        # Best effort: check existence and try alternative name
-        # A conservative guess used in notebooks: files named 'extracted_state_expAE05_2015-2300.nc'
-        flux_p = Path(flux_path)
-        alt_state = flux_p.parent.parent / 'draft-depen' / ("extracted_state_" + flux_p.name.split('extracted_flux_')[-1])
-        if not Path(state_path).exists() and alt_state.exists():
-            state_path = str(alt_state)
-
+        flux_path, state_path = mapping[sc]
+        # Prefer the configured state_path; warn if it's missing so the user can fix it.
         if not Path(state_path).exists():
-            logger.warning(f"State file for scenario {sc} not found at {state_path}; trying to proceed but results may be incorrect")
+            logger.warning(f"Configured state file for scenario {sc} not found at {state_path}; results may be incorrect. Please verify the path.")
 
-        out = process_scenario(flux_path, state_path, args.masks, args.outdir, regions=args.regions, stream=args.stream)
+        # Interpret region selection: explicit list takes precedence, otherwise
+        # use a start/end range if provided; if neither is given, process the
+        # default regions from config inside the function.
+        regions_arg = None
+        if args.regions is not None and len(args.regions) > 0:
+            regions_arg = args.regions
+        elif args.region_start is not None or args.region_end is not None:
+            if args.region_start is None or args.region_end is None:
+                raise SystemExit('Both --region-start and --region-end must be provided to use a range')
+            if args.region_end < args.region_start:
+                raise SystemExit('--region-end must be >= --region-start')
+            regions_arg = list(range(args.region_start, args.region_end + 1))
+
+        logger.info(f'Processing regions: {regions_arg if regions_arg is not None else "(default from config)"}')
+        out = process_scenario(flux_path, state_path, args.masks, args.outdir, regions=regions_arg, stream=args.stream)
         results[sc] = out
 
     logger.info("All scenarios processed")
