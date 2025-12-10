@@ -241,9 +241,25 @@ def process_scenario(flux_path, state_path, masks_path, out_dir, regions=None, s
                 # 2) If predicted_full has a Time coord (maybe integer/datetime)
                 try:
                     if (not pred_days_assigned) and config.TIME_DIM in predicted_full.coords:
-                        pred_days = _to_days(predicted_full[config.TIME_DIM].values)
-                        predicted_full = predicted_full.assign_coords({'daysSinceStart_num': (config.TIME_DIM, pred_days)})
-                        pred_days_assigned = True
+                        tvals = predicted_full[config.TIME_DIM].values
+                        # If Time coord already numeric/datetime-like, convert
+                        try:
+                            pred_days = _to_days(tvals)
+                            predicted_full = predicted_full.assign_coords({'daysSinceStart_num': (config.TIME_DIM, pred_days)})
+                            pred_days_assigned = True
+                        except Exception:
+                            # If Time coord is simple integer index (0..N-1), map it across the flux days range
+                            try:
+                                if np.issubdtype(np.asarray(tvals).dtype, np.integer) and 'daysSinceStart_num' in ds_flux.coords:
+                                    ft = ds_flux['daysSinceStart_num'].values
+                                    nl = predicted_full.sizes.get(config.TIME_DIM)
+                                    if nl and ft.size >= 2:
+                                        pred_days = np.linspace(float(ft[0]), float(ft[-1]), num=nl)
+                                        predicted_full = predicted_full.assign_coords({'daysSinceStart_num': (config.TIME_DIM, pred_days)})
+                                        pred_days_assigned = True
+                                        logger.debug('Mapped integer predicted_full Time index linearly over flux days range')
+                            except Exception:
+                                logger.debug('Could not map integer Time coord for predicted_full')
                 except Exception:
                     logger.debug('Could not convert predicted_full Time coord to numeric days')
 
@@ -263,8 +279,8 @@ def process_scenario(flux_path, state_path, masks_path, out_dir, regions=None, s
                     try:
                         logger.info('    Aligning predicted component to flux via numeric daysSinceStart')
                         predicted_full = predicted_full.interp({'daysSinceStart_num': days_target}, method='nearest')
-                    except Exception:
-                        logger.debug('    numeric days interp failed for predicted_full')
+                    except Exception as e:
+                        logger.debug(f'    numeric days interp failed for predicted_full: {e!r}')
                 else:
                     # Fall back to Time-based interpolation if both have Time coords
                     if config.TIME_DIM in ds_flux.coords and config.TIME_DIM in predicted_full.coords:
