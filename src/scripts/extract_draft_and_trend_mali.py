@@ -226,27 +226,53 @@ def process_scenario(flux_path, state_path, masks_path, out_dir, regions=None, s
             if 'daysSinceStart_num' in ds_flux.coords:
                 # target numeric days (from ds_flux)
                 days_target = ds_flux['daysSinceStart_num'].values
-                # Try to create numeric days for predicted_full from any daysSinceStart it may have
-                if 'daysSinceStart' in predicted_full.coords:
-                    try:
+
+                # Try several ways to derive numeric days for predicted_full.
+                pred_days_assigned = False
+                # 1) If predicted_full has an explicit daysSinceStart coord
+                try:
+                    if 'daysSinceStart' in predicted_full.coords:
                         pred_days = _to_days(predicted_full['daysSinceStart'].values)
                         predicted_full = predicted_full.assign_coords({'daysSinceStart_num': (config.TIME_DIM, pred_days)})
-                    except Exception:
-                        logger.debug('Could not convert predicted_full daysSinceStart to numeric')
-                # If predicted already exposes numeric days, interp on that to the flux numeric days
+                        pred_days_assigned = True
+                except Exception:
+                    logger.debug('Could not convert predicted_full daysSinceStart to numeric')
+
+                # 2) If predicted_full has a Time coord (maybe integer/datetime)
+                try:
+                    if (not pred_days_assigned) and config.TIME_DIM in predicted_full.coords:
+                        pred_days = _to_days(predicted_full[config.TIME_DIM].values)
+                        predicted_full = predicted_full.assign_coords({'daysSinceStart_num': (config.TIME_DIM, pred_days)})
+                        pred_days_assigned = True
+                except Exception:
+                    logger.debug('Could not convert predicted_full Time coord to numeric days')
+
+                # 3) If predicted_full has deltat, derive cumulative days
+                try:
+                    if (not pred_days_assigned) and 'deltat' in predicted_full.coords:
+                        pd = _to_days(predicted_full['deltat'].values)
+                        pcumsum = np.cumsum(pd)
+                        pcumsum = pcumsum - pcumsum[0]
+                        predicted_full = predicted_full.assign_coords({'daysSinceStart_num': (config.TIME_DIM, pcumsum)})
+                        pred_days_assigned = True
+                except Exception:
+                    logger.debug('Could not derive predicted_full daysSinceStart_num from deltat')
+
+                # If we now have numeric days on predicted_full, interpolate to the flux numeric days
                 if 'daysSinceStart_num' in predicted_full.coords:
                     try:
                         logger.info('    Aligning predicted component to flux via numeric daysSinceStart')
                         predicted_full = predicted_full.interp({'daysSinceStart_num': days_target}, method='nearest')
                     except Exception:
                         logger.debug('    numeric days interp failed for predicted_full')
-                # If numeric path not available or failed, fall back to Time-based interpolation
-                if config.TIME_DIM in ds_flux.coords and config.TIME_DIM in predicted_full.coords:
-                    try:
-                        logger.info('    Aligning predicted component to flux via Time')
-                        predicted_full = predicted_full.interp({config.TIME_DIM: ds_flux[config.TIME_DIM].values}, method='nearest')
-                    except Exception:
-                        logger.debug('    Time-based interp of predicted_full failed')
+                else:
+                    # Fall back to Time-based interpolation if both have Time coords
+                    if config.TIME_DIM in ds_flux.coords and config.TIME_DIM in predicted_full.coords:
+                        try:
+                            logger.info('    Aligning predicted component to flux via Time (fallback)')
+                            predicted_full = predicted_full.interp({config.TIME_DIM: ds_flux[config.TIME_DIM].values}, method='nearest')
+                        except Exception:
+                            logger.debug('    Time-based interp of predicted_full failed')
             elif config.TIME_DIM in ds_flux.coords and config.TIME_DIM in predicted_full.coords:
                 logger.info('    Aligning predicted component to flux via Time')
                 predicted_full = predicted_full.interp({config.TIME_DIM: ds_flux[config.TIME_DIM].values}, method='nearest')
