@@ -394,6 +394,40 @@ def process_scenario(flux_path, state_path, masks_path, out_dir, regions=None, s
         except Exception:
             logger.debug('    Could not assign ds_flux Time index to dedrafted_region')
 
+        # Before merging, log and (if necessary) force exact index equality
+        try:
+            if logger.isEnabledFor(logging.DEBUG):
+                tf = ds_flux.coords.get(config.TIME_DIM, None)
+                tr = dedrafted_region.coords.get(config.TIME_DIM, None)
+                td = dedrafted.coords.get(config.TIME_DIM, None)
+                logger.debug(f"    Pre-merge Time index objects: ds_flux Time repr={repr(tf)}")
+                logger.debug(f"    Pre-merge Time index objects: dedrafted_region Time repr={repr(tr)}")
+                logger.debug(f"    Pre-merge Time index objects: dedrafted Time repr={repr(td)}")
+                try:
+                    identical_rr = (tr is not None and tf is not None and tr.identical(tf))
+                except Exception:
+                    identical_rr = False
+                try:
+                    identical_dd = (td is not None and tf is not None and td.identical(tf))
+                except Exception:
+                    identical_dd = False
+                logger.debug(f"    Time index identical check: dedrafted_region==ds_flux: {identical_rr}, dedrafted==ds_flux: {identical_dd}")
+        except Exception:
+            logger.debug('    Could not produce pre-merge index introspection')
+
+        # If any index isn't identical to ds_flux's Time index, force-assign the ds_flux
+        try:
+            if config.TIME_DIM in ds_flux.coords:
+                tf_obj = ds_flux.coords[config.TIME_DIM]
+                if config.TIME_DIM in dedrafted_region.coords and not dedrafted_region.coords[config.TIME_DIM].identical(tf_obj):
+                    dedrafted_region = dedrafted_region.assign_coords({config.TIME_DIM: tf_obj})
+                    logger.debug('    Forced dedrafted_region Time coord to ds_flux Time index')
+                if config.TIME_DIM in dedrafted.coords and not dedrafted.coords[config.TIME_DIM].identical(tf_obj):
+                    dedrafted = dedrafted.assign_coords({config.TIME_DIM: tf_obj})
+                    logger.debug('    Forced dedrafted Time coord to ds_flux Time index')
+        except Exception:
+            logger.debug('    Could not force assign ds_flux Time index to arrays; proceeding to xr.where')
+
         # merge into full-field (where mask==1, use dedrafted_region)
         dedrafted = xr.where(mask_bool, dedrafted_region, dedrafted)
 
