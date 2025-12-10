@@ -382,6 +382,18 @@ def process_scenario(flux_path, state_path, masks_path, out_dir, regions=None, s
         except Exception:
             logger.debug('    Could not produce time-diags for region arrays')
 
+        # Ensure dedrafted_region uses the exact same Time index object as ds_flux
+        # This prevents xarray from trying to align differing index objects when
+        # performing xr.where later.
+        try:
+            if config.TIME_DIM in dedrafted_region.dims and config.TIME_DIM in ds_flux.coords:
+                if dedrafted_region.sizes.get(config.TIME_DIM) == ds_flux.sizes.get(config.TIME_DIM):
+                    # assign the exact Index object (not just values) from ds_flux
+                    dedrafted_region = dedrafted_region.assign_coords({config.TIME_DIM: ds_flux.coords[config.TIME_DIM]})
+                    logger.debug('    Assigned ds_flux Time index object to dedrafted_region')
+        except Exception:
+            logger.debug('    Could not assign ds_flux Time index to dedrafted_region')
+
         # merge into full-field (where mask==1, use dedrafted_region)
         dedrafted = xr.where(mask_bool, dedrafted_region, dedrafted)
 
