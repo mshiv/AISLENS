@@ -212,7 +212,13 @@ def process_scenario(flux_path, state_path, masks_path, out_dir, regions=None, s
         region_draft = ds_state[var_draft].where(mask_bool)
 
         # Fit slope/intercept and get predicted component for full time
-        slope, intercept, predicted_full = dedraft_unstructured_region(region_flux, region_draft, mask_da, time_dim=config.TIME_DIM)
+        # Pass the canonical ds_flux Time coord as `target_time` so the helper
+        # can produce a predicted_full that is already aligned to the flux Time
+        # axis (this avoids later xarray index-identity alignment errors).
+        slope, intercept, predicted_full = dedraft_unstructured_region(
+            region_flux, region_draft, mask_da, time_dim=config.TIME_DIM,
+            target_time=ds_flux.coords.get(config.TIME_DIM, None)
+        )
 
         logger.info(f"    slope={slope:.4g}, intercept={intercept:.4g}")
         region_coefs.append({'region': int(i), 'slope': float(slope), 'intercept': float(intercept)})
