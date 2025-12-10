@@ -175,6 +175,35 @@ def process_scenario(flux_path, state_path, masks_path, out_dir, regions=None, s
         logger.info(f"    slope={slope:.4g}, intercept={intercept:.4g}")
         region_coefs.append({'region': int(i), 'slope': float(slope), 'intercept': float(intercept)})
 
+        # Ensure we prefer numeric `daysSinceStart` (or derive from `deltat`) for alignment
+        def _ensure_days_num_on(x):
+            """Ensure the object (Dataset or DataArray) has a numeric `daysSinceStart_num` coord.
+
+            Derivation order:
+            - use existing `daysSinceStart` converted to numeric via `_to_days`
+            - else, if `deltat` is present, build cumulative days from `deltat`
+            Returns the same type (Dataset or DataArray) with `daysSinceStart_num` coord assigned.
+            """
+            try:
+                # datasets and dataarrays both support .coords and .assign_coords
+                if 'daysSinceStart_num' in x.coords:
+                    return x
+                if 'daysSinceStart' in x.coords:
+                    days_vals = _to_days(x['daysSinceStart'].values)
+                    return x.assign_coords({'daysSinceStart_num': (config.TIME_DIM, days_vals)})
+                # If deltat present, create cumulative days (start at zero)
+                if 'deltat' in x:
+                    try:
+                        delta_days = _to_days(x['deltat'].values)
+                        cumsum = np.cumsum(delta_days)
+                        cumsum = cumsum - cumsum[0]
+                        return x.assign_coords({'daysSinceStart_num': (config.TIME_DIM, cumsum)})
+                    except Exception:
+                        pass
+            except Exception:
+                logger.debug('Could not derive daysSinceStart_num for object')
+            return x
+
         # Align predicted_full to flux time axis if necessary (robust handling)
         def _align_predicted_to_flux(predicted, target_ds, time_dim=config.TIME_DIM):
             """Try multiple strategies to align `predicted` to `target_ds` along `time_dim`.
@@ -205,7 +234,7 @@ def process_scenario(flux_path, state_path, masks_path, out_dir, regions=None, s
                         except Exception:
                             logger.debug('    numeric days interp failed; will try Time-based methods')
 
-                # fallback: align on Time coordinate if available
+                # fallback: align on Time coordinate if available (only if daysSinceStart wasn't available)
                 if time_dim in target_ds.coords and time_dim in predicted.coords:
                     target_time = target_ds[time_dim].values
                     pred_time = predicted[time_dim].values
@@ -233,6 +262,16 @@ def process_scenario(flux_path, state_path, masks_path, out_dir, regions=None, s
                 logger.exception('    Unexpected error during predicted alignment')
             return predicted
 
+        # Ensure numeric days coords exist where possible on both objects before aligning
+        try:
+            ds_flux = _ensure_days_num_on(ds_flux)
+        except Exception:
+            logger.debug('Could not ensure daysSinceStart_num on ds_flux')
+        try:
+            predicted_full = _ensure_days_num_on(predicted_full)
+        except Exception:
+            logger.debug('Could not ensure daysSinceStart_num on predicted_full')
+
         predicted_full = _align_predicted_to_flux(predicted_full, ds_flux, time_dim=config.TIME_DIM)
 
         # After attempts, verify Time lengths match the flux; if not, try a final reindex to target Time
@@ -245,6 +284,18 @@ def process_scenario(flux_path, state_path, masks_path, out_dir, regions=None, s
                     predicted_full = predicted_full.reindex({config.TIME_DIM: t_flux}, method='nearest', fill_value=np.nan)
         except Exception:
             logger.exception('    Final reindex of predicted component failed; subtraction may raise an error')
+
+        # Ensure predicted_full explicitly uses the same Time coordinate object as ds_flux
+        try:
+            if config.TIME_DIM in predicted_full.dims and config.TIME_DIM in ds_flux.coords:
+                # If lengths match, assign the flux Time values (this makes indexes identical)
+                if predicted_full.sizes.get(config.TIME_DIM, 0) == ds_flux.sizes.get(config.TIME_DIM, 0):
+                    predicted_full = predicted_full.assign_coords({config.TIME_DIM: ds_flux[config.TIME_DIM].values})
+                else:
+                    # Force reindex as a last resort (should have been handled above)
+                    predicted_full = predicted_full.reindex({config.TIME_DIM: ds_flux[config.TIME_DIM].values}, method='nearest', fill_value=np.nan)
+        except Exception:
+            logger.exception('    Could not force predicted_full Time coords to match ds_flux')
 
         # Ensure dims order matches region_flux (transpose if same dim names differ in order)
         try:
