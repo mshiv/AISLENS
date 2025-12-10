@@ -418,13 +418,45 @@ def process_scenario(flux_path, state_path, masks_path, out_dir, regions=None, s
         # If any index isn't identical to ds_flux's Time index, force-assign the ds_flux
         try:
             if config.TIME_DIM in ds_flux.coords:
-                tf_obj = ds_flux.coords[config.TIME_DIM]
-                if config.TIME_DIM in dedrafted_region.coords and not dedrafted_region.coords[config.TIME_DIM].identical(tf_obj):
-                    dedrafted_region = dedrafted_region.assign_coords({config.TIME_DIM: tf_obj})
-                    logger.debug('    Forced dedrafted_region Time coord to ds_flux Time index')
-                if config.TIME_DIM in dedrafted.coords and not dedrafted.coords[config.TIME_DIM].identical(tf_obj):
-                    dedrafted = dedrafted.assign_coords({config.TIME_DIM: tf_obj})
-                    logger.debug('    Forced dedrafted Time coord to ds_flux Time index')
+                # Prefer assigning the actual Index object (ensures .identical() succeeds)
+                tf_index = None
+                try:
+                    tf_index = ds_flux.indexes.get(config.TIME_DIM, None)
+                except Exception:
+                    tf_index = None
+
+                # Fall back to the DataArray coord values if Index not available
+                tf_coord = ds_flux.coords.get(config.TIME_DIM, None)
+
+                # Assign index object when possible (this creates true identity)
+                if tf_index is not None:
+                    try:
+                        if config.TIME_DIM in dedrafted_region.coords and not dedrafted_region.coords[config.TIME_DIM].identical(tf_index):
+                            dedrafted_region = dedrafted_region.assign_coords({config.TIME_DIM: tf_index})
+                            logger.debug('    Assigned ds_flux Index object to dedrafted_region Time coord')
+                    except Exception:
+                        logger.debug('    Could not assign ds_flux Index object to dedrafted_region')
+                    try:
+                        if config.TIME_DIM in dedrafted.coords and not dedrafted.coords[config.TIME_DIM].identical(tf_index):
+                            dedrafted = dedrafted.assign_coords({config.TIME_DIM: tf_index})
+                            logger.debug('    Assigned ds_flux Index object to dedrafted Time coord')
+                    except Exception:
+                        logger.debug('    Could not assign ds_flux Index object to dedrafted')
+                elif tf_coord is not None:
+                    # Fallback: assign the coordinate values (may not create identical Index objects,
+                    # but often sufficient when values and dtypes match)
+                    try:
+                        if config.TIME_DIM in dedrafted_region.coords and not dedrafted_region.coords[config.TIME_DIM].identical(tf_coord):
+                            dedrafted_region = dedrafted_region.assign_coords({config.TIME_DIM: tf_coord.values})
+                            logger.debug('    Assigned ds_flux Time values to dedrafted_region Time coord (fallback)')
+                    except Exception:
+                        logger.debug('    Could not assign ds_flux Time values to dedrafted_region')
+                    try:
+                        if config.TIME_DIM in dedrafted.coords and not dedrafted.coords[config.TIME_DIM].identical(tf_coord):
+                            dedrafted = dedrafted.assign_coords({config.TIME_DIM: tf_coord.values})
+                            logger.debug('    Assigned ds_flux Time values to dedrafted Time coord (fallback)')
+                    except Exception:
+                        logger.debug('    Could not assign ds_flux Time values to dedrafted')
         except Exception:
             logger.debug('    Could not force assign ds_flux Time index to arrays; proceeding to xr.where')
 
