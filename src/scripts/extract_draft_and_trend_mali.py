@@ -297,6 +297,33 @@ def process_scenario(flux_path, state_path, masks_path, out_dir, regions=None, s
         except Exception:
             logger.exception('    Could not force predicted_full Time coords to match ds_flux')
 
+        # Ensure predicted_full has a Time-like dimension with the same name/length as ds_flux
+        try:
+            if config.TIME_DIM in ds_flux.coords:
+                t_flux = ds_flux[config.TIME_DIM].values
+                # If predicted has a different dim whose length equals the flux Time length,
+                # rename it to the canonical Time dim and assign the flux Time values so
+                # the index objects are identical for downstream alignment.
+                renamed = False
+                for d in predicted_full.dims:
+                    if predicted_full.sizes.get(d, None) == ds_flux.sizes.get(config.TIME_DIM, None):
+                        if d != config.TIME_DIM:
+                            try:
+                                predicted_full = predicted_full.rename({d: config.TIME_DIM})
+                                logger.info(f"    Renamed predicted dim '{d}' -> '{config.TIME_DIM}' to match flux Time length")
+                                renamed = True
+                            except Exception:
+                                logger.debug(f"    Could not rename dim {d} to {config.TIME_DIM}")
+                        # assign the exact flux Time coordinate values (makes index equality)
+                        try:
+                            predicted_full = predicted_full.assign_coords({config.TIME_DIM: t_flux})
+                            logger.info('    Assigned flux Time coordinate values to predicted component')
+                        except Exception:
+                            logger.debug('    Could not assign flux Time values to predicted component')
+                        break
+        except Exception:
+            logger.exception('    Error while coercing predicted_full to flux Time dim')
+
         # Ensure dims order matches region_flux (transpose if same dim names differ in order)
         try:
             if set(region_flux.dims) == set(predicted_full.dims) and region_flux.dims != predicted_full.dims:
@@ -306,6 +333,26 @@ def process_scenario(flux_path, state_path, masks_path, out_dir, regions=None, s
 
         # dedrafted region field = region_flux - predicted_full
         dedrafted_region = region_flux - predicted_full
+
+        # Diagnostic: log Time-index info if alignment problems persist
+        try:
+            if logger.isEnabledFor(logging.DEBUG):
+                def _sample_info(da, name):
+                    info = {'dims': da.dims}
+                    if config.TIME_DIM in da.coords:
+                        info['time_len'] = da.sizes.get(config.TIME_DIM)
+                        tvals = da.coords[config.TIME_DIM].values
+                        info['time_dtype'] = getattr(tvals, 'dtype', type(tvals))
+                        try:
+                            info['time_head'] = tvals[:3].tolist()
+                        except Exception:
+                            info['time_head'] = str(tvals[:3])
+                    logger.debug(f"    TIME DIAG ({name}): {info}")
+                _sample_info(region_flux, 'region_flux')
+                _sample_info(predicted_full, 'predicted_full')
+                _sample_info(dedrafted, 'dedrafted')
+        except Exception:
+            logger.debug('    Could not produce time-diags for region arrays')
 
         # merge into full-field (where mask==1, use dedrafted_region)
         dedrafted = xr.where(mask_bool, dedrafted_region, dedrafted)
@@ -464,9 +511,12 @@ def main():
     parser.add_argument('--regions', nargs='*', type=int, default=None, help='List of region indices (e.g. 33 34 35)')
     parser.add_argument('--region-start', type=int, default=None, help='Start index for a contiguous region range (inclusive)')
     parser.add_argument('--region-end', type=int, default=None, help='End index for a contiguous region range (inclusive)')
+    parser.add_argument('--log-level', choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'], default='INFO', help='Logging level')
     args = parser.parse_args()
 
-    logging.basicConfig(level=logging.INFO)
+    # configure logging from CLI flag
+    numeric_level = getattr(logging, args.log_level.upper(), logging.INFO)
+    logging.basicConfig(level=numeric_level)
 
     mapping = {
         # mapping: scenario -> (flux_path, state_path)
