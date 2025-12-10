@@ -460,6 +460,16 @@ def process_scenario(flux_path, state_path, masks_path, out_dir, regions=None, s
         except Exception:
             logger.debug('    Could not force assign ds_flux Time index to arrays; proceeding to xr.where')
 
+        # Ensure dedrafted_region is indexed like the target `dedrafted` before merging.
+        # `reindex_like` will align coordinates (and create missing values) so that
+        # xarray won't attempt deep alignment during `xr.where` and raise index errors.
+        try:
+            # reindex time and other coordinates to match dedrafted
+            dedrafted_region = dedrafted_region.reindex_like(dedrafted)
+            logger.debug('    Reindexed dedrafted_region to match dedrafted (pre-merge)')
+        except Exception:
+            logger.debug('    reindex_like failed for dedrafted_region; proceeding to xr.where (may error)')
+
         # merge into full-field (where mask==1, use dedrafted_region)
         dedrafted = xr.where(mask_bool, dedrafted_region, dedrafted)
 
