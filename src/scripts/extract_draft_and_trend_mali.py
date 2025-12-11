@@ -40,6 +40,21 @@ def process_scenario(flux_path, state_path, masks_path, out_dir, regions=None, s
     ds_state = xr.open_dataset(state_path, chunks={config.TIME_DIM: 12})
     ds_masks = xr.open_dataset(masks_path)
 
+    # Reverse sign of the floatingBasalMassBalApplied variable in the flux
+    # dataset before performing dedrafting (user-requested behavior).
+    try:
+        var_name = config.MALI_FLOATINGBMB_VAR
+        if var_name in ds_flux:
+            try:
+                ds_flux[var_name] = -1 * ds_flux[var_name]
+                logger.info(f"Reversed sign of {var_name} in ds_flux")
+            except Exception:
+                logger.exception(f"Failed to reverse sign of {var_name}; proceeding with original values")
+        else:
+            logger.warning(f"Variable {var_name} not found in ds_flux; cannot reverse sign")
+    except Exception:
+        logger.exception('Unexpected error while attempting to reverse flux sign')
+
     # Helper to coerce daysSinceStart-like arrays to numeric days (float)
     def _to_days(vals):
         vals = np.asarray(vals)
@@ -351,7 +366,7 @@ def main():
         # Try a simple guess: replace 'floatingBasalMassBalApplied' in path with 'state' patterns used elsewhere.
         # Fallback: require user to place matching state files next to the flux files with standard naming.
         # For now, attempt to infer the state file by replacing 'floatingBasalMassBalApplied' with 'state' substring patterns.
-        state_guess = flux_path.replace('floatingBasalMassBalApplied', 'state')
+        state_guess = flux_path.replace('_flux_', '_state_')
         # if guessed file does not exist, look for nearby file pattern by swapping 'flux' <-> 'state' in common naming
         # Fall back to using the same directory with 'extracted_state' naming
         try:
