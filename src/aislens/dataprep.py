@@ -315,7 +315,7 @@ def dedraft(data, draft, weights=None):
     return reg.coef_, reg.intercept_, data_pred
 """
 
-def dedraft_unstructured_region(data_da, draft_da, mask_da, time_dim='Time', target_time=None):
+def dedraft_unstructured_region(data_da, draft_da, mask_da, time_dim='Time'):
     """
     Compute a simple linear (slope, intercept) draft-dependence for an
     unstructured grid region and return a DataArray with the predicted
@@ -409,50 +409,6 @@ def dedraft_unstructured_region(data_da, draft_da, mask_da, time_dim='Time', tar
 
     # Mask out cells outside the region
     predicted_full = predicted_full.where(mask_bool)
-
-    # If caller provided a target_time (e.g. the canonical ds_flux Time coord
-    # or numeric daysSinceStart array), ensure the predicted_full time axis
-    # uses that exact coordinate/index. This avoids later xarray alignment
-    # errors where two Time index objects differ despite equal values.
-    if target_time is not None and time_dim in predicted_full.dims:
-        try:
-            # Normalize target_time to an xarray DataArray with the same dim name
-            if isinstance(target_time, xr.DataArray):
-                tgt = target_time
-            else:
-                # allow numpy arrays or lists
-                tgt = xr.DataArray(np.asarray(target_time), dims=[time_dim], coords={time_dim: np.asarray(target_time)})
-
-            # If lengths match and values are equal, assign coords to preserve
-            # the exact Index object identity from the caller
-            if predicted_full.sizes[time_dim] == tgt.sizes[time_dim] and np.allclose(predicted_full[time_dim].values, tgt.values, equal_nan=True):
-                predicted_full = predicted_full.assign_coords({time_dim: tgt.values})
-            else:
-                # Prefer interpolation by 'daysSinceStart' if available on either
-                # array. Otherwise, interpolate/reindex by the time_dim values.
-                if 'daysSinceStart' in predicted_full.coords and (('daysSinceStart' in tgt.coords) or tgt.dtype.kind in 'fi'):
-                    # use numeric days for interp
-                    days_vals = tgt.values if 'daysSinceStart' in tgt.coords else tgt.values
-                    predicted_full = predicted_full.interp({'daysSinceStart': days_vals}, method='nearest')
-                    # if target provided as Time dim, also assign its index
-                    if time_dim in tgt.coords:
-                        predicted_full = predicted_full.assign_coords({time_dim: tgt.values})
-                else:
-                    # last-resort: interp directly on the time_dim
-                    try:
-                        predicted_full = predicted_full.interp({time_dim: tgt.values}, method='nearest')
-                        predicted_full = predicted_full.assign_coords({time_dim: tgt.values})
-                    except Exception:
-                        # Try reindex if interp fails
-                        try:
-                            predicted_full = predicted_full.reindex({time_dim: tgt.values}, method='nearest')
-                        except Exception:
-                            # Give up silently; return predicted_full unaligned
-                            pass
-        except Exception:
-            # Be conservative: if anything goes wrong, return the unmodified
-            # predicted_full; callers should detect misalignment and handle it.
-            pass
 
     return slope, intercept, predicted_full
 
