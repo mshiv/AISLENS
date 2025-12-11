@@ -13,6 +13,7 @@ import logging
 import xarray as xr
 import argparse
 from pathlib import Path
+import numpy as np
 
 from aislens.utils import setup_logging
 
@@ -43,16 +44,35 @@ def combine_ssp585_forcing_xarray(trend_file_path, forcing_file_path, output_fil
     if "floatingBasalMassBalAdjustment" not in forcing_ds.data_vars:
         raise ValueError(f"floatingBasalMassBalAdjustment not found. Available: {list(forcing_ds.data_vars.keys())}")
     
-    logger.info("Extracting overlapping time periods...")
-    trend_subset = trend_ds
+    logger.info("Extracting overlapping time periods and aligning Time coordinates...")
+    # Forcing mid-period is indices 168..3599 (inclusive end exclusive slice => 168:3600)
     forcing_subset = forcing_ds.isel(Time=slice(168, 3600))
-    
-    logger.debug(f"Trend: {len(trend_subset.Time)} timesteps, Forcing: {len(forcing_subset.Time)} timesteps")
-    
-    if len(trend_subset.Time) != len(forcing_subset.Time):
-        raise ValueError(f"Time dimensions don't match: {len(trend_subset.Time)} vs {len(forcing_subset.Time)}")
-    
+
+    # Prefer aligning by exact Time values if possible (handles differing calendars/lengths)
+    try:
+        trend_times = trend_ds.Time.values
+        forcing_times = forcing_subset.Time.values
+        common_times = np.intersect1d(trend_times, forcing_times)
+    except Exception:
+        common_times = np.array([])
+
+    if common_times.size > 0:
+        logger.info(f"Found {common_times.size} exact overlapping Time values; selecting intersection")
+        trend_subset = trend_ds.sel(Time=common_times)
+        forcing_subset = forcing_subset.sel(Time=common_times)
+    else:
+        # Fall back to length-based trimming: make both equal to the shorter length
+        tlen = len(trend_ds.Time)
+        flen = len(forcing_subset.Time)
+        minlen = min(tlen, flen)
+        logger.warning(f"No exact Time intersection found; trimming to min length={minlen} (trend={tlen}, forcing={flen})")
+        trend_subset = trend_ds.isel(Time=slice(0, minlen))
+        forcing_subset = forcing_subset.isel(Time=slice(0, minlen))
+
+    logger.debug(f"Aligned Trend: {len(trend_subset.Time)} timesteps, Forcing: {len(forcing_subset.Time)} timesteps")
+
     logger.info("Adding floatingBasalMassBalAdjustment variables...")
+    # Ensure trend time coordinate uses the forcing subset times for safe arithmetic
     forcing_time_coord = forcing_subset.Time
     trend_subset_aligned = trend_subset.assign_coords(Time=forcing_time_coord)
     
@@ -70,14 +90,23 @@ def combine_ssp585_forcing_xarray(trend_file_path, forcing_file_path, output_fil
         final_ds = xr.concat([early_period, combined_subset], dim="Time")
         logger.info("Concatenated periods successfully")
     except Exception as e:
-        logger.warning(f"Direct concatenation failed ({e}), using fallback")
+        logger.warning(f"Direct concatenation failed ({e}), using fallback assignment")
         final_ds = forcing_ds.copy()
-        for var_name in combined_subset.data_vars:
-            if var_name in final_ds.data_vars:
-                final_ds[var_name].loc[dict(Time=slice(168, 3599))] = combined_subset[var_name]
-            else:
-                logger.warning(f"Variable {var_name} not in original forcing")
-        logger.info("Fallback approach completed")
+        # Ensure the Time index slice we write to matches the combined_subset length
+        start_idx = 168
+        end_idx = start_idx + len(combined_subset.Time) - 1
+        logger.debug(f"Fallback writing to Time indices {start_idx}:{end_idx} (inclusive)")
+        try:
+            for var_name in combined_subset.data_vars:
+                if var_name in final_ds.data_vars:
+                    # Use positional indexing to avoid issues with mismatched labels
+                    final_ds[var_name].values[start_idx:(start_idx + len(combined_subset.Time)), ...] = combined_subset[var_name].values
+                else:
+                    logger.warning(f"Variable {var_name} not in original forcing")
+            logger.info("Fallback assignment completed")
+        except Exception as e2:
+            logger.error(f"Fallback assignment failed: {e2}")
+            raise
     
     logger.info("Verifying final output...")
     final_time_size = len(final_ds.Time)
