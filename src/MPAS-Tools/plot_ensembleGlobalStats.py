@@ -215,13 +215,26 @@ if options.listAvailable:
     print("  -e 'EM*' or -e 'SSP585:EM*'")
     sys.exit(0)
 
-# Parse experiment specifications
-experiment_specs = parse_experiment_specifications(
-    options.experimentList, ensemble_dirs, options.rootDataDir, options.statsFilename
-)
-
-if not experiment_specs:
-    sys.exit("ERROR: No valid experiments found")
+# Parse experiment specifications (auto-discover if -e not provided)
+if not options.experimentList:
+    if not options.rootDataDir:
+        sys.exit("ERROR: --root must be provided when auto-discovering experiments")
+    available = find_all_experiments(options.rootDataDir, ensemble_dirs, options.statsFilename)
+    experiment_specs = []
+    for ensemble, exps in available.items():
+        for exp in sorted(exps):
+            exp_path = os.path.join(options.rootDataDir, ensemble, exp)
+            stats_file = os.path.join(exp_path, options.statsFilename)
+            display_name = f"{ensemble}:{exp}"
+            experiment_specs.append((ensemble, exp, stats_file, display_name))
+    if not experiment_specs:
+        sys.exit("ERROR: No experiments found under the provided root/base directories")
+else:
+    experiment_specs = parse_experiment_specifications(
+        options.experimentList, ensemble_dirs, options.rootDataDir, options.statsFilename
+    )
+    if not experiment_specs:
+        sys.exit("ERROR: No valid experiments found")
 
 print(f"\nFound {len(experiment_specs)} experiments to plot:")
 for ensemble, exp, file_path, display_name in experiment_specs:
@@ -382,6 +395,7 @@ def plotStat(fname, display_name, color):
     elif options.plotPercentChange:
         vol = (vol - vol[0])*100/vol[0]
     axVol.plot(yr, vol, label=display_name, color=color, linewidth=1.5)
+    _update_axis_range('axVol', yr, vol)
 
     VAF = f.variables['volumeAboveFloatation'][:] / scaleVol       
     if options.plotChange:
@@ -389,6 +403,7 @@ def plotStat(fname, display_name, color):
     elif options.plotPercentChange:
         VAF = (VAF - VAF[0])*100/VAF[0]
     axVAF.plot(yr, VAF, label=display_name, color=color, linewidth=1.5)
+    _update_axis_range('axVAF', yr, VAF)
     
     volGround = f.variables['groundedIceVolume'][:] / scaleVol
     if options.plotChange:
@@ -396,6 +411,7 @@ def plotStat(fname, display_name, color):
     elif options.plotPercentChange:
         volGround = (volGround - volGround[0])*100/volGround[0]
     axVolGround.plot(yr, volGround, label=display_name, color=color, linewidth=1.5)
+    _update_axis_range('axVolGround', yr, volGround)
 
     volFloat = f.variables['floatingIceVolume'][:] / scaleVol
     if options.plotChange:
@@ -403,6 +419,7 @@ def plotStat(fname, display_name, color):
     elif options.plotPercentChange:
         volFloat = (volFloat - volFloat[0])*100/volFloat[0]
     axVolFloat.plot(yr, volFloat, label=display_name, color=color, linewidth=1.5)
+    _update_axis_range('axVolFloat', yr, volFloat)
 
     areaGrd = f.variables['groundedIceArea'][:] / 1000.0**2
     if options.plotChange:
@@ -410,6 +427,7 @@ def plotStat(fname, display_name, color):
     elif options.plotPercentChange:
         areaGrd = (areaGrd - areaGrd[0])*100/areaGrd[0]
     axGrdArea.plot(yr, areaGrd, label=display_name, color=color, linewidth=1.5)
+    _update_axis_range('axGrdArea', yr, areaGrd)
 
     areaFlt = f.variables['floatingIceArea'][:] / 1000.0**2
     if options.plotChange:
@@ -417,17 +435,50 @@ def plotStat(fname, display_name, color):
     elif options.plotPercentChange:
         areaFlt = (areaFlt - areaFlt[0])*100/areaFlt[0]
     axFltArea.plot(yr, areaFlt, label=display_name, color=color, linewidth=1.5)
+    _update_axis_range('axFltArea', yr, areaFlt)
 
     GLflux = f.variables['groundingLineFlux'][:]
     axGLflux.plot(yr, GLflux, label=display_name, color=color, linewidth=1.5)
+    _update_axis_range('axGLflux', yr, GLflux)
 
     calvFlux = f.variables['totalCalvingFlux'][:]
     axCalvFlux.plot(yr, calvFlux, label=display_name, color=color, linewidth=1.5)
+    _update_axis_range('axCalvFlux', yr, calvFlux)
 
     totalBMB = f.variables['totalFloatingBasalMassBal'][:] / 1e12  # Convert kg/yr to Gt/yr
     axTotalBMB.plot(yr, totalBMB, label=display_name, color=color, linewidth=1.5)
+    _update_axis_range('axTotalBMB', yr, totalBMB)
 
     f.close()
+
+
+# Track per-axis y-limits computed only from data inside the requested x-limits
+# These will be updated by `plotStat` when `xlim_range` is set and applied later.
+axis_keys = ['axVol','axVAF','axVolGround','axVolFloat','axGrdArea','axFltArea','axGLflux','axCalvFlux','axTotalBMB']
+y_min = {k: np.inf for k in axis_keys}
+y_max = {k: -np.inf for k in axis_keys}
+
+# Helper to update trackers from arrays restricted to x limits
+def _update_axis_range(ax_key, yr, data):
+    if xlim_range is None:
+        return
+    xmin, xmax = xlim_range
+    mask = (yr >= xmin) & (yr <= xmax)
+    if not np.any(mask):
+        return
+    try:
+        d = np.asarray(data)[mask]
+    except Exception:
+        return
+    # ignore NaNs when computing min/max
+    if np.all(np.isnan(d)):
+        return
+    curmin = np.nanmin(d)
+    curmax = np.nanmax(d)
+    if curmin < y_min[ax_key]:
+        y_min[ax_key] = curmin
+    if curmax > y_max[ax_key]:
+        y_max[ax_key] = curmax
 
 
 # Parse x-axis limits if provided
@@ -455,8 +506,22 @@ addSeaLevAx(axVAF)
 # Apply x-axis limits to all subplots if specified
 if xlim_range:
     print(f"Applying X-axis limits: {xlim_range}")
-    for ax in [axVol, axVAF, axVolGround, axVolFloat, axGrdArea, axFltArea, axGLflux, axCalvFlux, axTotalBMB]:
+    axes_and_keys = [
+        (axVol, 'axVol'), (axVAF, 'axVAF'), (axVolGround, 'axVolGround'),
+        (axVolFloat, 'axVolFloat'), (axGrdArea, 'axGrdArea'), (axFltArea, 'axFltArea'),
+        (axGLflux, 'axGLflux'), (axCalvFlux, 'axCalvFlux'), (axTotalBMB, 'axTotalBMB')
+    ]
+    for ax, key in axes_and_keys:
         ax.set_xlim(xlim_range)
+        # Apply y-limits based only on data inside the x-limits (if available)
+        if np.isfinite(y_min[key]) and np.isfinite(y_max[key]):
+            ymin = y_min[key]
+            ymax = y_max[key]
+            if ymin == ymax:
+                pad = abs(ymin) * 0.01 + 1e-6
+            else:
+                pad = 0.05 * (ymax - ymin)
+            ax.set_ylim(ymin - pad, ymax + pad)
 
 # Add legend to the last subplot
 axTotalBMB.legend(loc='best', prop={'size': 6})

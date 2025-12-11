@@ -211,13 +211,26 @@ if options.listAvailable:
     print("  -e 'EM*' or -e 'SSP585:EM*'")
     sys.exit(0)
 
-# Parse experiment specifications
-experiment_specs = parse_experiment_specifications(
-    options.experimentList, ensemble_dirs, options.rootDataDir, options.statsFilename
-)
-
-if not experiment_specs:
-    sys.exit("ERROR: No valid experiments found")
+# Parse experiment specifications (auto-discover if -e not provided)
+if not options.experimentList:
+    if not options.rootDataDir:
+        sys.exit("ERROR: --root must be provided when auto-discovering experiments")
+    available = find_all_experiments(options.rootDataDir, ensemble_dirs, options.statsFilename)
+    experiment_specs = []
+    for ensemble, exps in available.items():
+        for exp in sorted(exps):
+            exp_path = os.path.join(options.rootDataDir, ensemble, exp)
+            stats_file = os.path.join(exp_path, options.statsFilename)
+            display_name = f"{ensemble}:{exp}"
+            experiment_specs.append((ensemble, exp, stats_file, display_name))
+    if not experiment_specs:
+        sys.exit("ERROR: No experiments found under the provided root/base directories")
+else:
+    experiment_specs = parse_experiment_specifications(
+        options.experimentList, ensemble_dirs, options.rootDataDir, options.statsFilename
+    )
+    if not experiment_specs:
+        sys.exit("ERROR: No valid experiments found")
 
 print(f"\nFound {len(experiment_specs)} experiments to plot:")
 for ensemble, exp, file_path, display_name in experiment_specs:
