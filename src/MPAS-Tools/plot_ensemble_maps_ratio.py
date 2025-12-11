@@ -62,6 +62,8 @@ parser.add_argument("--gl_linewidth", required=False, default=0.7, type=float, h
 parser.add_argument("--cmap", required=False, default="viridis", help="Colormap for ratio plots")
 parser.add_argument("--diverging", action="store_true", help="Use a diverging colormap centered at zero (red negative, blue positive).")
 parser.add_argument("--diverging_cmap", required=False, default="RdBu", help="Diverging colormap name to use when --diverging is set (default: RdBu).")
+parser.add_argument("--cbar_vmin", required=False, type=float, default=None, help="Hard-set colorbar minimum value (overrides automatic lower quantile).")
+parser.add_argument("--cbar_vmax", required=False, type=float, default=None, help="Hard-set colorbar maximum value (overrides automatic upper quantile).")
 
 args = parser.parse_args()
 stats_files = args.stats_files.split(',')
@@ -74,6 +76,8 @@ gl_linewidth = args.gl_linewidth
 cmap_name = args.cmap
 use_diverging = args.diverging
 diverging_cmap = args.diverging_cmap
+cbar_vmin = args.cbar_vmin
+cbar_vmax = args.cbar_vmax
 
 if save_base:
     os.makedirs(save_base, exist_ok=True)
@@ -195,11 +199,25 @@ for variable in variables:
             print(f"  INFO: All ratio values are NaN for {stats_file}. Skipping plot.")
             plt.close(fig)
             continue
-        vmin = np.nanquantile(ratio, 0.01)
-        vmax = np.nanquantile(ratio, 0.99)
+        # default quantile-based limits
+        qlow = np.nanquantile(ratio, 0.01)
+        qhigh = np.nanquantile(ratio, 0.99)
+        # apply user overrides if provided
+        vmin = qlow if cbar_vmin is None else cbar_vmin
+        vmax = qhigh if cbar_vmax is None else cbar_vmax
+        # sanity check for reversed bounds
+        if (cbar_vmin is not None) and (cbar_vmax is not None) and (cbar_vmin >= cbar_vmax):
+            print(f"  WARNING: --cbar_vmin ({cbar_vmin}) >= --cbar_vmax ({cbar_vmax}); falling back to quantile limits")
+            vmin, vmax = qlow, qhigh
+
         if use_diverging:
-            # center the colormap at zero, ensure symmetric limits
-            max_abs = max(abs(vmin), abs(vmax))
+            # If diverging requested, determine symmetric max_abs.
+            if (cbar_vmin is None) and (cbar_vmax is not None):
+                max_abs = abs(cbar_vmax)
+            elif (cbar_vmax is None) and (cbar_vmin is not None):
+                max_abs = abs(cbar_vmin)
+            else:
+                max_abs = max(abs(vmin), abs(vmax))
             from matplotlib.colors import TwoSlopeNorm
             norm = TwoSlopeNorm(vmin=-max_abs, vcenter=0.0, vmax=max_abs)
             cmap = plt.get_cmap(diverging_cmap)
