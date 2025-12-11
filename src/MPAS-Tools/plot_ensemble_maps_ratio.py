@@ -60,6 +60,8 @@ parser.add_argument("--run_names", required=True, help="Comma-separated run name
 parser.add_argument("--save_base", required=False, default=None, help="Directory to save PNG and NetCDF outputs")
 parser.add_argument("--gl_linewidth", required=False, default=0.7, type=float, help="Grounding line linewidth")
 parser.add_argument("--cmap", required=False, default="viridis", help="Colormap for ratio plots")
+parser.add_argument("--diverging", action="store_true", help="Use a diverging colormap centered at zero (red negative, blue positive).")
+parser.add_argument("--diverging_cmap", required=False, default="RdBu", help="Diverging colormap name to use when --diverging is set (default: RdBu).")
 
 args = parser.parse_args()
 stats_files = args.stats_files.split(',')
@@ -70,6 +72,8 @@ run_names = args.run_names.split(',')
 save_base = args.save_base
 gl_linewidth = args.gl_linewidth
 cmap_name = args.cmap
+use_diverging = args.diverging
+diverging_cmap = args.diverging_cmap
 
 if save_base:
     os.makedirs(save_base, exist_ok=True)
@@ -185,8 +189,7 @@ for variable in variables:
 
         # plotting
         fig, ax = plt.subplots(figsize=(7, 7))
-        cmap = plt.get_cmap(cmap_name)
-        # color limits
+        # choose colormap and normalization
         finite_mask = np.isfinite(ratio)
         if not np.any(finite_mask):
             print(f"  INFO: All ratio values are NaN for {stats_file}. Skipping plot.")
@@ -194,7 +197,15 @@ for variable in variables:
             continue
         vmin = np.nanquantile(ratio, 0.01)
         vmax = np.nanquantile(ratio, 0.99)
-        norm = Normalize(vmin=vmin, vmax=vmax)
+        if use_diverging:
+            # center the colormap at zero, ensure symmetric limits
+            max_abs = max(abs(vmin), abs(vmax))
+            from matplotlib.colors import TwoSlopeNorm
+            norm = TwoSlopeNorm(vmin=-max_abs, vcenter=0.0, vmax=max_abs)
+            cmap = plt.get_cmap(diverging_cmap)
+        else:
+            norm = Normalize(vmin=vmin, vmax=vmax)
+            cmap = plt.get_cmap(cmap_name)
         tcol = ax.tripcolor(triang, ratio, cmap=cmap, shading='flat', norm=norm)
         ax.set_title(f"{variable} range / dhdt_mean — Year {year}")
         ax.set_aspect('equal')
