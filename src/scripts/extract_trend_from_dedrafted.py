@@ -131,13 +131,12 @@ def compute_trend_by_segments(dedrafted_path, out_dir, segment_years=25):
     da = ds[flux_var]
     logger.info(f"Working on variable '{flux_var}' with dims={da.dims} shape={tuple(da.shape)}")
 
-    # center each time slice by subtracting the spatial mean
-    # compute mean over spatial dims (all dims except time)
-    spatial_dims = [d for d in da.dims if d != config.TIME_DIM]
-    # keepdims so broadcasting works
-    time_means = da.mean(dim=spatial_dims)
-    da_centered = da - time_means
-    logger.info(f"Centered data by spatial mean along dims={spatial_dims}")
+    # Subtract the initial (time-0) field from all time slices so each cell
+    # is referenced to its initial value. This preserves spatial structure
+    # and avoids using global spatial means.
+    first_slice = da.isel({config.TIME_DIM: 0})
+    da_centered = da - first_slice
+    logger.info(f"Subtracted first time-slice (index 0) from all times to reference time series to initial state")
 
     # compute years from daysSinceStart (like plotting scripts)
     if 'daysSinceStart' in ds:
