@@ -219,37 +219,44 @@ def compute_trend_by_segments(dedrafted_path, out_dir, segment_years=25):
             # compute offset (per-cell)
             shift = prev_last - cur_first
 
-            # Re-chunk the shift along nCells to match the segment's nCells
-            # chunking. This prevents expensive rechunk operations during the
-            # distributed addition `trend_seg + shift` when the graph is
-            # computed.
+            # Re-chunk the shift along nCells (or other spatial dim) to match the
+            # segment's chunking. This prevents expensive rechunk operations
+            # during the distributed addition `trend_seg + shift` when the graph
+            # is executed.
             try:
                 if 'nCells' in trend_seg.dims:
                     nCells_len = trend_seg.sizes.get('nCells', None)
                     if nCells_len is not None:
                         chunk_n = min(4096, int(nCells_len))
                         shift = shift.chunk({'nCells': chunk_n})
-            except Exception:
-                # If chunking fails, fall back to unchunked shift (do not crash)
-                pass
+            except Exception as exc:
+                logger.debug(f"Chunking shift failed: {exc}")
 
             # Add shift (broadcast along Time). Aligned chunking reduces
             # re-chunking when the graph is executed.
             trend_seg = trend_seg + shift
 
-            # Lightweight diagnostic: compute mean on a small sample slice only
+            # Lightweight diagnostic: compute mean on a small sample slice only.
+            # Find the first non-time dim to sample (handles other spatial dim names).
             mean_shift = None
             try:
                 sample = shift
-                if 'nCells' in shift.dims:
-                    n = shift.sizes.get('nCells', None)
+                spatial_dims = [d for d in shift.dims if d != config.TIME_DIM]
+                if spatial_dims:
+                    dim0 = spatial_dims[0]
+                    n = shift.sizes.get(dim0, None)
                     if n is not None and n > 0:
                         sel_n = min(10, int(n))
-                        sample = shift.isel(nCells=slice(0, sel_n))
+                        sample = shift.isel({dim0: slice(0, sel_n)})
+
+                # compute mean on small sample (this triggers a small compute)
                 mean_shift = float(sample.abs().mean().compute())
-            except Exception:
+            except Exception as exc:
+                # Log exception at debug level so it can be inspected without
+                # forcing full-array materialization in normal runs.
+                logger.debug(f"Sample mean compute failed for segment {seg_i}: {exc}")
                 mean_shift = None
-            logger.info(f"  Shifted segment {seg_i} by mean abs offset={mean_shift}")
+            logger.info(f"  Shifted segment {seg_i} by mean abs offset={mean_shift}; shift.dims={shift.dims} sizes={shift.sizes}")
 
         segments.append(trend_seg)
 
