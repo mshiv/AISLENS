@@ -285,6 +285,18 @@ for ii, run in enumerate(runs):
                 vmin = first_quant
         if vmax in ['None', None]:
             vmax = np.nanquantile(var_to_plot[timeLevs, :], 0.99)
+        # For dhdt we prefer a symmetric diverging range around zero
+        if variable == 'dhdt':
+            try:
+                # ensure numeric
+                vmin_f = float(vmin)
+                vmax_f = float(vmax)
+                vmax_abs = max(abs(vmin_f), abs(vmax_f))
+                vmin = -vmax_abs
+                vmax = vmax_abs
+            except Exception:
+                # if conversion fails, leave as-is
+                pass
         # Plot bedTopography on an asymmetric colorbar if appropriate
         if ( (variable == 'bedTopography') and
              (np.nanquantile(var_to_plot[timeLevs, :], 0.99) > 0.) and
@@ -342,13 +354,13 @@ for ii, run in enumerate(runs):
             if calc_mask:
                 gl_2000 = axs[index].tricontour(triang, groundingLineMask_2000[timeLev, :],
                                               levels=[0.9999], colors='darkgreen',
-                                              linestyles='solid', linewidths=0.9)
+                                              linestyles='solid', linewidths=0.8)
                 gl_end = axs[index].tricontour(triang, groundingLineMask_end[timeLev, :],
                                               levels=[0.9999], colors='darkviolet',
-                                              linestyles='solid', linewidths=0.9)
+                                              linestyles='solid', linewidths=0.8)
                 axs[index].tricontour(triang, initialExtentMask[timeLev, :],
                                       levels=[0.9999], colors='black',
-                                      linestyles='solid', linewidths=0.8)                
+                                      linestyles='solid', linewidths=0.6)                
 
             # Plot 2D field at each desired time. Use quantile range of 0.01-0.99 to cut out
             # outliers. Could improve on this by accounting for areaCell, as currently all cells
