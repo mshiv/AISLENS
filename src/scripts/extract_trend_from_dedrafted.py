@@ -127,20 +127,37 @@ def compute_trend_by_segments(dedrafted_path, out_dir, segment_years=25):
     # compute years from daysSinceStart (like plotting scripts)
     if 'daysSinceStart' in ds:
         days = ds['daysSinceStart'].values
-        years = days / 365.0
-        years = years - years[0]
+        # days may be datetime64, timedelta64 or numeric days; handle all cases
+        if np.issubdtype(getattr(days, 'dtype', type(days)), np.datetime64):
+            # compute days since first entry in calendar days
+            delta_days = (days - days[0]) / np.timedelta64(1, 'D')
+            years = delta_days.astype(float) / 365.0
+        elif np.issubdtype(getattr(days, 'dtype', type(days)), np.timedelta64):
+            delta_days = (days - days[0]) / np.timedelta64(1, 'D')
+            years = delta_days.astype(float) / 365.0
+        else:
+            # numeric days
+            years = np.asarray(days, dtype=float) / 365.0
+            years = years - years[0]
     else:
         # fallback: construct from index using deltat if present
         if 'deltat' in ds:
             dt = ds['deltat'].values
-            # deltat typically scalar or array of same len as Time
-            # convert seconds to years
-            if np.isscalar(dt):
-                step_year = dt / 3.15e7
-                years = np.arange(da.sizes[config.TIME_DIM]) * step_year
+            # deltat may be timedelta64 or numeric seconds
+            if np.issubdtype(getattr(dt, 'dtype', type(dt)), np.timedelta64):
+                # convert each deltat to days, cumulative from zero
+                secs = (dt / np.timedelta64(1, 's')).astype(float)
+                cumsum_secs = np.cumsum(np.r_[0.0, secs[:-1]])
+                years = cumsum_secs / 3.15e7
             else:
-                years = np.cumsum(np.r_[0.0, dt[:-1]]) / 3.15e7
-                years = years - years[0]
+                # numeric seconds (scalar or array)
+                if np.isscalar(dt):
+                    step_year = float(dt) / 3.15e7
+                    years = np.arange(da.sizes[config.TIME_DIM]) * step_year
+                else:
+                    secs = np.asarray(dt, dtype=float)
+                    cumsum_secs = np.cumsum(np.r_[0.0, secs[:-1]])
+                    years = cumsum_secs / 3.15e7
         else:
             raise RuntimeError('No daysSinceStart or deltat found to compute years')
 
