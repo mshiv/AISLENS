@@ -204,7 +204,13 @@ def compute_trend_by_segments(dedrafted_path, out_dir, segment_years=25):
         seg = seg.chunk({config.TIME_DIM: -1})
         logger.info(f"  Detrending segment {seg_i} with {seg.sizes.get(config.TIME_DIM)} timesteps")
         detrended = detrend_dim(seg, dim=config.TIME_DIM, deg=1)
-        trend_seg = seg - detrended
+        # detrend_dim preserves the original mean by adding it back. The
+        # returned `detrended` equals `seg - fit + original_mean`. To recover
+        # the polynomial fit (the actual trend) without modifying
+        # `detrend_dim` (which other workflows expect), compute the segment
+        # mean and use algebra: fit = seg - detrended + original_mean.
+        original_mean = seg.mean(dim=config.TIME_DIM)
+        trend_seg = seg - detrended + original_mean
         logger.info(f"  Computed trend segment {seg_i} shape={tuple(trend_seg.shape)}")
 
         # Make segments piecewise-continuous: shift this segment so its
@@ -249,14 +255,24 @@ def compute_trend_by_segments(dedrafted_path, out_dir, segment_years=25):
                         sel_n = min(10, int(n))
                         sample = shift.isel({dim0: slice(0, sel_n)})
 
-                # compute mean on small sample (this triggers a small compute)
-                mean_shift = float(sample.abs().mean().compute())
+                # Force a tiny compute to get a numpy array for robust diagnostics.
+                # This will compute at most sel_n spatial points and is safe.
+                try:
+                    sample_vals = sample.values
+                    # compute mean abs on the tiny sample
+                    mean_shift = float(np.nanmean(np.abs(sample_vals)))
+                except Exception as exc_sample:
+                    # Capture the exception and log it at debug level for
+                    # diagnosis, but don't raise — we still want the script to run.
+                    logger.debug(f"Tiny-sample values extraction failed for segment {seg_i}: {exc_sample}")
+                    mean_shift = None
             except Exception as exc:
-                # Log exception at debug level so it can be inspected without
-                # forcing full-array materialization in normal runs.
-                logger.debug(f"Sample mean compute failed for segment {seg_i}: {exc}")
+                logger.debug(f"Preparing tiny-sample failed for segment {seg_i}: {exc}")
                 mean_shift = None
-            logger.info(f"  Shifted segment {seg_i} by mean abs offset={mean_shift}; shift.dims={shift.dims} sizes={shift.sizes}")
+
+            logger.info(
+                f"  Shifted segment {seg_i} by mean abs offset={mean_shift}; shift.dims={shift.dims} sizes={shift.sizes}"
+            )
 
         segments.append(trend_seg)
 
