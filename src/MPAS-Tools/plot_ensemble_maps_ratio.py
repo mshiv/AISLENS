@@ -50,11 +50,13 @@ def safe_flatten(var):
     return a.ravel()
 
 
-parser = argparse.ArgumentParser(description="Plot ensemble ratio: <variable>_range / dhdt_mean")
+parser = argparse.ArgumentParser(description="Plot ensemble ratio: numerator / denominator (flexible)")
 parser.add_argument("--stats_files", required=True,
                     help="Comma-separated ensemble stats NetCDF files (one per year).")
 parser.add_argument("--years", required=True, help="Comma-separated years.")
-parser.add_argument("--variables", required=True, help="Comma-separated variables (e.g. thickness)")
+parser.add_argument("--variables", required=False, help="(DEPRECATED) use --numerators; comma-separated variables (e.g. thickness)")
+parser.add_argument("--numerators", required=False, help="Comma-separated numerator variables. Accepts exact variable names existing in the stats files (e.g. thickness_range, dhdt_std) or base names (e.g. thickness) which will try suffixes like '_range' first.")
+parser.add_argument("--denominators", required=False, help="Comma-separated denominator variables (e.g. dhdt_mean). If a single name is given it will be used for all numerators. If omitted defaults to 'dhdt_mean'.")
 parser.add_argument("--run_dirs", required=True, help="Comma-separated run output directories (for grounding line overlays)")
 parser.add_argument("--run_names", required=True, help="Comma-separated run names (for legend)")
 parser.add_argument("--save_base", required=False, default=None, help="Directory to save PNG and NetCDF outputs")
@@ -68,7 +70,14 @@ parser.add_argument("--cbar_vmax", required=False, type=float, default=None, hel
 args = parser.parse_args()
 stats_files = args.stats_files.split(',')
 years = [int(y) for y in args.years.split(',')]
-variables = args.variables.split(',')
+# support legacy --variables argument
+if args.numerators:
+    variables = args.numerators.split(',')
+elif args.variables:
+    variables = args.variables.split(',')
+else:
+    raise SystemExit('ERROR: must provide --numerators (or legacy --variables)')
+denominators = args.denominators.split(',') if args.denominators else None
 run_dirs = args.run_dirs.split(',')
 run_names = args.run_names.split(',')
 save_base = args.save_base
@@ -113,12 +122,9 @@ def load_grounding_for_year(run_dirs, run_names, year):
 
 
 for variable in variables:
-    if variable != 'thickness':
-        print(f"Note: this script is optimised for computing ratio for 'thickness' variable. Skipping {variable}.")
-        continue
-
+    # variable here is a requested numerator token (could be 'thickness', 'thickness_range', 'dhdt_std', etc.)
     for stats_file, year in zip(stats_files, years):
-        print(f"Processing {stats_file} (year {year})")
+        print(f"Processing {stats_file} (year {year}) for numerator={variable}")
         if not os.path.exists(stats_file):
             print(f"  WARNING: stats file not found: {stats_file}")
             continue
@@ -127,23 +133,58 @@ for variable in variables:
         except Exception as e:
             print(f"  ERROR opening {stats_file}: {e}")
             continue
+        # Determine numerator variable name to read from file
+        num_token = variable
+        # If user provided an exact variable name present in file, use it
+        if num_token in f.variables:
+            num_name = num_token
+        else:
+            # try common derived names
+            candidates = [f"{num_token}_range", f"{num_token}_std", f"{num_token}_mean"]
+            found = None
+            for c in candidates:
+                if c in f.variables:
+                    found = c
+                    break
+            if found is None:
+                print(f"  WARNING: numerator '{num_token}' not found (tried { [num_token]+candidates }). Skipping.")
+                f.close()
+                continue
+            num_name = found
 
-        # Required names (conventional)
-        range_name = f"{variable}_range"
-        dhdt_name = 'dhdt_mean'
+        # Determine denominator variable (broadcasting rules)
+        if denominators is None:
+            den_token = 'dhdt_mean'
+        else:
+            if len(denominators) == 1:
+                den_token = denominators[0]
+            elif len(denominators) == len(variables):
+                # match by position of variable in original variables list
+                den_token = denominators[variables.index(variable)]
+            else:
+                print(f"  ERROR: number of denominators ({len(denominators)}) must be 1 or equal to numerators ({len(variables)}).")
+                f.close()
+                raise SystemExit(1)
 
-        if range_name not in f.variables:
-            print(f"  WARNING: {range_name} not found in {stats_file}. Skipping.")
-            f.close()
-            continue
-        if dhdt_name not in f.variables:
-            print(f"  WARNING: {dhdt_name} not found in {stats_file}. Skipping.")
-            f.close()
-            continue
+        # Resolve denom name similar to numerator
+        if den_token in f.variables:
+            den_name = den_token
+        else:
+            candidates = [f"{den_token}_mean", f"{den_token}_range", f"{den_token}_std"]
+            found = None
+            for c in candidates:
+                if c in f.variables:
+                    found = c
+                    break
+            if found is None:
+                print(f"  WARNING: denominator '{den_token}' not found (tried { [den_token]+candidates }). Skipping.")
+                f.close()
+                continue
+            den_name = found
 
         try:
-            arr_range = safe_flatten(f.variables[range_name][:])
-            dhdt = safe_flatten(f.variables[dhdt_name][:])
+            arr_num = safe_flatten(f.variables[num_name][:])
+            arr_den = safe_flatten(f.variables[den_name][:])
         except Exception as e:
             print(f"  ERROR reading arrays: {e}")
             f.close()
@@ -162,20 +203,20 @@ for variable in variables:
         f.close()
 
         # make sure arrays align
-        if arr_range.shape != dhdt.shape:
+        if arr_num.shape != arr_den.shape:
             # attempt simple broadcast-friendly trimming to min length
-            nmin = min(arr_range.size, dhdt.size)
-            print(f"  WARNING: arr sizes differ (range={arr_range.size}, dhdt={dhdt.size}). Trimming to {nmin}.")
-            arr_range = arr_range[:nmin]
-            dhdt = dhdt[:nmin]
+            nmin = min(arr_num.size, arr_den.size)
+            print(f"  WARNING: arr sizes differ (num={arr_num.size}, den={arr_den.size}). Trimming to {nmin}.")
+            arr_num = arr_num[:nmin]
+            arr_den = arr_den[:nmin]
             xCell = xCell[:nmin]
             yCell = yCell[:nmin]
 
         # compute ratio, avoid division by zero
         tiny = 1e-12
-        dhdt_safe = dhdt.astype(float)
-        dhdt_safe[np.abs(dhdt_safe) < tiny] = np.nan
-        ratio = arr_range / dhdt_safe
+        den_safe = arr_den.astype(float)
+        den_safe[np.abs(den_safe) < tiny] = np.nan
+        ratio = arr_num / den_safe
 
         # prepare triangulation
         triang = tri.Triangulation(xCell, yCell)
@@ -225,7 +266,7 @@ for variable in variables:
             norm = Normalize(vmin=vmin, vmax=vmax)
             cmap = plt.get_cmap(cmap_name)
         tcol = ax.tripcolor(triang, ratio, cmap=cmap, shading='flat', norm=norm)
-        ax.set_title(f"{variable} range / dhdt_mean — Year {year}")
+        ax.set_title(f"{num_name} / {den_name} — Year {year}")
         ax.set_aspect('equal')
         ax.set_xlabel('x (m)')
         ax.set_ylabel('y (m)')
@@ -244,24 +285,27 @@ for variable in variables:
                 continue
 
         cbar = fig.colorbar(tcol, ax=ax, orientation='vertical', fraction=0.035, pad=0.03)
-        cbar.set_label(f"{variable}_range / dhdt_mean (units: derived)")
+        cbar.set_label(f"{num_name} / {den_name} (units: derived)")
 
         if save_base:
-            out_png = os.path.join(save_base, f"ensemble_ratio_{variable}_range_{year}.png")
+            safe_num = num_name.replace('/', '_')
+            safe_den = den_name.replace('/', '_')
+            out_png = os.path.join(save_base, f"ensemble_ratio_{safe_num}_over_{safe_den}_{year}.png")
             fig.savefig(out_png, dpi=300, bbox_inches='tight')
             print(f"  Saved plot {out_png}")
             # write compact NetCDF
-            out_nc = os.path.join(save_base, f"ensemble_ratio_{variable}_range_{year}.nc")
+            out_nc = os.path.join(save_base, f"ensemble_ratio_{safe_num}_over_{safe_den}_{year}.nc")
             try:
                 ncw = Dataset(out_nc, 'w')
                 ncw.createDimension('nCells', xCell.size)
                 xv = ncw.createVariable('xCell', 'f8', ('nCells',))
                 yv = ncw.createVariable('yCell', 'f8', ('nCells',))
-                rv = ncw.createVariable(f"{variable}_range_over_dhdt_mean", 'f8', ('nCells',), zlib=True)
+                rvname = f"{safe_num}_over_{safe_den}"
+                rv = ncw.createVariable(rvname, 'f8', ('nCells',), zlib=True)
                 xv[:] = xCell
                 yv[:] = yCell
                 rv[:] = ratio
-                rv.units = 'derived (thickness / (thickness/yr))'
+                rv.units = 'derived (numerator / denominator)'
                 ncw.close()
                 print(f"  Saved ratio NetCDF {out_nc}")
             except Exception as e:
