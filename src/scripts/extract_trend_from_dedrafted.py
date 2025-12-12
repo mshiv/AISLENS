@@ -216,12 +216,37 @@ def compute_trend_by_segments(dedrafted_path, out_dir, segment_years=25):
             prev_last = segments[-1].isel({config.TIME_DIM: -1})
             # current segment's first timeslice
             cur_first = trend_seg.isel({config.TIME_DIM: 0})
-            # compute offset (per-cell) and add to entire segment
+            # compute offset (per-cell)
             shift = prev_last - cur_first
-            # Broadcasting will align spatial dims; preserve chunking by adding
-            trend_seg = trend_seg + shift
+
+            # Re-chunk the shift along nCells to match the segment's nCells
+            # chunking. This prevents expensive rechunk operations during the
+            # distributed addition `trend_seg + shift` when the graph is
+            # computed.
             try:
-                mean_shift = float(np.nanmean(np.abs(shift.values)))
+                if 'nCells' in trend_seg.dims:
+                    nCells_len = trend_seg.sizes.get('nCells', None)
+                    if nCells_len is not None:
+                        chunk_n = min(4096, int(nCells_len))
+                        shift = shift.chunk({'nCells': chunk_n})
+            except Exception:
+                # If chunking fails, fall back to unchunked shift (do not crash)
+                pass
+
+            # Add shift (broadcast along Time). Aligned chunking reduces
+            # re-chunking when the graph is executed.
+            trend_seg = trend_seg + shift
+
+            # Lightweight diagnostic: compute mean on a small sample slice only
+            mean_shift = None
+            try:
+                sample = shift
+                if 'nCells' in shift.dims:
+                    n = shift.sizes.get('nCells', None)
+                    if n is not None and n > 0:
+                        sel_n = min(10, int(n))
+                        sample = shift.isel(nCells=slice(0, sel_n))
+                mean_shift = float(sample.abs().mean().compute())
             except Exception:
                 mean_shift = None
             logger.info(f"  Shifted segment {seg_i} by mean abs offset={mean_shift}")
