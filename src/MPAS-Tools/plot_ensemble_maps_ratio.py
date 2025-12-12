@@ -67,6 +67,11 @@ parser.add_argument("--diverging_cmap", required=False, default="RdBu", help="Di
 parser.add_argument("--cbar_vmin", required=False, type=float, default=None, help="Hard-set colorbar minimum value (overrides automatic lower quantile).")
 parser.add_argument("--cbar_vmax", required=False, type=float, default=None, help="Hard-set colorbar maximum value (overrides automatic upper quantile).")
 
+# Optional initial thickness file used to compute absolute thickness change
+parser.add_argument("--initial_thickness_file", required=False, default=None,
+                    help="Path to initial output file containing 'thickness' (e.g. output_flux_all_timesteps_2000.nc). Required when using denominator 'abs_thickness_change'.")
+parser.add_argument("--initial_thickness_time_index", required=False, type=int, default=0,
+                    help="Time index to use from initial thickness file (default 0).")
 args = parser.parse_args()
 stats_files = args.stats_files.split(',')
 years = [int(y) for y in args.years.split(',')]
@@ -87,6 +92,8 @@ use_diverging = args.diverging
 diverging_cmap = args.diverging_cmap
 cbar_vmin = args.cbar_vmin
 cbar_vmax = args.cbar_vmax
+initial_thickness_file = args.initial_thickness_file
+initial_thickness_time_index = args.initial_thickness_time_index
 
 if save_base:
     os.makedirs(save_base, exist_ok=True)
@@ -166,29 +173,86 @@ for variable in variables:
                 f.close()
                 raise SystemExit(1)
 
-        # Resolve denom name similar to numerator
-        if den_token in f.variables:
-            den_name = den_token
-        else:
-            candidates = [f"{den_token}_mean", f"{den_token}_range", f"{den_token}_std"]
-            found = None
-            for c in candidates:
-                if c in f.variables:
-                    found = c
-                    break
-            if found is None:
-                print(f"  WARNING: denominator '{den_token}' not found (tried { [den_token]+candidates }). Skipping.")
+        # Resolve or compute denominator. Support special token 'abs_thickness_change'
+        if den_token == 'abs_thickness_change':
+            # Need an initial thickness file path
+            if not initial_thickness_file:
+                print("  ERROR: denominator 'abs_thickness_change' requires --initial_thickness_file. Skipping.")
                 f.close()
                 continue
-            den_name = found
+            # Read numerator and thickness_mean from stats file
+            try:
+                arr_num = safe_flatten(f.variables[num_name][:])
+            except Exception as e:
+                print(f"  ERROR reading numerator array: {e}")
+                f.close()
+                continue
+            # thickness_mean should be present in ensemble stats
+            if 'thickness_mean' not in f.variables:
+                print("  WARNING: 'thickness_mean' not found in stats file; cannot compute abs_thickness_change. Skipping.")
+                f.close()
+                continue
+            try:
+                arr_thickness_mean = safe_flatten(f.variables['thickness_mean'][:])
+            except Exception as e:
+                print(f"  ERROR reading thickness_mean from stats: {e}")
+                f.close()
+                continue
+            # Load initial thickness from provided file
+            try:
+                initf = Dataset(initial_thickness_file)
+                init_thick = initf.variables['thickness'][:]
+                initf.close()
+            except Exception as e:
+                print(f"  ERROR opening initial thickness file {initial_thickness_file}: {e}")
+                f.close()
+                continue
+            # select time index if necessary
+            try:
+                if getattr(init_thick, 'ndim', 0) > 1:
+                    if initial_thickness_time_index >= init_thick.shape[0]:
+                        print(f"  ERROR: initial_thickness_time_index {initial_thickness_time_index} out of range for file {initial_thickness_file}. Skipping.")
+                        f.close()
+                        continue
+                    init_slice = safe_flatten(init_thick[initial_thickness_time_index, :])
+                else:
+                    init_slice = safe_flatten(init_thick)
+            except Exception as e:
+                print(f"  ERROR processing initial thickness array: {e}")
+                f.close()
+                continue
+            # compute absolute change per cell
+            try:
+                arr_den = np.abs(arr_thickness_mean - init_slice)
+            except Exception as e:
+                print(f"  ERROR computing abs_thickness_change: {e}")
+                f.close()
+                continue
+            den_name = 'abs_thickness_change'
+        else:
+            # Resolve denom name similar to numerator
+            if den_token in f.variables:
+                den_name = den_token
+            else:
+                candidates = [f"{den_token}_mean", f"{den_token}_range", f"{den_token}_std"]
+                found = None
+                for c in candidates:
+                    if c in f.variables:
+                        found = c
+                        break
+                if found is None:
+                    print(f"  WARNING: denominator '{den_token}' not found (tried { [den_token]+candidates }). Skipping.")
+                    f.close()
+                    continue
+                den_name = found
 
-        try:
-            arr_num = safe_flatten(f.variables[num_name][:])
-            arr_den = safe_flatten(f.variables[den_name][:])
-        except Exception as e:
-            print(f"  ERROR reading arrays: {e}")
-            f.close()
-            continue
+            try:
+                arr_num = safe_flatten(f.variables[num_name][:])
+                arr_den = safe_flatten(f.variables[den_name][:])
+            except Exception as e:
+                print(f"  ERROR reading arrays: {e}")
+                f.close()
+                continue
 
         # mesh for plotting
         try:
