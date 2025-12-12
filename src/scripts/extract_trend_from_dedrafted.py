@@ -118,7 +118,7 @@ def create_dedrafted_from_merged(merged_path, masks_path, out_dir, regions=None)
     return str(dedrafted_path)
 
 
-def compute_trend_by_segments(dedrafted_path, out_dir, segment_years=25):
+def compute_trend_by_segments(dedrafted_path, out_dir, segment_years=25, anchor='exact'):
     dedrafted_path = Path(dedrafted_path)
     ds = xr.open_dataset(dedrafted_path, chunks={config.TIME_DIM: 12})
     
@@ -213,37 +213,56 @@ def compute_trend_by_segments(dedrafted_path, out_dir, segment_years=25):
         trend_seg = seg - detrended + original_mean
         logger.info(f"  Computed trend segment {seg_i} shape={tuple(trend_seg.shape)}")
 
-        # Make segments piecewise-continuous: shift this segment so its
-        # first timestack equals the last timestack of the previous
-        # concatenated segment. This preserves the continuous trend
-        # trajectory across segment boundaries.
-        if len(segments) > 0:
-            # previous segment's last timeslice (DataArray over spatial dims)
-            prev_last = segments[-1].isel({config.TIME_DIM: -1})
-            # current segment's first timeslice
-            cur_first = trend_seg.isel({config.TIME_DIM: 0})
-            # compute offset (per-cell)
-            shift = prev_last - cur_first
+        # Make segments piecewise-continuous according to `anchor` strategy.
+        # Modes:
+        #  - 'exact': shift segment so its first value equals previous segment's last (exact continuity)
+        #  - 'fast' : shift segment so its first value equals this segment's original first timeslice (cheap)
+        #  - 'none' : do not apply any shift
+        if len(segments) > 0 and anchor != 'none':
+            if anchor == 'exact':
+                # previous segment's last timeslice (DataArray over spatial dims)
+                prev_last = segments[-1].isel({config.TIME_DIM: -1})
+                # current segment's first timeslice
+                cur_first = trend_seg.isel({config.TIME_DIM: 0})
+                # compute offset (per-cell) and add to entire segment
+                shift = prev_last - cur_first
+                # Broadcasting will align spatial dims; preserve chunking by adding
+                trend_seg = trend_seg + shift
+                # Eager tiny diagnostic (may be expensive) - compute mean abs of full shift
+                try:
+                    mean_shift = float(np.nanmean(np.abs(shift.values)))
+                except Exception:
+                    mean_shift = None
+                logger.info(f"  Shifted segment {seg_i} by mean abs offset={mean_shift}")
+                # skip the later chunking/fast-sample diagnostics for exact mode
+                segments.append(trend_seg)
+                continue
+            elif anchor == 'fast':
+                # Use the original (centered) segment first timeslice as an
+                # intercept anchor. This only requires data from the current
+                # segment and avoids cross-segment reads.
+                seg_first = seg.isel({config.TIME_DIM: 0})
+                trend_first = trend_seg.isel({config.TIME_DIM: 0})
+                shift = seg_first - trend_first
+            else:
+                raise RuntimeError(f"Unknown anchor mode: {anchor}")
 
-            # Re-chunk the shift along nCells (or other spatial dim) to match the
-            # segment's chunking. This prevents expensive rechunk operations
-            # during the distributed addition `trend_seg + shift` when the graph
-            # is executed.
+            # Re-chunk the shift along the primary spatial dim (if present)
             try:
-                if 'nCells' in trend_seg.dims:
-                    nCells_len = trend_seg.sizes.get('nCells', None)
-                    if nCells_len is not None:
-                        chunk_n = min(4096, int(nCells_len))
-                        shift = shift.chunk({'nCells': chunk_n})
+                spatial_dims = [d for d in trend_seg.dims if d != config.TIME_DIM]
+                if spatial_dims:
+                    dim0 = spatial_dims[0]
+                    n_len = trend_seg.sizes.get(dim0, None)
+                    if n_len is not None:
+                        chunk_n = min(4096, int(n_len))
+                        shift = shift.chunk({dim0: chunk_n})
             except Exception as exc:
                 logger.debug(f"Chunking shift failed: {exc}")
 
-            # Add shift (broadcast along Time). Aligned chunking reduces
-            # re-chunking when the graph is executed.
+            # Apply shift (broadcast along Time)
             trend_seg = trend_seg + shift
 
             # Lightweight diagnostic: compute mean on a small sample slice only.
-            # Find the first non-time dim to sample (handles other spatial dim names).
             mean_shift = None
             try:
                 sample = shift
@@ -255,15 +274,10 @@ def compute_trend_by_segments(dedrafted_path, out_dir, segment_years=25):
                         sel_n = min(10, int(n))
                         sample = shift.isel({dim0: slice(0, sel_n)})
 
-                # Force a tiny compute to get a numpy array for robust diagnostics.
-                # This will compute at most sel_n spatial points and is safe.
                 try:
                     sample_vals = sample.values
-                    # compute mean abs on the tiny sample
                     mean_shift = float(np.nanmean(np.abs(sample_vals)))
                 except Exception as exc_sample:
-                    # Capture the exception and log it at debug level for
-                    # diagnosis, but don't raise — we still want the script to run.
                     logger.debug(f"Tiny-sample values extraction failed for segment {seg_i}: {exc_sample}")
                     mean_shift = None
             except Exception as exc:
@@ -271,7 +285,7 @@ def compute_trend_by_segments(dedrafted_path, out_dir, segment_years=25):
                 mean_shift = None
 
             logger.info(
-                f"  Shifted segment {seg_i} by mean abs offset={mean_shift}; shift.dims={shift.dims} sizes={shift.sizes}"
+                f"  Shifted segment {seg_i} by mean abs offset={mean_shift}; shift.dims={shift.dims} sizes={shift.sizes} (anchor={anchor})"
             )
 
         segments.append(trend_seg)
@@ -326,6 +340,7 @@ def main():
     parser.add_argument('--outdir', type=str, default=str(config.DIR_MALI_FORCING_TRENDS), help='Output directory')
     parser.add_argument('--regions', nargs='*', type=int, default=None, help='List of region indices to process when creating dedrafted file')
     parser.add_argument('--segment-years', type=int, default=25, help='Segment length in years (default: 25)')
+    parser.add_argument('--anchor', choices=['exact', 'fast', 'none'], default='exact', help="How to anchor piecewise trends: 'exact' (match previous last), 'fast' (anchor to this segment's first), 'none' (no shift).")
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO)
@@ -339,7 +354,7 @@ def main():
     else:
         logger.info(f"Using dedrafted file: {dedrafted_path}")
 
-    trend_path = compute_trend_by_segments(dedrafted_path, args.outdir, segment_years=args.segment_years)
+    trend_path = compute_trend_by_segments(dedrafted_path, args.outdir, segment_years=args.segment_years, anchor=args.anchor)
     logger.info(f'Trend file created: {trend_path}')
 
 
