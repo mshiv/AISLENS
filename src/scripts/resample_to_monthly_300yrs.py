@@ -78,7 +78,7 @@ def compute_years_from_ds(ds, time_dim=config.TIME_DIM):
 
 
 def resample_to_monthly(infile, outpath, years_total=300, months_per_year=12,
-                        time_dim=config.TIME_DIM, fill='nan'):
+                        time_dim=config.TIME_DIM, fill='nan', variables=None):
     ds = xr.open_dataset(infile, chunks={time_dim: 12})
     logger.info(f"Opened input: {infile}")
 
@@ -100,8 +100,23 @@ def resample_to_monthly(infile, outpath, years_total=300, months_per_year=12,
     # create a new coordinate 'years_coord' (temporary) aligned to time dim
     ds = ds.assign_coords({'years_coord': (time_dim, years)})
 
-    # Select variables that contain the time dimension
-    time_vars = [v for v in ds.data_vars if time_dim in ds[v].dims]
+    # Select variables that contain the time dimension. If `variables` is
+    # provided, limit to that list (comma-separated names accepted).
+    if variables:
+        # accept comma-separated string or list
+        if isinstance(variables, str):
+            variables_requested = [vv.strip() for vv in variables.split(',') if vv.strip()]
+        else:
+            variables_requested = list(variables)
+        time_vars = [v for v in variables_requested if v in ds and time_dim in ds[v].dims]
+        missing = [v for v in variables_requested if v not in ds]
+        not_time = [v for v in variables_requested if v in ds and time_dim not in ds[v].dims]
+        if missing:
+            logger.warning(f"Requested variables not found in file and will be skipped: {missing}")
+        if not_time:
+            logger.warning(f"Requested variables found but do not contain time dim '{time_dim}' and will be skipped: {not_time}")
+    else:
+        time_vars = [v for v in ds.data_vars if time_dim in ds[v].dims]
     logger.info(f"Variables to resample (time-dependent): {time_vars}")
 
     out_vars = {}
@@ -125,8 +140,25 @@ def resample_to_monthly(infile, outpath, years_total=300, months_per_year=12,
                     interp_cols[:, col] = np.interp(target, years, colvals, left=np.nan, right=np.nan)
                 except Exception:
                     interp_cols[:, col] = np.nan
-            da = xr.DataArray(interp_cols, dims=('years_coord', 'allpoints'))
-            da = da.unstack('allpoints')
+            # interp_cols shape is (n_target, n_points) where n_points is the
+            # product of the non-time dims sizes. Reshape it directly back to
+            # (n_target, ...) matching the original non-time dims instead of
+            # relying on a MultiIndex/unstack which may not exist.
+            non_time_dims = [d for d in ds[v].dims if d != time_dim]
+            if len(non_time_dims) == 0:
+                # purely 1D time series
+                da = xr.DataArray(interp_cols[:, 0], dims=('years_coord',))
+            else:
+                sizes = tuple(int(ds.sizes[d]) for d in non_time_dims)
+                try:
+                    interp_reshaped = interp_cols.reshape((n_target,) + sizes)
+                except Exception:
+                    # on failure, create an array of NaNs with expected shape
+                    interp_reshaped = np.full((n_target,) + sizes, np.nan)
+                dims = ('years_coord',) + tuple(non_time_dims)
+                # build coords for non-time dims using original coords when available
+                coords = {d: ds.coords.get(d, np.arange(ds.sizes[d])) for d in non_time_dims}
+                da = xr.DataArray(interp_reshaped, dims=dims, coords=coords)
 
         # after interp da has coord 'years_coord'
         out_vars[v] = da
@@ -150,6 +182,16 @@ def resample_to_monthly(infile, outpath, years_total=300, months_per_year=12,
         int_time = np.arange(n_target, dtype=int)
         da = da.assign_coords({time_dim: int_time})
         out_ds[v] = da
+
+    # If user requested a subset of variables, drop everything except the
+    # interpolated variables and necessary coords so output contains only
+    # the requested variable(s).
+    if variables:
+        keep_vars = list(out_vars.keys())
+        # preserve mesh coords as coords (already copied above)
+        for existing in list(out_ds.data_vars):
+            if existing not in keep_vars:
+                out_ds = out_ds.drop_vars(existing)
 
     # copy supportive coords from input (xCell, yCell, etc.) if present
     for coord in ['xCell', 'yCell', 'dcEdge', 'nCells']:
@@ -189,12 +231,14 @@ def main():
     parser.add_argument('--months-per-year', type=int, default=12, help='Months per year (default 12)')
     parser.add_argument('--time-dim', default=config.TIME_DIM, help='Name of time dimension in file (default from config)')
     parser.add_argument('--fill', choices=['nan', 'nearest'], default='nan', help="How to fill outside original time range: 'nan' or 'nearest' (default 'nan')")
+    parser.add_argument('--variable', '-v', default=None, help="(Optional) variable name to resample (e.g. 'floatingBasalMassBalAdjustment'). If omitted, all time-dependent variables are resampled.")
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO)
     resample_to_monthly(args.infile, args.out, years_total=args.years,
                         months_per_year=args.months_per_year,
-                        time_dim=args.time_dim, fill=args.fill)
+                        time_dim=args.time_dim, fill=args.fill,
+                        variables=args.variable)
 
 
 if __name__ == '__main__':
