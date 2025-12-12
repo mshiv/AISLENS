@@ -206,6 +206,26 @@ def compute_trend_by_segments(dedrafted_path, out_dir, segment_years=25):
         detrended = detrend_dim(seg, dim=config.TIME_DIM, deg=1)
         trend_seg = seg - detrended
         logger.info(f"  Computed trend segment {seg_i} shape={tuple(trend_seg.shape)}")
+
+        # Make segments piecewise-continuous: shift this segment so its
+        # first timestack equals the last timestack of the previous
+        # concatenated segment. This preserves the continuous trend
+        # trajectory across segment boundaries.
+        if len(segments) > 0:
+            # previous segment's last timeslice (DataArray over spatial dims)
+            prev_last = segments[-1].isel({config.TIME_DIM: -1})
+            # current segment's first timeslice
+            cur_first = trend_seg.isel({config.TIME_DIM: 0})
+            # compute offset (per-cell) and add to entire segment
+            shift = prev_last - cur_first
+            # Broadcasting will align spatial dims; preserve chunking by adding
+            trend_seg = trend_seg + shift
+            try:
+                mean_shift = float(np.nanmean(np.abs(shift.values)))
+            except Exception:
+                mean_shift = None
+            logger.info(f"  Shifted segment {seg_i} by mean abs offset={mean_shift}")
+
         segments.append(trend_seg)
 
     if len(segments) == 0:
