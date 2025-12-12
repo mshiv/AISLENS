@@ -19,6 +19,13 @@ from aislens.utils import setup_logging
 
 logger = logging.getLogger(__name__)
 
+# --- Configurable indices (change here for different split points) ---
+# Inclusive start index for the combined mid-period (e.g. 168)
+COMBINED_START_INDEX = 180
+# Exclusive end index for slicing the mid-period (e.g. 3600 -> slices stop at 3599)
+COMBINED_END_EXCLUSIVE = 3600
+# ---------------------------------------------------------------------------
+
 def combine_ssp585_forcing_xarray(trend_file_path, forcing_file_path, output_file_path):
     """
     Python equivalent of the NCO-based SSP585 forcing combination.
@@ -45,8 +52,8 @@ def combine_ssp585_forcing_xarray(trend_file_path, forcing_file_path, output_fil
         raise ValueError(f"floatingBasalMassBalAdjustment not found. Available: {list(forcing_ds.data_vars.keys())}")
     
     logger.info("Extracting overlapping time periods and aligning Time coordinates...")
-    # Forcing mid-period is indices 168..3599 (inclusive end exclusive slice => 168:3600)
-    forcing_subset = forcing_ds.isel(Time=slice(168, 3600))
+    # Forcing mid-period is indices COMBINED_START_INDEX .. (COMBINED_END_EXCLUSIVE-1)
+    forcing_subset = forcing_ds.isel(Time=slice(COMBINED_START_INDEX, COMBINED_END_EXCLUSIVE))
 
     # Prefer aligning by exact Time values if possible (handles differing calendars/lengths)
     try:
@@ -83,7 +90,7 @@ def combine_ssp585_forcing_xarray(trend_file_path, forcing_file_path, output_fil
     )
     
     logger.info("Creating final output with early period...")
-    early_period = forcing_ds.isel(Time=slice(0, 168))
+    early_period = forcing_ds.isel(Time=slice(0, COMBINED_START_INDEX))
     logger.debug(f"Early period: {len(early_period.Time)} timesteps")
     
     try:
@@ -93,7 +100,7 @@ def combine_ssp585_forcing_xarray(trend_file_path, forcing_file_path, output_fil
         logger.warning(f"Direct concatenation failed ({e}), using fallback assignment")
         final_ds = forcing_ds.copy()
         # Ensure the Time index slice we write to matches the combined_subset length
-        start_idx = 168
+        start_idx = COMBINED_START_INDEX
         end_idx = start_idx + len(combined_subset.Time) - 1
         logger.debug(f"Fallback writing to Time indices {start_idx}:{end_idx} (inclusive)")
         try:
