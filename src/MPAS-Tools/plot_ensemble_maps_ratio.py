@@ -54,6 +54,62 @@ def safe_flatten(var):
     return a.ravel()
 
 
+def _get_colormap_by_name(name):
+    """Return a matplotlib colormap. Supports `cmocean:NAME` prefix.
+
+    If `name` starts with `cmocean:`, try to import `cmocean.cm` and return
+    the named colormap. Falls back to `plt.get_cmap` on any failure.
+    """
+    if not name:
+        return plt.get_cmap(None)
+    if isinstance(name, str) and name.startswith('cmocean:'):
+        cmap_key = name.split(':', 1)[1]
+        try:
+            import cmocean
+            cmap = getattr(cmocean.cm, cmap_key, None)
+            if cmap is not None:
+                return cmap
+            else:
+                print(f"  WARNING: cmocean colormap '{cmap_key}' not found; falling back to matplotlib cmap")
+        except Exception as e:
+            print(f"  WARNING: cmocean import failed ({e}); falling back to matplotlib cmap")
+    try:
+        return plt.get_cmap(name)
+    except Exception:
+        print(f"  WARNING: matplotlib cmap '{name}' not found; using default cmap")
+        return plt.get_cmap(None)
+
+
+def _make_gl_colors(user_colors, n):
+    """Return a list of `n` colors for grounding-line overlays.
+
+    Behavior:
+    - If `user_colors` is provided (list of strings), assign those colors to the
+      last grounding lines (so a single color will apply to the last GL plotted).
+    - Pad the beginning with tab10-derived colors so the total length equals `n`.
+    - If user supplied more colors than `n`, take the last `n` entries.
+    """
+    if user_colors is None:
+        # simply use tab10 for all runs
+        cols = cm.tab10(np.linspace(0, 1, n))
+        return [tuple(c) for c in cols]
+
+    user_list = list(user_colors)
+    # number of padding colors needed at the front
+    pad_count = max(0, n - len(user_list))
+    pad = cm.tab10(np.linspace(0, 1, max(1, pad_count)))
+    pad_colors = [tuple(c) for c in pad][:pad_count]
+    cols = pad_colors + user_list
+    # if user provided more colors than n, keep the last n (so user's last colors map to last runs)
+    if len(cols) > n:
+        cols = cols[-n:]
+    # final safety: if still short, pad at end with tab10 cycle
+    if len(cols) < n:
+        extra = cm.tab10(np.linspace(0, 1, n - len(cols)))
+        cols += [tuple(c) for c in extra]
+    return cols
+
+
 parser = argparse.ArgumentParser(description="Plot ensemble ratio: numerator / denominator (flexible)")
 parser.add_argument("--stats_files", required=True,
                     help="Comma-separated ensemble stats NetCDF files (one per year).")
