@@ -15,7 +15,7 @@ import argparse
 import matplotlib.pyplot as plt
 import matplotlib.tri as tri
 from matplotlib.colorbar import Colorbar
-from matplotlib.colors import Normalize, TwoSlopeNorm, LinearSegmentedColormap
+from matplotlib.colors import Normalize, TwoSlopeNorm, LinearSegmentedColormap, LogNorm
 import matplotlib.cm as cm
 
 parser = argparse.ArgumentParser(description="Ensemble map plots for MALI with year-specific grounding lines.")
@@ -26,6 +26,10 @@ parser.add_argument("--run_dirs", required=True, help="Comma-separated run outpu
 parser.add_argument("--run_names", required=True, help="Comma-separated run names (for legend).")
 parser.add_argument("--save_base", required=False, default=None, help="Path to directory for saving figures (if not provided, figures are not saved).")
 parser.add_argument("--gl_linewidth", required=False, default=0.7, type=float, help="Linewidth for grounding lines (default: 0.7)")
+parser.add_argument("--single_gl", action="store_true", help="If set, plot only a single grounding line instead of all runs (default: False)")
+parser.add_argument("--gl_run_index", required=False, type=int, default=None, help="If --single_gl, use this run index (0-based) to select which run's grounding line to plot")
+parser.add_argument("--gl_run_name", required=False, default=None, help="If --single_gl, select grounding line by run name (matches run_names entry)")
+parser.add_argument("--log_cbar", action="store_true", help="Use log scale for the colorbar (requires positive data).")
 
 args = parser.parse_args()
 ensemble_files = args.ensemble_files.split(',')
@@ -35,6 +39,10 @@ run_dirs = args.run_dirs.split(',')
 run_names = args.run_names.split(',')
 save_base = args.save_base
 gl_linewidth = args.gl_linewidth
+single_gl = args.single_gl
+gl_run_index = args.gl_run_index
+gl_run_name = args.gl_run_name
+use_log_cbar = args.log_cbar
 
 print(f"Processing {len(ensemble_files)} ensemble files for years: {years}")
 print(f"Variables: {variables}")
@@ -184,8 +192,30 @@ for variable in variables:
             if np.all(np.isnan(arr)):
                 print(f"      All data is NaN for {variable}_{stat}, year {year}.")
                 continue
-            vmin = np.nanquantile(arr, 0.01)
-            vmax = np.nanquantile(arr, 0.99)
+            # default quantile-based limits
+            # allow optional log-scaling for colorbar (positive-only)
+            # Default to log for std panels unless user explicitly disables it
+            user_requested_log = bool(use_log_cbar)
+            use_log = user_requested_log or (stat == 'std')
+
+            if use_log and (variable == 'dhdt' or stat == 'range'):
+                print("      WARNING: --log_cbar requested/defaulted together with diverging scale (dhdt/range). Ignoring log scale.")
+                use_log = False
+
+            if use_log:
+                pos_mask = np.isfinite(arr) & (arr > 0)
+                if not np.any(pos_mask):
+                    src = '--log_cbar' if user_requested_log else 'default for std'
+                    print(f"      WARNING: {src} requested but no positive values present for {variable}_{stat} year {year}; falling back to linear scale.")
+                    use_log = False
+
+            if use_log:
+                vmin = np.nanquantile(arr[pos_mask], 0.01)
+                vmax = np.nanquantile(arr[pos_mask], 0.99)
+            else:
+                vmin = np.nanquantile(arr, 0.01)
+                vmax = np.nanquantile(arr, 0.99)
+
             # Diverging colormap for dhdt/range
             if variable == 'dhdt' or stat == 'range':
                 max_abs = max(abs(vmin), abs(vmax))
@@ -197,8 +227,21 @@ for variable in variables:
                 norm = Normalize(vmin=vmin, vmax=vmax)
                 cmap = plt.get_cmap('plasma')
             else:
-                norm = Normalize(vmin=vmin, vmax=vmax)
-                cmap = plt.get_cmap(defaultColors.get(variable, 'viridis'))
+                if use_log:
+                    # ensure positive bounds
+                    if vmin <= 0 or vmax <= 0:
+                        print(f"      WARNING: log colorbar bounds non-positive for {variable}_{stat} year {year}; falling back to linear scale.")
+                        norm = Normalize(vmin=np.nanquantile(arr, 0.01), vmax=np.nanquantile(arr, 0.99))
+                        cmap = plt.get_cmap(defaultColors.get(variable, 'viridis'))
+                    else:
+                        # mask non-positive to avoid LogNorm errors
+                        arr = arr.astype(float)
+                        arr[~(np.isfinite(arr) & (arr > 0))] = np.nan
+                        norm = LogNorm(vmin=vmin, vmax=vmax)
+                        cmap = plt.get_cmap(defaultColors.get(variable, 'viridis'))
+                else:
+                    norm = Normalize(vmin=vmin, vmax=vmax)
+                    cmap = plt.get_cmap(defaultColors.get(variable, 'viridis'))
             print(f"      Color range: {vmin:.3f} to {vmax:.3f}")
 
             # REVISED: Load year-specific grounding lines for this year
@@ -213,9 +256,27 @@ for variable in variables:
             ax.set_xlabel('x (m)')
             ax.set_ylabel('y (m)')
 
-            # Overlay grounding lines for all runs FOR THIS SPECIFIC YEAR
+            # Overlay grounding lines for runs FOR THIS SPECIFIC YEAR
             legend_elements = []
-            for gl_info in grounding_lines:
+            # If requested, restrict grounding_lines to a single entry
+            if single_gl and grounding_lines:
+                sel = None
+                if gl_run_name is not None:
+                    for g in grounding_lines:
+                        if g.get('run_name') == gl_run_name:
+                            sel = g
+                            break
+                if sel is None and gl_run_index is not None:
+                    if 0 <= gl_run_index < len(grounding_lines):
+                        sel = grounding_lines[gl_run_index]
+                if sel is None:
+                    # default to the first grounding line
+                    sel = grounding_lines[0]
+                grounding_lines_to_plot = [sel]
+            else:
+                grounding_lines_to_plot = grounding_lines
+
+            for gl_info in grounding_lines_to_plot:
                 if gl_info['gl_mask'] is not None:
                     try:
                         gl_triang = tri.Triangulation(gl_info['x'], gl_info['y'])
