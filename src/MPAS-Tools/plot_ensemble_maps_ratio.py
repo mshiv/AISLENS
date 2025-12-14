@@ -34,7 +34,7 @@ import numpy as np
 from netCDF4 import Dataset
 import matplotlib.pyplot as plt
 import matplotlib.tri as tri
-from matplotlib.colors import Normalize, TwoSlopeNorm
+from matplotlib.colors import Normalize, TwoSlopeNorm, LogNorm
 import matplotlib.cm as cm
 
 
@@ -66,6 +66,7 @@ parser.add_argument("--diverging", action="store_true", help="Use a diverging co
 parser.add_argument("--diverging_cmap", required=False, default="RdBu", help="Diverging colormap name to use when --diverging is set (default: RdBu).")
 parser.add_argument("--cbar_vmin", required=False, type=float, default=None, help="Hard-set colorbar minimum value (overrides automatic lower quantile).")
 parser.add_argument("--cbar_vmax", required=False, type=float, default=None, help="Hard-set colorbar maximum value (overrides automatic upper quantile).")
+parser.add_argument("--log_cbar", action="store_true", help="Use log scale for the colorbar (requires positive data).")
 
 # Optional initial thickness file used to compute absolute thickness change
 parser.add_argument("--initial_thickness_file", required=False, default=None,
@@ -92,6 +93,7 @@ use_diverging = args.diverging
 diverging_cmap = args.diverging_cmap
 cbar_vmin = args.cbar_vmin
 cbar_vmax = args.cbar_vmax
+use_log_cbar = args.log_cbar
 initial_thickness_file = args.initial_thickness_file
 initial_thickness_time_index = args.initial_thickness_time_index
 
@@ -301,15 +303,35 @@ for variable in variables:
         # choose colormap and normalization
         finite_mask = np.isfinite(ratio)
         if not np.any(finite_mask):
-            print(f"  INFO: All ratio values are NaN for {stats_file}. Skipping plot.")
+            print(f"  INFO: All ratio values are NaN for {stats_file}. Skipping.")
             plt.close(fig)
             continue
-        # default quantile-based limits
-        qlow = np.nanquantile(ratio, 0.01)
-        qhigh = np.nanquantile(ratio, 0.99)
+
+        # If user requested a log-scaled colorbar, validate and prepare positive-only values
+        use_log = bool(use_log_cbar)
+        if use_log and use_diverging:
+            print("  WARNING: --log_cbar requested together with --diverging. Ignoring log scale and using diverging colormap.")
+            use_log = False
+
+        if use_log:
+            # consider only positive finite values for log scaling
+            pos_mask = np.isfinite(ratio) & (ratio > 0)
+            if not np.any(pos_mask):
+                print(f"  WARNING: --log_cbar requested but no positive ratio values present in {stats_file}; falling back to linear scale.")
+                use_log = False
+
+        # default quantile-based limits (use positive-only quantiles for log case)
+        if use_log:
+            qlow = np.nanquantile(ratio[pos_mask], 0.01)
+            qhigh = np.nanquantile(ratio[pos_mask], 0.99)
+        else:
+            qlow = np.nanquantile(ratio, 0.01)
+            qhigh = np.nanquantile(ratio, 0.99)
+
         # apply user overrides if provided
         vmin = qlow if cbar_vmin is None else cbar_vmin
         vmax = qhigh if cbar_vmax is None else cbar_vmax
+
         # sanity check for reversed bounds
         if (cbar_vmin is not None) and (cbar_vmax is not None) and (cbar_vmin >= cbar_vmax):
             print(f"  WARNING: --cbar_vmin ({cbar_vmin}) >= --cbar_vmax ({cbar_vmax}); falling back to quantile limits")
@@ -323,12 +345,23 @@ for variable in variables:
                 max_abs = abs(cbar_vmin)
             else:
                 max_abs = max(abs(vmin), abs(vmax))
-            from matplotlib.colors import TwoSlopeNorm
             norm = TwoSlopeNorm(vmin=-max_abs, vcenter=0.0, vmax=max_abs)
             cmap = plt.get_cmap(diverging_cmap)
         else:
-            norm = Normalize(vmin=vmin, vmax=vmax)
-            cmap = plt.get_cmap(cmap_name)
+            if use_log:
+                # ensure vmin/vmax are positive for LogNorm
+                if vmin <= 0 or vmax <= 0:
+                    print(f"  WARNING: requested log colorbar but vmin/vmax include non-positive values; using positive quantile limits instead.")
+                    vmin = qlow
+                    vmax = qhigh
+                # mask non-positive values to avoid LogNorm errors
+                ratio = ratio.astype(float)
+                ratio[~(np.isfinite(ratio) & (ratio > 0))] = np.nan
+                norm = LogNorm(vmin=vmin, vmax=vmax)
+                cmap = plt.get_cmap(cmap_name)
+            else:
+                norm = Normalize(vmin=vmin, vmax=vmax)
+                cmap = plt.get_cmap(cmap_name)
         tcol = ax.tripcolor(triang, ratio, cmap=cmap, shading='flat', norm=norm)
         ax.set_title(f"{num_name} / {den_name} — Year {year}")
         ax.set_aspect('equal')
