@@ -37,6 +37,10 @@ import matplotlib.tri as tri
 from matplotlib.colors import Normalize, TwoSlopeNorm, LogNorm
 import matplotlib.cm as cm
 
+# grounding/mask bit values (match other plotting script)
+groundingLineValue = 256
+initialExtentValue = 1
+
 
 def safe_flatten(var):
     """Return a 1-D numpy array for typical (1,nCells) or (nCells,) variables."""
@@ -118,13 +122,22 @@ def load_grounding_for_year(run_dirs, run_names, year):
             xCell = safe_flatten(m.variables['xCell'][:])
             yCell = safe_flatten(m.variables['yCell'][:])
             cellMask = None
+            gl_mask = None
+            extent_mask = None
             if 'cellMask' in m.variables:
                 cmask = m.variables['cellMask'][:]
                 if cmask.ndim > 1:
                     cmask = cmask[0]
                 cellMask = cmask
+                # extract grounding-line bit and initial extent bit
+                try:
+                    gl_mask = (cmask & groundingLineValue) // groundingLineValue
+                    extent_mask = (cmask & initialExtentValue) // initialExtentValue
+                except Exception:
+                    gl_mask = None
+                    extent_mask = None
             m.close()
-            entries.append({'x': xCell, 'y': yCell, 'cellMask': cellMask, 'color': colors[i], 'name': run_names[i] if i < len(run_names) else f'run{i}'})
+            entries.append({'x': xCell, 'y': yCell, 'cellMask': cellMask, 'gl_mask': gl_mask, 'extent_mask': extent_mask, 'color': colors[i], 'name': run_names[i] if i < len(run_names) else f'run{i}'})
         except Exception as e:
             print(f"Warning: cannot load mesh {mesh_file}: {e}")
     return entries
@@ -284,6 +297,28 @@ for variable in variables:
         den_safe[np.abs(den_safe) < tiny] = np.nan
         ratio = arr_num / den_safe
 
+        # Special handling when denominator is absolute thickness change:
+        # Mask out small denominators (near-zero absolute change) so the
+        # uncertainty-to-signal map highlights regions where variability
+        # legitimately outpaces the local signal. We choose a conservative
+        # threshold at the 5th positive-percentile of abs_thickness_change
+        # (fall back to a tiny value if no positive denominators).
+        if den_token == 'abs_thickness_change':
+            try:
+                pos_den = arr_den[np.isfinite(arr_den) & (arr_den > 0)]
+                if pos_den.size > 0:
+                    denom_thresh = float(np.nanquantile(pos_den, 0.05))
+                else:
+                    denom_thresh = 1e-6
+                mask_small = (arr_den < denom_thresh) | (~np.isfinite(arr_den))
+                n_masked = int(np.count_nonzero(mask_small))
+                print(f"  INFO: masking {n_masked}/{arr_den.size} cells with abs_thickness_change < {denom_thresh:.3e}")
+                # hide masked cells in ratio
+                ratio = ratio.astype(float)
+                ratio[mask_small] = np.nan
+            except Exception as e:
+                print(f"  WARNING: could not apply small-denominator masking for abs_thickness_change: {e}")
+
         # prepare triangulation
         triang = tri.Triangulation(xCell, yCell)
         if dcEdge is not None:
@@ -371,13 +406,21 @@ for variable in variables:
         # overlay grounding lines (best-effort)
         gls = load_grounding_for_year(run_dirs, run_names, year)
         for g in gls:
-            if g.get('cellMask') is None:
+            # prefer the extracted grounding-line mask if present
+            if g.get('gl_mask') is None:
                 continue
-            # overlay contour where grounding bit (256) set
             try:
                 gl_tr = tri.Triangulation(g['x'], g['y'])
-                mask = g['cellMask']
-                ax.tricontour(gl_tr, mask, levels=[0.5], colors=[g['color']], linewidths=gl_linewidth)
+                # create triangle mask consistent with main triangulation
+                gl_triMask = np.zeros(len(gl_tr.triangles), dtype=bool)
+                for t in range(len(gl_tr.triangles)):
+                    thisTri = gl_tr.triangles[t, :]
+                    if (np.hypot(g['x'][thisTri[0]]-g['x'][thisTri[1]], g['y'][thisTri[0]]-g['y'][thisTri[1]]) > maxDist or
+                        np.hypot(g['x'][thisTri[1]]-g['x'][thisTri[2]], g['y'][thisTri[1]]-g['y'][thisTri[2]]) > maxDist or
+                        np.hypot(g['x'][thisTri[0]]-g['x'][thisTri[2]], g['y'][thisTri[0]]-g['y'][thisTri[2]]) > maxDist):
+                        gl_triMask[t] = True
+                gl_tr.set_mask(gl_triMask)
+                ax.tricontour(gl_tr, g['gl_mask'], levels=[0.9999], colors=[g['color']], linewidths=gl_linewidth)
             except Exception:
                 continue
 
