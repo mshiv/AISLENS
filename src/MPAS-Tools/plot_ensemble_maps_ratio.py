@@ -130,6 +130,11 @@ parser.add_argument("--log_cbar", action="store_true", help="Use log scale for t
 parser.add_argument("--gl_colors", required=False, default=None,
                     help="Optional comma-separated grounding-line colors for runs (overrides default colormap)."
                     )
+parser.add_argument("--mask_ratio_below", required=False, type=float, default=None,
+                    help="Mask (set to NaN) ratio values below this absolute threshold before plotting."
+                    )
+parser.add_argument("--mask_ratio_quantile", required=False, type=float, default=5.0,
+                    help="Mask ratio values below this percentile (0-100). Default 5.0 masks values below the 5th percentile.")
 
 # Optional initial thickness file used to compute absolute thickness change
 parser.add_argument("--initial_thickness_file", required=False, default=None,
@@ -160,6 +165,8 @@ use_log_cbar = args.log_cbar
 initial_thickness_file = args.initial_thickness_file
 initial_thickness_time_index = args.initial_thickness_time_index
 gl_colors_arg = args.gl_colors.split(',') if args.gl_colors else None
+mask_ratio_below = args.mask_ratio_below
+mask_ratio_quantile = args.mask_ratio_quantile
 
 if save_base:
     os.makedirs(save_base, exist_ok=True)
@@ -379,6 +386,50 @@ for variable in variables:
                 ratio[mask_small] = np.nan
             except Exception as e:
                 print(f"  WARNING: could not apply small-denominator masking for abs_thickness_change: {e}")
+        # Quantile-based masking: mask values below the requested percentile
+        if (mask_ratio_quantile is not None):
+            try:
+                q = float(mask_ratio_quantile)
+                if (q < 0.0) or (q > 100.0):
+                    print(f"  WARNING: --mask_ratio_quantile {q} out of range (0-100); skipping quantile masking")
+                else:
+                    qfrac = q / 100.0
+                    if use_diverging:
+                        vals = np.abs(ratio[np.isfinite(ratio)])
+                    elif use_log:
+                        vals = ratio[np.isfinite(ratio) & (ratio > 0)]
+                    else:
+                        vals = ratio[np.isfinite(ratio)]
+                    if vals.size > 0:
+                        thresh_q = float(np.nanquantile(vals, qfrac))
+                    else:
+                        thresh_q = 0.0
+                    if use_diverging:
+                        mask_q = (np.abs(ratio) < thresh_q) | (~np.isfinite(ratio))
+                    else:
+                        mask_q = (ratio < thresh_q) | (~np.isfinite(ratio))
+                    n_masked_q = int(np.count_nonzero(mask_q))
+                    print(f"  INFO: masking {n_masked_q}/{ratio.size} cells below {q}th percentile (thresh={thresh_q:.3e})")
+                    ratio = ratio.astype(float)
+                    ratio[mask_q] = np.nan
+            except Exception as e:
+                print(f"  WARNING: failed to apply --mask_ratio_quantile: {e}")
+
+        # Additional user-requested masking: mask ratio values below absolute threshold
+        if (mask_ratio_below is not None):
+            try:
+                thresh = float(mask_ratio_below)
+                if use_diverging:
+                    mask_low = (np.abs(ratio) < thresh) | (~np.isfinite(ratio))
+                else:
+                    # for non-diverging maps (and log maps) we mask values strictly less than thresh
+                    mask_low = (ratio < thresh) | (~np.isfinite(ratio))
+                n_masked2 = int(np.count_nonzero(mask_low))
+                print(f"  INFO: masking {n_masked2}/{ratio.size} cells with ratio < {thresh}")
+                ratio = ratio.astype(float)
+                ratio[mask_low] = np.nan
+            except Exception as e:
+                print(f"  WARNING: failed to apply --mask_ratio_below: {e}")
 
         # prepare triangulation
         triang = tri.Triangulation(xCell, yCell)
