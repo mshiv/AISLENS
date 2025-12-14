@@ -25,7 +25,7 @@ parser.add_argument("--variables", required=True, help="Comma-separated variable
 parser.add_argument("--run_dirs", required=True, help="Comma-separated run output directories.")
 parser.add_argument("--run_names", required=True, help="Comma-separated run names (for legend).")
 parser.add_argument("--save_base", required=False, default=None, help="Path to directory for saving figures (if not provided, figures are not saved).")
-parser.add_argument("--gl_linewidth", required=False, default=0.7, type=float, help="Linewidth for grounding lines (default: 0.7)")
+parser.add_argument("--gl_linewidth", required=False, default=1.25, type=float, help="Linewidth for grounding lines (default: 0.7)")
 parser.add_argument("--single_gl", action="store_true", help="If set, plot only a single grounding line instead of all runs (default: False)")
 parser.add_argument("--gl_run_index", required=False, type=int, default=None, help="If --single_gl, use this run index (0-based) to select which run's grounding line to plot")
 parser.add_argument("--gl_run_name", required=False, default=None, help="If --single_gl, select grounding line by run name (matches run_names entry)")
@@ -64,7 +64,7 @@ def dist(i1, i2, xCell, yCell):
 
 def create_custom_colormap():
     """Create custom diverging colormap"""
-    colors = ['Navajowhite', 'Darkorange', 'Darkred', 'white', 
+    colors = ['Darkred', 'Darkorange', 'Navajowhite', 'white', 
               'Lightsteelblue', 'Royalblue', 'Navy']
     return LinearSegmentedColormap.from_list("custom", colors, N=200)
 
