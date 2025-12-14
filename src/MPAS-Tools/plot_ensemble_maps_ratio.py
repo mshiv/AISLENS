@@ -71,6 +71,9 @@ parser.add_argument("--diverging_cmap", required=False, default="RdBu", help="Di
 parser.add_argument("--cbar_vmin", required=False, type=float, default=None, help="Hard-set colorbar minimum value (overrides automatic lower quantile).")
 parser.add_argument("--cbar_vmax", required=False, type=float, default=None, help="Hard-set colorbar maximum value (overrides automatic upper quantile).")
 parser.add_argument("--log_cbar", action="store_true", help="Use log scale for the colorbar (requires positive data).")
+parser.add_argument("--gl_colors", required=False, default=None,
+                    help="Optional comma-separated grounding-line colors for runs (overrides default colormap)."
+                    )
 
 # Optional initial thickness file used to compute absolute thickness change
 parser.add_argument("--initial_thickness_file", required=False, default=None,
@@ -100,6 +103,7 @@ cbar_vmax = args.cbar_vmax
 use_log_cbar = args.log_cbar
 initial_thickness_file = args.initial_thickness_file
 initial_thickness_time_index = args.initial_thickness_time_index
+gl_colors_arg = args.gl_colors.split(',') if args.gl_colors else None
 
 if save_base:
     os.makedirs(save_base, exist_ok=True)
@@ -110,7 +114,18 @@ print(f"Plotting ratio for years={years} variables={variables}")
 
 def load_grounding_for_year(run_dirs, run_names, year):
     entries = []
-    colors = cm.tab10(np.linspace(0, 1, len(run_dirs)))
+    # determine colors: prefer user-provided list, else fall back to tab10
+    if gl_colors_arg:
+        # if user provided fewer colors than runs, pad with tab10
+        if len(gl_colors_arg) >= len(run_dirs):
+            colors = gl_colors_arg
+        else:
+            pad = cm.tab10(np.linspace(0, 1, max(1, len(run_dirs) - len(gl_colors_arg))))
+            # convert pad to hex color strings
+            pad_colors = [tuple(c) for c in pad]
+            colors = list(gl_colors_arg) + pad_colors[: len(run_dirs) - len(gl_colors_arg)]
+    else:
+        colors = cm.tab10(np.linspace(0, 1, len(run_dirs)))
     for i, rd in enumerate(run_dirs):
         if not rd:
             continue
