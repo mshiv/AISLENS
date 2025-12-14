@@ -115,17 +115,7 @@ print(f"Plotting ratio for years={years} variables={variables}")
 def load_grounding_for_year(run_dirs, run_names, year):
     entries = []
     # determine colors: prefer user-provided list, else fall back to tab10
-    if gl_colors_arg:
-        # if user provided fewer colors than runs, pad with tab10
-        if len(gl_colors_arg) >= len(run_dirs):
-            colors = gl_colors_arg
-        else:
-            pad = cm.tab10(np.linspace(0, 1, max(1, len(run_dirs) - len(gl_colors_arg))))
-            # convert pad to hex color strings
-            pad_colors = [tuple(c) for c in pad]
-            colors = list(gl_colors_arg) + pad_colors[: len(run_dirs) - len(gl_colors_arg)]
-    else:
-        colors = cm.tab10(np.linspace(0, 1, len(run_dirs)))
+    colors = _make_gl_colors(gl_colors_arg, len(run_dirs))
     for i, rd in enumerate(run_dirs):
         if not rd:
             continue
@@ -396,7 +386,7 @@ for variable in variables:
             else:
                 max_abs = max(abs(vmin), abs(vmax))
             norm = TwoSlopeNorm(vmin=-max_abs, vcenter=0.0, vmax=max_abs)
-            cmap = plt.get_cmap(diverging_cmap)
+            cmap = _get_colormap_by_name(diverging_cmap)
         else:
             if use_log:
                 # ensure vmin/vmax are positive for LogNorm
@@ -408,10 +398,10 @@ for variable in variables:
                 ratio = ratio.astype(float)
                 ratio[~(np.isfinite(ratio) & (ratio > 0))] = np.nan
                 norm = LogNorm(vmin=vmin, vmax=vmax)
-                cmap = plt.get_cmap(cmap_name)
+                cmap = _get_colormap_by_name(cmap_name)
             else:
                 norm = Normalize(vmin=vmin, vmax=vmax)
-                cmap = plt.get_cmap(cmap_name)
+                cmap = _get_colormap_by_name(cmap_name)
         tcol = ax.tripcolor(triang, ratio, cmap=cmap, shading='flat', norm=norm)
         ax.set_title(f"{num_name} / {den_name} — Year {year}")
         ax.set_aspect('equal')
