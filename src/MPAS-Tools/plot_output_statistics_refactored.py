@@ -10,17 +10,72 @@ Date: December 2025
 import sys
 import os
 import numpy as np
+import glob
 from netCDF4 import Dataset
 from optparse import OptionParser
 import matplotlib.pyplot as plt
 from scipy import stats
 from scipy.interpolate import interp1d
 from scipy.stats import gaussian_kde
+from matplotlib.ticker import ScalarFormatter
+from matplotlib.patches import Patch
+
+# Increase default font sizes for readability across figures
+import matplotlib as mpl
+mpl.rcParams.update({
+    'axes.titlesize': 16,
+    'axes.labelsize': 14,
+    'legend.fontsize': 12,
+    'xtick.labelsize': 12,
+    'ytick.labelsize': 12
+})
 
 # Constants
 RHOI = 910.0  # Ice density (kg/m³)
 RHOSW = 1028.0  # Seawater density (kg/m³)
 MIN_EXPERIMENTS_THRESHOLD = 3  # Minimum experiments needed for valid PDF
+
+
+def _vaf_to_sealevel_mm_factory(scale_vol):
+    """Return pair of functions (vaf->mm, mm->vaf) for secondary axis.
+
+    scale_vol: the multiplicative factor used to convert volumes from m^3
+               to the plotted unit (e.g., Gt uses scale_vol = 1e12 / rhoi).
+    """
+    def VAF2seaLevel(vol):
+        # Convert plotted VAF units back to m^3 then to sea-level mm
+        # Formula adapted from other plotting utilities in this repo.
+        # sea-level (mm) = (vol_in_m3 / ocean_area_m3_per_mm) * rhoi/rhosw * 1000
+        # where ocean_area_m3_per_mm = 3.62e14 m^3 per mm of SLE
+        try:
+            # vol is in the same units as the plotted VAF (e.g., Gt). Convert
+            # to m^3 by multiplying by scale_vol (which was used as denom earlier).
+            vol_m3 = vol * scale_vol
+            sle_mm = vol_m3 / 3.62e14 * (RHOI / RHOSW) * 1000.0
+            return sle_mm
+        except Exception:
+            return np.nan
+
+    def seaLevel2VAF(mm):
+        try:
+            vol_m3 = (mm / 1000.0) * 3.62e14 * (RHOSW / RHOI)
+            return vol_m3 / scale_vol
+        except Exception:
+            return np.nan
+
+    return VAF2seaLevel, seaLevel2VAF
+
+
+def addSeaLevAx(ax, scale_vol):
+    """Attach a secondary y-axis showing sea-level equivalent (mm).
+
+    Parameters
+    - ax: primary matplotlib Axes (plotted in VAF units)
+    - scale_vol: multiplicative factor to convert plotted VAF back to m^3
+    """
+    v2s, s2v = _vaf_to_sealevel_mm_factory(scale_vol)
+    seaLevAx = ax.secondary_yaxis('right', functions=(v2s, s2v))
+    seaLevAx.set_ylabel('Sea-level\nequivalent (mm)')
 
 # ============================================================================
 # Configuration and Argument Parsing
@@ -61,6 +116,12 @@ def parse_arguments():
     parser.add_option("--anomaly-ref", dest="anomaly_ref", help="Compute anomalies relative to a specific experiment name (must be one of the names passed to -e)", metavar="EXP_NAME", default=None)
     parser.add_option("--time-series", dest="time_series", help="Produce time-series plot using all timestamps from the original files", action='store_true', default=False)
     parser.add_option("-x", "--xlim", dest="xlimits", help="X-axis limits as comma-separated values (e.g., '0,25')", metavar="MIN,MAX")
+    parser.add_option("--std-normalize", dest="std_normalize",
+                      help="Normalize standard-deviation panel: 'absolute' (default), 'cv' (σ/|mean|), or 'percent' (σ/|mean|*100)",
+                      default='absolute', metavar="MODE")
+    parser.add_option("--ensemble-colors", dest="ensemble_colors",
+                      help="Comma-separated list of colors for ensemble bases (order matches -b)."
+                      " Example: '#2ca02c,#1f77b4,#d62728'", metavar="C1,C2,...", default=None)
     
     options, args = parser.parse_args()
     
@@ -117,6 +178,16 @@ def get_unit_string(variable, base_unit, change_mode):
         unit_base = "Gt/yr"
     else:
         unit_base = ""
+
+    # Special-case dhdt (thickness change rate): units are meters per year
+    if var_lower == 'dhdt' or 'dhdt' in var_lower:
+        # If user requested change-mode labeling, keep that behavior
+        if change_mode == 'absolute':
+            return " change (m/yr)"
+        elif change_mode == 'percent':
+            return " change (%)"
+        else:
+            return " (m/yr)"
     
     # Add change modifier
     if change_mode == 'absolute':
@@ -145,13 +216,52 @@ def extract_variable_data(fname, variable, scale_vol, change_mode=None):
         var_data: Scaled and processed variable data
     """
     with Dataset(fname, 'r') as f:
-        if variable not in f.variables:
-            raise ValueError(f"Variable '{variable}' not found in {fname}")
-        
+        # compute years from daysSinceStart (start at 0)
+        if 'daysSinceStart' not in f.variables:
+            raise ValueError(f"Missing 'daysSinceStart' in {fname}; cannot compute times")
         yr = f.variables['daysSinceStart'][:] / 365.0
         yr = yr - yr[0]  # Start from year 0
-        
-        var_data = f.variables[variable][:]
+
+        # Normal case: variable present in file
+        if variable in f.variables:
+            var_data = f.variables[variable][:]
+        else:
+            # Special-case: allow computing dhdt from iceThicknessMean when
+            # the requested 'dhdt' variable is not present in the stats file.
+            if variable == 'dhdt' and 'iceThicknessMean' in f.variables:
+                thickness = np.asarray(f.variables['iceThicknessMean'][:])
+                # attempt to reduce thickness to a 1D time series matching years
+                if thickness.ndim == 1 and thickness.shape[0] == yr.shape[0]:
+                    thickness_1d = thickness
+                else:
+                    # if time is first axis and other axes exist, collapse spatial dims
+                    if thickness.shape[0] == yr.shape[0]:
+                        # collapse remaining axes by mean
+                        thickness_1d = np.nanmean(thickness.reshape(thickness.shape[0], -1), axis=1)
+                    elif thickness.shape[-1] == yr.shape[0]:
+                        # time is last axis; collapse front axes
+                        newshape = (int(np.prod(thickness.shape[:-1])), thickness.shape[-1])
+                        thickness_1d = np.nanmean(thickness.reshape(newshape), axis=0)
+                    elif thickness.size == yr.shape[0]:
+                        thickness_1d = thickness.ravel()
+                    else:
+                        raise ValueError(f"Cannot interpret shape {thickness.shape} of 'iceThicknessMean' in {fname}")
+
+                # compute dhdt = (thickness(t) - thickness(0)) / years_since_start
+                delta = thickness_1d - thickness_1d[0]
+                years = np.asarray(yr, dtype=float)
+                # avoid divide-by-zero at time 0; set dhdt[0] = 0.0
+                years_safe = years.copy()
+                if years_safe.size > 0:
+                    years_safe[0] = np.nan
+                dhdt = delta / years_safe
+                # set time-0 to 0.0 explicitly
+                if dhdt.size > 0:
+                    dhdt = dhdt.astype(float)
+                    dhdt[0] = 0.0
+                var_data = dhdt
+            else:
+                raise ValueError(f"Variable '{variable}' not found in {fname}")
     
     # Apply scaling
     var_lower = variable.lower()
@@ -494,7 +604,7 @@ def build_time_series_matrix(experiment_files, experiment_names, variable, scale
     return time_grid, data_matrix
 
 
-def plot_time_series(time_grid, data_matrix, experiment_names, variable, unit_str, mode='raw', ref_idx=None):
+def plot_time_series(time_grid, data_matrix, experiment_names, variable, unit_str, mode='raw', ref_idx=None, scale_vol=None):
     """Plot ensemble time series.
 
     mode: 'raw' | 'anomaly' | 'ref'  (ref requires ref_idx)
@@ -502,81 +612,72 @@ def plot_time_series(time_grid, data_matrix, experiment_names, variable, unit_st
     fig, ax = plt.subplots(1, 1, figsize=(12, 6))
 
     n_exp = data_matrix.shape[0]
-    # Plot individual members (light lines). In 'ref' mode skip plotting the
-    # reference run here so it does not obscure the ensemble mean/shading.
-    for i in range(n_exp):
-        if mode == 'ref' and ref_idx is not None and i == ref_idx:
-            continue
-        ax.plot(time_grid, data_matrix[i, :], color='gray', alpha=0.4, linewidth=0.8)
+    # Compute and plot per-ensemble shaded ranges and mean lines.
+    # experiment_names are expected as 'ENSEMBLE:EXP' display strings.
+    # Build mapping ensemble -> member indices
+    ensemble_map = {}
+    for idx, dname in enumerate(experiment_names):
+        ens = dname.split(':', 1)[0]
+        ensemble_map.setdefault(ens, []).append(idx)
 
-    # Compute central tendency and spread
-    with np.errstate(invalid='ignore'):
-        median = np.nanmedian(data_matrix, axis=0)
-        mean = np.nanmean(data_matrix, axis=0)
-        p25 = np.nanpercentile(data_matrix, 25, axis=0)
-        p75 = np.nanpercentile(data_matrix, 75, axis=0)
+    # Determine colors: prefer ensemble_to_base_color if available (set by caller context),
+    # else fallback to matplotlib default
+    try:
+        palette = globals().get('ensemble_to_base_color', {})
+    except Exception:
+        palette = {}
 
-    if mode == 'raw':
-        central = mean
-        label_central = 'Ensemble mean'
-    elif mode == 'anomaly':
-        central = mean
-        # subtract ensemble mean from each member
-        data_matrix = data_matrix - central[np.newaxis, :]
-        median = np.nanmedian(data_matrix, axis=0)
-        p25 = np.nanpercentile(data_matrix, 25, axis=0)
-        p75 = np.nanpercentile(data_matrix, 75, axis=0)
-        central = np.nanmean(data_matrix, axis=0)  # should be ~0
-        label_central = 'Ensemble mean anomaly (≈0)'
-    elif mode == 'ref':
-        if ref_idx is None:
-            raise ValueError('ref_idx required for ref mode')
-        # reference series
-        ref_series = data_matrix[ref_idx, :]
-        # anomaly central: subtract reference then compute mean across other members
-        data_minus_ref = data_matrix - ref_series[np.newaxis, :]
-        data_excl_ref = np.delete(data_minus_ref, ref_idx, axis=0)
-        median = np.nanmedian(data_excl_ref, axis=0)
-        p25 = np.nanpercentile(data_excl_ref, 25, axis=0)
-        p75 = np.nanpercentile(data_excl_ref, 75, axis=0)
-        central = np.nanmean(data_excl_ref, axis=0)  # mean anomaly (excl ref)
-        label_central = f'Mean anomaly vs {experiment_names[ref_idx]}'
-        # also compute absolute ensemble mean excluding reference for bold plotting
-        mean_excl_ref_abs = np.nanmean(np.delete(data_matrix, ref_idx, axis=0), axis=0)
-    else:
-        raise ValueError(f'Unknown mode {mode}')
+    legend_handles = []
+    legend_labels = []
 
-    # Compute full range (min/max) for plotting the ensemble spread
-    if mode == 'ref' and ref_idx is not None:
-        pmin = np.nanmin(data_excl_ref, axis=0)
-        pmax = np.nanmax(data_excl_ref, axis=0)
-    else:
-        pmin = np.nanmin(data_matrix, axis=0)
-        pmax = np.nanmax(data_matrix, axis=0)
+    for ens, indices in ensemble_map.items():
+        subset = data_matrix[indices, :]
+        with np.errstate(invalid='ignore'):
+            if mode == 'anomaly':
+                mean = np.nanmean(subset, axis=0)
+                subset = subset - mean[np.newaxis, :]
+            if subset.size == 0:
+                continue
+            # compute percentiles: 5-95 for faint band, 25-75 for IQR, and mean for dashed line
+            p5 = np.nanpercentile(subset, 5, axis=0)
+            p95 = np.nanpercentile(subset, 95, axis=0)
+            p25 = np.nanpercentile(subset, 25, axis=0)
+            p75 = np.nanpercentile(subset, 75, axis=0)
+            mean_for_plot = np.nanmean(subset, axis=0)
 
-    # Plot fills (full range first - light, IQR next - slightly darker), then dashed mean,
-    # then overlay bold lines (black absolute mean / red reference) so they remain visible.
-    # Full ensemble range (light shade)
-    ax.fill_between(time_grid, pmin, pmax, color='blue', alpha=0.08, label='Ensemble range')
-    # IQR (darker shade)
-    ax.fill_between(time_grid, p25, p75, color='blue', alpha=0.2, label='IQR (25-75%)')
+        base_color = palette.get(ens, None)
+        if base_color is None:
+            # fallback
+            base_color = plt.cm.tab10(len(legend_handles) % 10)
 
-    if mode == 'ref' and ref_idx is not None:
-        # dashed anomaly central (mean anomaly excluding ref)
-        # NOTE: do not plot the reference run itself here — values are anomalies
-        # relative to that reference and would be a zero line.
-        ax.plot(time_grid, central, color='blue', linewidth=1.8, linestyle='--', label=label_central)
-    else:
-        # default plotting for other modes: dashed ensemble mean and central on top
+
+        # faint fill: full range (min-max) behind IQR, darker fill: IQR (25-75)
+        # Note: p5/p95 are kept computed above for future use but currently not plotted.
+        pmin = np.nanmin(subset, axis=0)
+        pmax = np.nanmax(subset, axis=0)
+        ax.fill_between(time_grid, pmin, pmax, color=base_color, alpha=0.08)
+        ax.fill_between(time_grid, p25, p75, color=base_color, alpha=0.2)
+
+        # dashed mean line (do not add a separate legend entry; legend shows ensemble only)
+        ax.plot(time_grid, mean_for_plot, color=base_color, linewidth=1.5, linestyle='--')
+
+        # prepare legend handle for this ensemble
+        from matplotlib.lines import Line2D
+        legend_handles.append(Line2D([0], [0], color=base_color, lw=3))
+        legend_labels.append(f"{ens} (n={len(indices)})")
+
+    # Add a compact legend showing one entry per ensemble
+    if legend_handles:
+        # Add descriptive legend entries for the shaded bands (IQR and 5%-95%)
         try:
-            mean_for_plot = np.nanmean(data_matrix, axis=0)
-            mean_label = 'Ensemble mean'
+            band_iqr = Patch(facecolor='gray', alpha=0.2, label='IQR (25%-75%)')
+            band_range = Patch(facecolor='gray', alpha=0.08, label='5%-95% range')
+            legend_handles_ext = list(legend_handles) + [band_iqr, band_range]
+            legend_labels_ext = list(legend_labels) + [band_iqr.get_label(), band_range.get_label()]
+            ax.legend(legend_handles_ext, legend_labels_ext, loc='best')
         except Exception:
-            mean_for_plot = np.nanmean(data_matrix, axis=0)
-            mean_label = 'Ensemble mean'
-        ax.plot(time_grid, mean_for_plot, color='blue', linewidth=1.5, linestyle='--', marker='o', markersize=3, markevery=max(1, len(time_grid)//50), label=mean_label)
-        # central (solid) on top
-        ax.plot(time_grid, central, color='black', linewidth=2.2, label=label_central)
+            # fallback to original legend if patch creation fails
+            ax.legend(legend_handles, legend_labels, loc='best')
 
     # If plotting anomalies (ref or ensemble), tighten y-limits to anomaly range so small values are visible
     if mode in ('anomaly', 'ref'):
@@ -600,9 +701,388 @@ def plot_time_series(time_grid, data_matrix, experiment_names, variable, unit_st
 
     ax.set_xlabel('Time (years)')
     ax.set_ylabel(f'{variable}{unit_str}')
+    # Add sea-level secondary axis when plotting volumeAboveFloatation
+    try:
+        if variable is not None and 'volumeabovefloatation' in variable.lower() and scale_vol is not None:
+            addSeaLevAx(ax, scale_vol)
+    except Exception:
+        pass
     ax.set_title(f'{variable} Time Series ({n_exp} experiments)')
-    ax.legend()
     ax.grid(True, alpha=0.3)
+    # Format y-axis to use scientific multiplier for thousands (e.g., x10^3)
+    try:
+        fmt = ScalarFormatter(useMathText=True)
+        # force scientific notation for powers >= 10^3
+        fmt.set_powerlimits((3, 3))
+        fmt.set_scientific(True)
+        ax.yaxis.set_major_formatter(fmt)
+        # request ticklabel formatting to apply the power limits
+        ax.ticklabel_format(axis='y', style='sci', scilimits=(3, 3))
+    except Exception:
+        # If formatting fails for any reason, silently continue with default
+        pass
+    plt.tight_layout()
+    return fig
+
+
+def plot_spread_ratio_time_series(time_grid, data_matrix, experiment_names, variable, unit_str):
+    """Plot time series of (ensemble range) / (ensemble mean) per ensemble.
+
+    For each ensemble provided in `experiment_names` (display names expected
+    as 'ENSEMBLE:EXP'), compute range = max - min and mean across members,
+    then ratio = range / mean. Plot one line per ensemble and include a legend.
+    """
+    fig, ax = plt.subplots(1, 1, figsize=(10, 4))
+
+    # Build ensemble -> member indices mapping from display names
+    ensemble_map = {}
+    for idx, dname in enumerate(experiment_names):
+        ens = dname.split(':', 1)[0]
+        ensemble_map.setdefault(ens, []).append(idx)
+
+    # color mapping (caller sets global `ensemble_to_base_color`)
+    palette = globals().get('ensemble_to_base_color', {})
+
+    from matplotlib.lines import Line2D
+    legend_handles = []
+    legend_labels = []
+
+    tiny = 1e-12
+    for ens, indices in ensemble_map.items():
+        subset = data_matrix[indices, :]
+        if subset.size == 0:
+            continue
+        with np.errstate(invalid='ignore', divide='ignore'):
+            mean = np.nanmean(subset, axis=0)
+            pmin = np.nanmin(subset, axis=0)
+            pmax = np.nanmax(subset, axis=0)
+            spread = pmax - pmin
+            # use absolute mean so ratio is positive and matches combined-panel behavior
+            mean_abs = np.abs(mean)
+            mean_safe = mean_abs.copy()
+            mean_safe[mean_safe < tiny] = np.nan
+            ratio = spread / mean_safe
+
+        base_color = palette.get(ens, None)
+        if base_color is None:
+            base_color = plt.cm.tab10(len(legend_handles) % 10)
+
+        # mask non-finite and non-positive values (required for log scale)
+        ratio_plot = ratio.copy()
+        ratio_plot[~np.isfinite(ratio_plot)] = np.nan
+        ratio_plot[ratio_plot <= 0.0] = np.nan
+
+        ax.plot(time_grid, ratio_plot, '-', color=base_color, linewidth=1.5, label=f"{ens} (n={len(indices)})")
+
+        legend_handles.append(Line2D([0], [0], color=base_color, lw=3))
+        legend_labels.append(f"{ens} (n={len(indices)})")
+
+    if legend_handles:
+        ax.legend(legend_handles, legend_labels, loc='best')
+
+    ax.set_xlabel('Time (years)')
+    ax.set_ylabel(f'Spread / |Mean| {unit_str} (log scale)')
+    ax.set_yscale('log')
+    ax.set_title(f'{variable} — Spread (range) / |Mean| (log y-axis)')
+    ax.grid(True, alpha=0.3)
+    plt.tight_layout()
+    return fig
+
+
+def plot_skew_kurt_time_series(time_grid, data_matrix, experiment_names, variable):
+    """Plot time series of skewness and kurtosis per ensemble.
+
+    For each ensemble present in `experiment_names` (display names
+    expected as 'ENSEMBLE:EXP'), compute skewness and kurtosis across
+    members at each time and plot them using the ensemble base color.
+    """
+    from scipy import stats as _stats
+
+    # Create two stacked subplots: top = Spread/|Mean| ratio, bottom = Kurtosis
+    fig, (ax_ratio, ax_kurt) = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
+
+    # Build ensemble -> member indices mapping from display names
+    ensemble_map = {}
+    for idx, dname in enumerate(experiment_names):
+        ens = dname.split(':', 1)[0]
+        ensemble_map.setdefault(ens, []).append(idx)
+
+    palette = globals().get('ensemble_to_base_color', {})
+
+    ratio_handles = []
+    ratio_labels = []
+    kurt_handles = []
+    kurt_labels = []
+
+    tiny = 1e-12
+    for ens, indices in ensemble_map.items():
+        subset = data_matrix[indices, :]
+        if subset.size == 0:
+            continue
+        with np.errstate(invalid='ignore', divide='ignore'):
+            mean = np.nanmean(subset, axis=0)
+            pmin = np.nanmin(subset, axis=0)
+            pmax = np.nanmax(subset, axis=0)
+            spread = pmax - pmin
+            mean_abs = np.abs(mean)
+            mean_safe = mean_abs.copy()
+            mean_safe[mean_safe < tiny] = np.nan
+            ratio = spread / mean_safe
+
+        base_color = palette.get(ens, None)
+        if base_color is None:
+            base_color = plt.cm.tab10(len(ratio_handles) % 10)
+
+        ratio_plot = ratio.copy()
+        ratio_plot[~np.isfinite(ratio_plot)] = np.nan
+        ratio_plot[ratio_plot <= 0.0] = np.nan
+
+        lratio, = ax_ratio.plot(time_grid, ratio_plot, '-', color=base_color, linewidth=1.5, label=f"{ens} (n={len(indices)})")
+        ratio_handles.append(lratio)
+        ratio_labels.append(f"{ens} (n={len(indices)})")
+
+        # compute kurtosis for bottom panel
+        with np.errstate(invalid='ignore'):
+            kurt_ts = _stats.kurtosis(subset, axis=0, nan_policy='omit')
+        lk, = ax_kurt.plot(time_grid, kurt_ts, '-', color=base_color, linewidth=1.5, label=f"{ens} kurtosis")
+        kurt_handles.append(lk)
+        kurt_labels.append(f"{ens} (n={len(indices)})")
+
+    if ratio_handles:
+        ax_ratio.legend(ratio_handles, ratio_labels, loc='best')
+    if kurt_handles:
+        ax_kurt.legend(kurt_handles, kurt_labels, loc='best')
+
+    ax_ratio.set_ylabel(f'Spread / |Mean| {unit_str} (log scale)')
+    ax_ratio.set_yscale('log')
+    ax_ratio.set_title(f'{variable} — Spread (range) / |Mean| (log y-axis)')
+    ax_ratio.grid(True, alpha=0.3)
+
+    ax_kurt.set_xlabel('Time (years)')
+    ax_kurt.set_ylabel('Kurtosis')
+    ax_kurt.set_title(f'{variable} — Kurtosis over time')
+    ax_kurt.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    return fig
+
+
+def plot_std_time_series(time_grid, data_matrix, experiment_names, variable, unit_str):
+    """Plot ensemble standard deviation (σ) over time for each ensemble.
+
+    Display one line per ensemble showing the standard deviation across
+    members at each time point.
+    """
+    fig, ax = plt.subplots(1, 1, figsize=(10, 4))
+
+    # Build ensemble -> member indices mapping from display names
+    ensemble_map = {}
+    for idx, dname in enumerate(experiment_names):
+        ens = dname.split(':', 1)[0]
+        ensemble_map.setdefault(ens, []).append(idx)
+
+    palette = globals().get('ensemble_to_base_color', {})
+    from matplotlib.lines import Line2D
+    legend_handles = []
+    legend_labels = []
+
+    for ens, indices in ensemble_map.items():
+        subset = data_matrix[indices, :]
+        if subset.size == 0:
+            continue
+        with np.errstate(invalid='ignore'):
+            std_ts = np.nanstd(subset, axis=0)
+
+        base_color = palette.get(ens, None)
+        if base_color is None:
+            base_color = plt.cm.tab10(len(legend_handles) % 10)
+
+        ax.plot(time_grid, std_ts, '-', color=base_color, linewidth=1.5)
+
+        legend_handles.append(Line2D([0], [0], color=base_color, lw=3))
+        legend_labels.append(f"{ens} (n={len(indices)})")
+
+    if legend_handles:
+        ax.legend(legend_handles, legend_labels, loc='best')
+
+    ax.set_xlabel('Time (years)')
+    ax.set_ylabel(f'Standard deviation {unit_str}')
+    ax.set_title(f'{variable} — Ensemble standard deviation over time')
+    ax.grid(True, alpha=0.3)
+    plt.tight_layout()
+    return fig
+
+
+def plot_relative_std_time_series(time_grid, data_matrix, experiment_names, variable):
+    """Plot ensemble σ relative to the absolute ensemble mean change (σ / |mean|).
+
+    The denominator is the absolute value of the ensemble mean at each time.
+    Values where the absolute mean is too small are masked to avoid
+    spurious large ratios.
+    """
+    fig, ax = plt.subplots(1, 1, figsize=(10, 4))
+
+    # Build ensemble -> member indices mapping from display names
+    ensemble_map = {}
+    for idx, dname in enumerate(experiment_names):
+        ens = dname.split(':', 1)[0]
+        ensemble_map.setdefault(ens, []).append(idx)
+
+    palette = globals().get('ensemble_to_base_color', {})
+    from matplotlib.lines import Line2D
+    legend_handles = []
+    legend_labels = []
+
+    tiny = 1e-12
+    for ens, indices in ensemble_map.items():
+        subset = data_matrix[indices, :]
+        if subset.size == 0:
+            continue
+        with np.errstate(invalid='ignore', divide='ignore'):
+            mean = np.nanmean(subset, axis=0)
+            std_ts = np.nanstd(subset, axis=0)
+            mean_abs = np.abs(mean)
+            mean_safe = mean_abs.copy()
+            mean_safe[mean_safe < tiny] = np.nan
+            rel = std_ts / mean_safe
+            # Prepare a plotting-safe version: mask non-finite and non-positive values
+            rel_plot = rel.copy()
+            rel_plot[~np.isfinite(rel_plot)] = np.nan
+            # For log-scale plotting we must remove non-positive values
+            rel_plot[rel_plot <= 0.0] = np.nan
+
+        base_color = palette.get(ens, None)
+        if base_color is None:
+            base_color = plt.cm.tab10(len(legend_handles) % 10)
+
+        ax.plot(time_grid, rel_plot, '-', color=base_color, linewidth=1.5)
+
+        legend_handles.append(Line2D([0], [0], color=base_color, lw=3))
+        legend_labels.append(f"{ens} (n={len(indices)})")
+
+    if legend_handles:
+        ax.legend(legend_handles, legend_labels, loc='best')
+
+    ax.set_xlabel('Time (years)')
+    ax.set_ylabel('Std / |Mean| (log scale)')
+    ax.set_yscale('log')
+    ax.set_title(f'{variable} — Ensemble σ relative to absolute ensemble mean (log y-axis)')
+    ax.grid(True, alpha=0.3)
+    plt.tight_layout()
+    return fig
+
+
+def plot_time_series_metrics_combined(time_grid, data_matrix, experiment_names, variable, unit_str, std_normalize='absolute'):
+    """Create a single-column multi-row figure with these panels (top->bottom):
+    - Spread / Mean ratio
+    - Standard deviation (or normalized variant depending on `std_normalize`)
+    - Relative standard deviation (σ / |mean|, log scale)
+
+    Parameters:
+        std_normalize: 'absolute' (default) | 'cv' | 'percent'
+
+    Returns a matplotlib Figure object.
+    """
+    n_rows = 3
+    fig, axes = plt.subplots(n_rows, 1, figsize=(10, 3.5*n_rows), sharex=True)
+
+    # Build ensemble -> member indices mapping from display names
+    ensemble_map = {}
+    for idx, dname in enumerate(experiment_names):
+        ens = dname.split(':', 1)[0]
+        ensemble_map.setdefault(ens, []).append(idx)
+
+    palette = globals().get('ensemble_to_base_color', {})
+    tiny = 1e-12
+
+
+    # Reordered panels per user request:
+    # Top: absolute standard deviation (previously middle)
+    ax0 = axes[0]
+    tiny = 1e-12
+    std_ylabel = None
+    std_title = None
+    for ens, indices in ensemble_map.items():
+        subset = data_matrix[indices, :]
+        if subset.size == 0:
+            continue
+        mean_ts = np.nanmean(subset, axis=0)
+        std_ts = np.nanstd(subset, axis=0)
+        mean_safe = mean_ts.copy()
+        mean_safe[np.abs(mean_safe) < tiny] = np.nan
+
+        if std_normalize == 'absolute':
+            plot_vals = std_ts
+            std_ylabel = f'Standard deviation {unit_str}'
+            std_title = f'{variable} — Ensemble standard deviation over time'
+        elif std_normalize == 'cv':
+            plot_vals = std_ts / np.abs(mean_safe)
+            std_ylabel = 'Std / |Mean|'
+            std_title = f'{variable} — Coefficient of variation (σ / |mean|)'
+        elif std_normalize == 'percent':
+            plot_vals = 100.0 * (std_ts / np.abs(mean_safe))
+            std_ylabel = 'Std / |Mean| (%)'
+            std_title = f'{variable} — Std as percent of mean (σ / |mean| * 100)'
+        else:
+            plot_vals = std_ts
+            std_ylabel = f'Standard deviation {unit_str}'
+            std_title = f'{variable} — Ensemble standard deviation over time'
+
+        base_color = palette.get(ens, None) or plt.cm.tab10(len(ax0.lines) % 10)
+        ax0.plot(time_grid, plot_vals, '-', color=base_color, linewidth=1.5, label=f"{ens} (n={len(indices)})")
+
+    # Top panel: use concise ylabel and requested title (sigma symbol)
+    ax0.set_ylabel('Standard Deviation')
+    ax0.set_title(f'Ensemble standard deviation (σ) for {variable}')
+    ax0.grid(True, alpha=0.3)
+    ax0.legend(loc='best')
+
+    # Middle: Relative standard deviation (σ / |mean|) (was bottom)
+    ax1 = axes[1]
+    for ens, indices in ensemble_map.items():
+        subset = data_matrix[indices, :]
+        if subset.size == 0:
+            continue
+        mean = np.nanmean(subset, axis=0)
+        std_ts = np.nanstd(subset, axis=0)
+        mean_abs = np.abs(mean)
+        mean_safe = mean_abs.copy()
+        mean_safe[mean_safe < tiny] = np.nan
+        rel = std_ts / mean_safe
+        rel_plot = rel.copy()
+        rel_plot[~np.isfinite(rel_plot)] = np.nan
+        rel_plot[rel_plot <= 0.0] = np.nan
+
+        base_color = palette.get(ens, None) or plt.cm.tab10(len(ax1.lines) % 10)
+        ax1.plot(time_grid, rel_plot, '-', color=base_color, linewidth=1.5, label=f"{ens} (n={len(indices)})")
+
+    ax1.set_ylabel('Std / |Mean|')
+    ax1.set_yscale('log')
+    # Middle panel title: ratio of std (σ) to mean change (Δ)
+    ax1.set_title(f'σ / Δ{variable} — Std deviation (σ) / mean change in {variable} (log y-axis)')
+    ax1.grid(True, alpha=0.3)
+    ax1.legend(loc='best')
+
+    # Bottom: Skewness (moved from separate figure)
+    ax2 = axes[2]
+    from scipy import stats as _stats
+    kurt_dummy = []
+    for ens, indices in ensemble_map.items():
+        subset = data_matrix[indices, :]
+        if subset.size == 0:
+            continue
+        with np.errstate(invalid='ignore'):
+            skew_ts = _stats.skew(subset, axis=0, nan_policy='omit')
+
+        base_color = palette.get(ens, None) or plt.cm.tab10(len(ax2.lines) % 10)
+        ax2.plot(time_grid, skew_ts, '-', color=base_color, linewidth=1.5, label=f"{ens} (n={len(indices)})")
+
+    ax2.set_ylabel('Skewness')
+    ax2.set_xlabel('Time (years)')
+    ax2.set_title('Skewness over time')
+    ax2.grid(True, alpha=0.3)
+    ax2.legend(loc='best')
+
     plt.tight_layout()
     return fig
 
@@ -703,10 +1183,23 @@ def plot_probability_evolution(all_var_data, valid_time_steps, variable, unit_st
         x_range = np.linspace(data_min - 0.1*data_range, data_max + 0.1*data_range, 300)
         for i, ts in enumerate(time_steps):
             vals = np.array(all_var_data[ts])
-            if len(vals) >= 3 and np.std(vals) > 1e-10:
-                kde = gaussian_kde(vals)
-                pdf = kde(x_range)
-                ax.plot(x_range, pdf, color=colors[i], linewidth=2.0, label=f'Year {ts:.0f}')
+            if len(vals) >= 3 and np.std(vals) > 1e-10 and np.unique(vals).size > 1:
+                try:
+                    kde = gaussian_kde(vals)
+                    pdf = kde(x_range)
+                    ax.plot(x_range, pdf, color=colors[i], linewidth=2.0, label=f'Year {ts:.0f}')
+                except Exception as e:
+                    print(f"Warning: gaussian_kde failed for year {ts} (density plot fallback): {e}", file=sys.stderr)
+                    # Fallback: empirical histogram density plotted as a step
+                    h_bins = 50
+                    h, bin_edges = np.histogram(vals, bins=h_bins, density=True)
+                    centers = 0.5 * (bin_edges[:-1] + bin_edges[1:])
+                    ax.step(centers, h, where='mid', color=colors[i], linewidth=1.5, label=f'Year {ts:.0f} (hist)')
+            else:
+                # fallback for tiny/degenerate samples: plot a marker at the value(s)
+                if vals.size > 0:
+                    y_vals = np.zeros_like(vals) + 0.0
+                    ax.plot(vals, y_vals, '|', color=colors[i], markersize=10, label=f'Year {ts:.0f} (points)')
         ax.set_xlabel(f'{variable}{unit_str}')
         ax.set_ylabel('Probability Density')
         ax.set_title(f'{variable} PDF Evolution (KDE)')
@@ -736,24 +1229,21 @@ def print_statistics_summary(all_var_data, valid_time_steps):
     print(f"{'Year':<8} {'N':<5} {'Mean':<10} {'Std':<10} {'Median':<10} "
           f"{'Q25':<10} {'Q75':<10} {'Skew':<8} {'Kurt':<8}")
     print("-"*80)
-    
+
     for time_step in valid_time_steps:
-        var_values = np.array(all_var_data[time_step])
+        var_values = np.array(all_var_data.get(time_step, []))
+        if var_values.size == 0:
+            print(f"{time_step:<8.0f} {'0':<5} {'nan':<10} {'nan':<10} {'nan':<10} {'nan':<10} {'nan':<10} {'nan':<8} {'nan':<8}")
+            continue
         s = calculate_distribution_stats(var_values)
         print(f"{time_step:<8.0f} {s['n']:<5} {s['mean']:<10.2f} {s['std']:<10.2f} "
               f"{s['median']:<10.2f} {s['q25']:<10.2f} {s['q75']:<10.2f} "
               f"{s['skewness']:<8.2f} {s['kurtosis']:<8.2f}")
-
-# ============================================================================
-# Main Execution
-# ============================================================================
-
+    
 def main():
-    """Main execution function."""
-    
-    # Parse arguments
+    # Parse command-line arguments
     options = parse_arguments()
-    
+
     # Parse x-axis limits if provided
     xlim_range = None
     if getattr(options, 'xlimits', None):
@@ -769,8 +1259,155 @@ def main():
             sys.exit("ERROR: X-axis limits must be numeric values separated by comma (e.g., '0,25')")
     
     # Parse experiment list and time steps
-    experiment_names = [exp.strip() for exp in options.experimentList.split(',')]
     time_steps = [float(t.strip()) for t in options.timeSteps.split(',')]
+
+    # Support multiple ensemble bases (comma-separated) and several experiment specification formats:
+    #  - 'ENSEMBLE:EXP' -> explicit mapping
+    #  - 'EXP' -> search EXP under all provided ensembles
+    #  - wildcards supported in EXP (e.g. 'CTRL:EXP*' or 'EXP*')
+    if not options.ensembleBaseDir:
+        sys.exit("ERROR: Must specify ensemble base directory(s) with -b/--base")
+
+    ensemble_dirs = [ens.strip() for ens in options.ensembleBaseDir.split(',')]
+
+    # Build list of experiment specs: tuples (ensemble, exp, file_path, display_name)
+    experiment_specs = []
+
+    if not options.experimentList:
+        # Auto-discover experiments under each ensemble base (requires root)
+        if not options.rootDataDir:
+            sys.exit("ERROR: --root must be provided when auto-discovering experiments")
+        for ens in ensemble_dirs:
+            ensemble_path = os.path.join(options.rootDataDir, ens) if options.rootDataDir else ens
+            if not os.path.exists(ensemble_path):
+                print(f"Warning: ensemble directory not found: {ensemble_path}", file=sys.stderr)
+                continue
+            for item in os.listdir(ensemble_path):
+                exp_path = os.path.join(ensemble_path, item)
+                if os.path.isdir(exp_path):
+                    stats_file = os.path.join(exp_path, options.statsFilename)
+                    if os.path.exists(stats_file):
+                        display_name = f"{ens}:{item}"
+                        experiment_specs.append((ens, item, stats_file, display_name))
+    else:
+        exp_parts = [exp.strip() for exp in options.experimentList.split(',')]
+        for exp_spec in exp_parts:
+            if ':' in exp_spec:
+                ens_name, exp_name = [p.strip() for p in exp_spec.split(':', 1)]
+                if ens_name not in ensemble_dirs:
+                    print(f"Warning: specified ensemble '{ens_name}' not in provided bases", file=sys.stderr)
+                    continue
+                # wildcard in exp_name?
+                if '*' in exp_name or '?' in exp_name:
+                    search_path = os.path.join(options.rootDataDir, ens_name) if options.rootDataDir else ens_name
+                    matches = glob.glob(os.path.join(search_path, exp_name))
+                    for match in matches:
+                        if os.path.isdir(match):
+                            match_exp = os.path.basename(match)
+                            stats_file = os.path.join(match, options.statsFilename)
+                            if os.path.exists(stats_file):
+                                display_name = f"{ens_name}:{match_exp}"
+                                experiment_specs.append((ens_name, match_exp, stats_file, display_name))
+                else:
+                    exp_path = os.path.join(options.rootDataDir, ens_name, exp_name) if options.rootDataDir else os.path.join(ens_name, exp_name)
+                    stats_file = os.path.join(exp_path, options.statsFilename)
+                    if os.path.exists(stats_file):
+                        display_name = f"{ens_name}:{exp_name}"
+                        experiment_specs.append((ens_name, exp_name, stats_file, display_name))
+                    else:
+                        print(f"Warning: stats file not found for {ens_name}:{exp_name} -> {stats_file}", file=sys.stderr)
+            else:
+                # no ensemble specified: search this experiment name under all ensemble_dirs
+                exp_name = exp_spec
+                if '*' in exp_name or '?' in exp_name:
+                    for ens in ensemble_dirs:
+                        search_path = os.path.join(options.rootDataDir, ens) if options.rootDataDir else ens
+                        matches = glob.glob(os.path.join(search_path, exp_name))
+                        for match in matches:
+                            if os.path.isdir(match):
+                                match_exp = os.path.basename(match)
+                                stats_file = os.path.join(match, options.statsFilename)
+                                if os.path.exists(stats_file):
+                                    display_name = f"{ens}:{match_exp}"
+                                    experiment_specs.append((ens, match_exp, stats_file, display_name))
+                else:
+                    found = False
+                    for ens in ensemble_dirs:
+                        exp_path = os.path.join(options.rootDataDir, ens, exp_name) if options.rootDataDir else os.path.join(ens, exp_name)
+                        stats_file = os.path.join(exp_path, options.statsFilename)
+                        if os.path.exists(stats_file):
+                            display_name = f"{ens}:{exp_name}"
+                            experiment_specs.append((ens, exp_name, stats_file, display_name))
+                            found = True
+                    if not found:
+                        print(f"Warning: experiment '{exp_name}' not found under any provided ensemble base", file=sys.stderr)
+
+    if not experiment_specs:
+        sys.exit("ERROR: No valid experiments found with the provided -b/-e arguments")
+
+    # Build parallel lists expected by downstream functions
+    experiment_files = [spec[2] for spec in experiment_specs]
+    experiment_names = [spec[3] for spec in experiment_specs]
+
+    # Build ensemble -> base color mapping (default scheme):
+    # CTRL* -> blue, SSP126* -> orange, SSP585* -> red; fallback to tab20 palette
+    ensemble_names_unique = []
+    for ens, _, _, _ in experiment_specs:
+        if ens not in ensemble_names_unique:
+            ensemble_names_unique.append(ens)
+    base_cmap = plt.cm.get_cmap('tab20')
+    ensemble_to_base_color = {}
+    for i, ens in enumerate(ensemble_names_unique):
+        if ens.upper().startswith('CTRL'):
+            ensemble_to_base_color[ens] = "#383E39"  # blue
+        elif 'SSP126' in ens.upper():
+            ensemble_to_base_color[ens] = "#236ddb"  # orange
+        elif 'SSP585' in ens.upper():
+            ensemble_to_base_color[ens] = "#dc2f2f"  # red
+        else:
+            ensemble_to_base_color[ens] = base_cmap(i % base_cmap.N)
+
+    # If user provided explicit ensemble colors on the CLI, use them (order matches the supplied -b bases)
+    if getattr(options, 'ensemble_colors', None):
+        try:
+            provided = [c.strip() for c in options.ensemble_colors.split(',') if c.strip()]
+            if len(provided) != len(ensemble_names_unique):
+                print(f"Warning: --ensemble-colors provided {len(provided)} colors but found {len(ensemble_names_unique)} ensemble bases; ignoring override", file=sys.stderr)
+            else:
+                for ens_name, col in zip(ensemble_names_unique, provided):
+                    ensemble_to_base_color[ens_name] = col
+        except Exception as e:
+            print(f"Warning: failed to parse --ensemble-colors: {e}; using default colors", file=sys.stderr)
+
+    # Export the mapping to module globals so plotting helper functions (which lookup globals())
+    # can access the ensemble base colors when they run.
+    globals()['ensemble_to_base_color'] = ensemble_to_base_color
+
+    # Diagnostic: print the resolved ensemble -> base color mapping
+    print('Ensemble -> base color mapping:')
+    for ens in ensemble_names_unique:
+        print(f"  {ens} -> {ensemble_to_base_color.get(ens)}")
+
+    # Map each display_name (ENSEMBLE:EXP) to a per-experiment color variation
+    # Create small brightness variations so experiments within the same ensemble are distinct
+    import matplotlib.colors as mcolors
+    experiment_to_color = {}
+    for ens in ensemble_names_unique:
+        members = [d for e, _, _, d in experiment_specs if e == ens]
+        n = len(members)
+        base_color = ensemble_to_base_color[ens]
+        hsv = mcolors.rgb_to_hsv(mcolors.to_rgb(base_color))
+        variations = []
+        if n == 1:
+            variations = [base_color]
+        else:
+            for j in range(n):
+                brightness = 0.5 + 0.5 * (j / max(1, n-1))
+                new_hsv = hsv.copy()
+                new_hsv[2] = min(1.0, hsv[2] * brightness)
+                variations.append(mcolors.hsv_to_rgb(new_hsv))
+        for member, col in zip(members, variations):
+            experiment_to_color[member] = col
     
     # Get scaling
     scale_vol, mass_unit = get_scale_factor(options.units)
@@ -787,19 +1424,10 @@ def main():
     
     
     
-    # Build and validate file paths
-    experiment_files = []
-    for exp_name in experiment_names:
-        if options.rootDataDir:
-            file_path = os.path.join(options.rootDataDir, options.ensembleBaseDir, 
-                                     exp_name, options.statsFilename)
-        else:
-            file_path = os.path.join(options.ensembleBaseDir, exp_name, options.statsFilename)
-        
+    # Validate that all resolved files exist (experiment_files was built from experiment_specs)
+    for file_path, display_name in zip(experiment_files, experiment_names):
         if not os.path.exists(file_path):
             sys.exit(f"ERROR: File not found: {file_path}")
-        
-        experiment_files.append(file_path)
     
     # Extract and interpolate data
     all_var_data, valid_time_steps = interpolate_ensemble_data(
@@ -815,14 +1443,47 @@ def main():
     # Optionally convert to anomalies.
     data_for_plots = all_var_data
     display_variable = options.variable
+    # resolved display-name for anomaly-ref (if provided and matched)
+    resolved_ref_display_name = None
 
     # If a reference experiment is provided, compute anomalies relative to that run
     if options.anomaly_ref:
-        ref_name = options.anomaly_ref
-        if ref_name not in experiment_names:
-            sys.exit(f"ERROR: reference experiment '{ref_name}' not in supplied experiment list")
+        user_ref = options.anomaly_ref
 
-        # Find the corresponding file for the reference and interpolate to target times
+        # Try to resolve the user-provided reference name against the discovered
+        # display names in `experiment_names`. Support several convenient forms:
+        #  - exact display name: 'ENSEMBLE:EXP'
+        #  - experiment suffix: 'EXP' (matches the part after the colon)
+        #  - file basename prefix: matches start of the netCDF filename
+        ref_name = None
+
+        # 1) exact match
+        if user_ref in experiment_names:
+            ref_name = user_ref
+        else:
+            # 2) match by EXP part after colon
+            matches = [nm for nm in experiment_names if nm.split(':', 1)[-1] == user_ref]
+            if len(matches) == 1:
+                ref_name = matches[0]
+            elif len(matches) > 1:
+                sys.exit(f"ERROR: ambiguous anomaly-ref '{user_ref}'; matches: {matches}")
+            else:
+                # 3) try matching by file basename (starts with provided string)
+                matches = [nm for nm, fp in zip(experiment_names, experiment_files)
+                           if os.path.basename(fp).startswith(user_ref)]
+                if len(matches) == 1:
+                    ref_name = matches[0]
+                elif len(matches) > 1:
+                    sys.exit(f"ERROR: ambiguous anomaly-ref '{user_ref}'; file matches: {matches}")
+
+        if ref_name is None:
+            # Provide helpful message listing available names for the user
+            sample_names = ', '.join(experiment_names[:10]) + (', ...' if len(experiment_names) > 10 else '')
+            sys.exit(f"ERROR: reference experiment '{user_ref}' not found among resolved experiments. "
+                     f"Provide one of the display names (ENSEMBLE:EXP) or the EXP suffix. "
+                     f"Examples: {sample_names}")
+
+        # Find the corresponding file for the resolved reference and interpolate to target times
         ref_idx = experiment_names.index(ref_name)
         ref_file = experiment_files[ref_idx]
         try:
@@ -851,6 +1512,7 @@ def main():
         data_for_plots = anom_data
         valid_time_steps = valid_time_steps_ref
         display_variable = f"{options.variable} (anomaly vs {ref_name})"
+        resolved_ref_display_name = ref_name
 
     elif options.anomaly:
         anom_data = {}
@@ -890,15 +1552,23 @@ def main():
         else:
             mode = 'density'
 
-        fig_evolution = plot_probability_evolution(data_for_plots, valid_time_steps, display_variable,
-                                                   unit_str, len(experiment_names), mode=mode,
-                                                   show_bars=(not options.no_bars))
-        if mode == 'mass':
-            evo_suffix = '_prob_evolution'
-        elif mode == 'cdf':
-            evo_suffix = '_cdf_evolution'
-        else:
-            evo_suffix = '_pdf_evolution'
+        # Generate the unified probability evolution plot; tolerate failures so
+        # other figures still produce when KDE/data issues occur.
+        try:
+            fig_evolution = plot_probability_evolution(data_for_plots, valid_time_steps, display_variable,
+                                                       unit_str, len(experiment_names), mode=mode,
+                                                       show_bars=(not options.no_bars))
+            if mode == 'mass':
+                evo_suffix = '_prob_evolution'
+            elif mode == 'cdf':
+                evo_suffix = '_cdf_evolution'
+            else:
+                evo_suffix = '_pdf_evolution'
+        except Exception as e:
+            # Fail silently for the evolution plot per user request; print a short warning.
+            print(f"Warning: failed to produce probability-evolution figure: {e}", file=sys.stderr)
+            fig_evolution = None
+            evo_suffix = '_prob_evolution_failed'
     
     # Save figures if requested
     if options.plotSave:
@@ -911,9 +1581,15 @@ def main():
         print(f"Saved: {skew_name}")
 
         # Save the evolution figure with a name depending on the selected mode
-        evo_name = options.plotSave.replace('.png', f"{evo_suffix}.png")
-        fig_evolution.savefig(evo_name, dpi=300, bbox_inches='tight')
-        print(f"Saved: {evo_name}")
+        if fig_evolution is not None:
+            evo_name = options.plotSave.replace('.png', f"{evo_suffix}.png")
+            try:
+                fig_evolution.savefig(evo_name, dpi=300, bbox_inches='tight')
+                print(f"Saved: {evo_name}")
+            except Exception as e:
+                print(f"Warning: failed to save evolution figure: {e}", file=sys.stderr)
+        else:
+            print("Skipping saving probability-evolution figure (generation failed).")
 
     # Optional time series plot using all timestamps from original files
     if options.time_series:
@@ -923,9 +1599,18 @@ def main():
             print('Warning: no time-series data available; skipping time-series plot')
         else:
             # Determine mode for time series
-            if options.anomaly_ref:
+            if resolved_ref_display_name is not None:
                 ts_mode = 'ref'
-                ref_idx = experiment_names.index(options.anomaly_ref)
+                ref_idx = experiment_names.index(resolved_ref_display_name)
+            elif options.anomaly_ref:
+                # fallback: user passed a ref but resolution failed earlier (shouldn't happen)
+                try:
+                    ref_idx = experiment_names.index(options.anomaly_ref)
+                    ts_mode = 'ref'
+                except ValueError:
+                    print(f"Warning: anomaly-ref '{options.anomaly_ref}' was not resolved; falling back to anomaly mode", file=sys.stderr)
+                    ts_mode = 'anomaly'
+                    ref_idx = None
             elif options.anomaly:
                 ts_mode = 'anomaly'
                 ref_idx = None
@@ -935,7 +1620,7 @@ def main():
 
             fig_ts = plot_time_series(time_grid, data_matrix, experiment_names,
                                       display_variable, unit_str,
-                                      mode=ts_mode, ref_idx=ref_idx)
+                                      mode=ts_mode, ref_idx=ref_idx, scale_vol=scale_vol)
             # Apply x-axis limits to time-series figure if requested
             if xlim_range is not None:
                 try:
@@ -948,7 +1633,9 @@ def main():
             # Save timeseries figure only if requested
             if options.plotSave:
                 ts_name = options.plotSave.replace('.png', f"_timeseries")
-                if options.anomaly_ref:
+                if resolved_ref_display_name:
+                    ts_name = ts_name + f"_vs_{resolved_ref_display_name}.png"
+                elif options.anomaly_ref:
                     ts_name = ts_name + f"_vs_{options.anomaly_ref}.png"
                 elif options.anomaly:
                     ts_name = ts_name + '_anom.png'
@@ -957,6 +1644,38 @@ def main():
 
                 fig_ts.savefig(ts_name, dpi=300, bbox_inches='tight')
                 print(f"Saved: {ts_name}")
+            # Create and optionally save the spread/mean ratio time series
+            try:
+                fig_metrics = plot_time_series_metrics_combined(time_grid, data_matrix, experiment_names, display_variable, unit_str, std_normalize=options.std_normalize)
+                if xlim_range is not None:
+                    try:
+                        for ax in fig_metrics.axes:
+                            ax.set_xlim(xlim_range)
+                    except Exception:
+                        pass
+                if options.plotSave:
+                    metrics_name = options.plotSave.replace('.png', f"_timeseries_metrics.png")
+                    metrics_name = metrics_name + '.png' if not metrics_name.endswith('.png') else metrics_name
+                    fig_metrics.savefig(metrics_name, dpi=300, bbox_inches='tight')
+                    print(f"Saved: {metrics_name}")
+            except Exception as e:
+                print('Failed to produce combined metrics figure:', e)
+            # Produce skewness/kurtosis as a separate figure
+            try:
+                fig_sk_kurt_ts = plot_skew_kurt_time_series(time_grid, data_matrix, experiment_names, display_variable)
+                if xlim_range is not None:
+                    try:
+                        ax_sk = fig_sk_kurt_ts.axes[0] if len(fig_sk_kurt_ts.axes) > 0 else fig_sk_kurt_ts.gca()
+                        ax_sk.set_xlim(xlim_range)
+                    except Exception:
+                        pass
+                if options.plotSave:
+                    sk_name_ts = options.plotSave.replace('.png', f"_skew_kurt_timeseries.png")
+                    sk_name_ts = sk_name_ts + '.png' if not sk_name_ts.endswith('.png') else sk_name_ts
+                    fig_sk_kurt_ts.savefig(sk_name_ts, dpi=300, bbox_inches='tight')
+                    print(f"Saved: {sk_name_ts}")
+            except Exception as e:
+                print('Failed to produce skew/kurtosis timeseries figure:', e)
     
     # Print statistics
     print_statistics_summary(all_var_data, valid_time_steps)

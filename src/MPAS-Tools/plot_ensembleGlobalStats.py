@@ -18,6 +18,7 @@ import numpy as np
 import numpy.ma as ma
 from netCDF4 import Dataset
 from optparse import OptionParser
+from matplotlib.lines import Line2D
 import matplotlib.pyplot as plt
 import glob
 
@@ -37,6 +38,9 @@ parser.add_option("-s", dest="plotSave", help="save figure")
 parser.add_option("-x", "--xlim", dest="xlimits", help="X-axis limits as comma-separated values (e.g., '0,25' for years 0 to 25)", metavar="MIN,MAX")
 parser.add_option("--search-all", dest="searchAll", help="Search all ensemble directories for experiments (ignores -b)", action='store_true', default=False)
 parser.add_option("--list-available", dest="listAvailable", help="List all available experiments and exit", action='store_true', default=False)
+parser.add_option("--ensemble-colors", dest="ensemble_colors",
+                  help="Comma-separated list of colors for ensemble bases (order matches -b). Example: '#1f77b4,#ff7f0e,#d62728'",
+                  metavar="C1,C2,...", default=None)
 options, args = parser.parse_args()
 
 
@@ -332,8 +336,16 @@ ensemble_base_colors = plt.cm.Set1(np.linspace(0, 1, 9))  # Use Set1 colormap fo
 # Create mapping of ensembles to colors and experiments to color variations
 ensemble_names_unique = list(set([ensemble for ensemble, _, _, _ in experiment_specs]))
 ensemble_to_base_color = {}
-for i, ensemble in enumerate(sorted(ensemble_names_unique)):
-    ensemble_to_base_color[ensemble] = ensemble_base_colors[i % len(ensemble_base_colors)]
+    for i, ensemble in enumerate(sorted(ensemble_names_unique)):
+        ens_up = ensemble.upper()
+        if ens_up.startswith('CTRL'):
+            ensemble_to_base_color[ensemble] = '#1f77b4'
+        elif 'SSP126' in ens_up:
+            ensemble_to_base_color[ensemble] = '#ff7f0e'
+        elif 'SSP585' in ens_up:
+            ensemble_to_base_color[ensemble] = '#d62728'
+        else:
+            ensemble_to_base_color[ensemble] = ensemble_base_colors[i % len(ensemble_base_colors)]
 
 # Group experiments by ensemble to assign color variations within each ensemble
 experiments_by_ensemble = {}
@@ -523,8 +535,21 @@ if xlim_range:
                 pad = 0.05 * (ymax - ymin)
             ax.set_ylim(ymin - pad, ymax + pad)
 
-# Add legend to the last subplot
-axTotalBMB.legend(loc='best', prop={'size': 6})
+# Replace per-experiment legend with one ensemble-level legend
+ensemble_labels = []
+ensemble_handles = []
+for ens in sorted(ensemble_names_unique):
+    base_color = ensemble_to_base_color.get(ens, None)
+    if base_color is None:
+        continue
+    n = len(experiments_by_ensemble.get(ens, []))
+    label = f"{ens} (n={n})" if n > 0 else ens
+    handle = Line2D([0], [0], color=base_color, lw=3)
+    ensemble_handles.append(handle)
+    ensemble_labels.append(label)
+
+if ensemble_handles:
+    axTotalBMB.legend(ensemble_handles, ensemble_labels, loc='best', prop={'size': 8})
 
 # Add title with experiment information
 ensemble_names = list(set([ensemble for ensemble, _, _, _ in experiment_specs]))

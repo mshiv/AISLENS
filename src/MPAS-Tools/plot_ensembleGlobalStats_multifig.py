@@ -12,7 +12,9 @@ import glob
 import numpy as np
 from netCDF4 import Dataset
 from optparse import OptionParser
+import fnmatch
 import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
 
 rhoi = 910.0
 rhosw = 1028.0
@@ -27,9 +29,18 @@ parser.add_option("-c", dest="plotChange", help="plot time series as absolute ch
 parser.add_option("-p", dest="plotPercentChange", help="plot time series as percentage change from initial", action='store_true', default=False)
 parser.add_option("-s", dest="plotSave", help="save figure (any value makes saving enabled)")
 parser.add_option("-x", "--xlim", dest="xlimits", help="X-axis limits as comma-separated values (e.g., '0,25')", metavar="MIN,MAX")
+parser.add_option("-k", "--drop-restarts", dest="dropRestarts", help="Comma-separated experiment name patterns to drop earlier segments before the last restart (keep final monotonic tail aligned to restart time). Use '*' as wildcard. Example: -k SSP126-TRN:SSP12601,SSP585-*", metavar="LIST", default=None)
 parser.add_option("--search-all", dest="searchAll", help="Search all ensemble directories for experiments (ignores -b)", action='store_true', default=False)
 parser.add_option("--list-available", dest="listAvailable", help="List all available experiments and exit", action='store_true', default=False)
 parser.add_option("-v", "--variables", dest="varList", help="Comma-separated list of variables to plot (defaults to a common set)")
+parser.add_option("--dry-run", dest="dryRun", help="Print detected restart adjustments instead of plotting", action='store_true', default=False)
+parser.add_option("--ensemble-colors", dest="ensemble_colors",
+            help=("Comma-separated list of colors for ensemble bases. Two formats are supported: "
+                "1) Positional colors: 'C1,C2,...' (order matches -b). "
+                "2) Mapping entries: 'ENS1=#hex,ENS2=#hex' to set colors by ensemble name. "
+                "You can mix mappings and positional entries; mappings are applied first. "
+                "This option may be repeated: e.g. --ensemble-colors grey --ensemble-colors black"),
+            metavar="C1,C2,...|ENS=COLOR,...", action='append', default=None)
 
 options, args = parser.parse_args()
 
@@ -189,11 +200,58 @@ if not ensemble_names_unique:
     ensemble_names_unique = list(ensemble_dirs)
 
 # Use a larger categorical colormap for distinct base colors
-base_cmap = plt.cm.get_cmap('tab20')
+base_cmap = plt.get_cmap('tab20')
 ensemble_base_colors = base_cmap(np.linspace(0, 1, 20))
 ensemble_to_base_color = {}
 for i, ensemble in enumerate(ensemble_names_unique):
-    ensemble_to_base_color[ensemble] = ensemble_base_colors[i % len(ensemble_base_colors)]
+    ens_up = ensemble.upper()
+    if ens_up.startswith('CTRL'):
+        ensemble_to_base_color[ensemble] = '#1f77b4'
+    elif 'SSP126' in ens_up:
+        ensemble_to_base_color[ensemble] = '#ff7f0e'
+    elif 'SSP585' in ens_up:
+        ensemble_to_base_color[ensemble] = '#d62728'
+    else:
+        ensemble_to_base_color[ensemble] = ensemble_base_colors[i % len(ensemble_base_colors)]
+
+# If user provided explicit ensemble colors on the CLI, use them.
+# Supported formats:
+#  - Positional colors: "#1f77b4,#ff7f0e,..." (order matches ensemble_names_unique)
+#  - Mappings: "ENSEMBLE_NAME=#hex" (can be repeated and mixed with positional entries)
+if getattr(options, 'ensemble_colors', None):
+    try:
+        raw = options.ensemble_colors
+        entries = []
+        # options.ensemble_colors may be a list (if flag repeated) or a single string
+        if isinstance(raw, list):
+            for item in raw:
+                entries.extend([e.strip() for e in item.split(',') if e.strip()])
+        else:
+            entries = [e.strip() for e in raw.split(',') if e.strip()]
+
+        # First apply any mapping entries of the form NAME=COLOR
+        positional = []
+        mapped = set()
+        for ent in entries:
+            if '=' in ent:
+                name, col = [p.strip() for p in ent.split('=', 1)]
+                if name in ensemble_names_unique:
+                    ensemble_to_base_color[name] = col
+                    mapped.add(name)
+                else:
+                    print(f"Warning: --ensemble-colors mapping refers to unknown ensemble '{name}'", file=sys.stderr)
+            else:
+                positional.append(ent)
+
+        # Assign positional entries to ensembles not set via mappings, in order
+        if positional:
+            unset_ensembles = [ens for ens in ensemble_names_unique if ens not in mapped]
+            if len(positional) > len(unset_ensembles):
+                print(f"Warning: more positional colors ({len(positional)}) provided than available ensembles ({len(unset_ensembles)}); extra colors will be ignored", file=sys.stderr)
+            for ens, col in zip(unset_ensembles, positional):
+                ensemble_to_base_color[ens] = col
+    except Exception as e:
+        print(f"Warning: failed to parse --ensemble-colors: {e}; using default colors", file=sys.stderr)
 
 experiments_by_ensemble = {}
 for ensemble, exp, file_path, display_name in experiment_specs:
@@ -201,7 +259,16 @@ for ensemble, exp, file_path, display_name in experiment_specs:
 
 def create_color_variations(base_color, n_variations):
     import matplotlib.colors as mcolors
-    hsv = mcolors.rgb_to_hsv(base_color[:3])
+    # Ensure we have an RGB triple regardless of input type (hex string, RGB(A) tuple/array)
+    try:
+        base_rgb = mcolors.to_rgb(base_color)
+    except Exception:
+        # Fallback: if base_color is an array-like, try to slice first 3 components
+        try:
+            base_rgb = tuple(float(x) for x in base_color[:3])
+        except Exception:
+            raise ValueError(f"Unsupported base_color format: {base_color}")
+    hsv = mcolors.rgb_to_hsv(base_rgb)
     variations = []
     if n_variations == 1:
         variations.append(base_color)
@@ -216,15 +283,19 @@ def create_color_variations(base_color, n_variations):
             variations.append(new_rgb)
     return variations
 
+# Use the same base color for all experiments within an ensemble (no per-member shading)
 experiment_to_color = {}
 for ensemble, experiments in experiments_by_ensemble.items():
     base_color = ensemble_to_base_color[ensemble]
-    n_experiments = len(experiments)
-    color_variations = create_color_variations(base_color, n_experiments)
-    for i, (exp, file_path, display_name) in enumerate(experiments):
-        experiment_to_color[display_name] = color_variations[i]
+    for (exp, file_path, display_name) in experiments:
+        experiment_to_color[display_name] = base_color
 
-def read_time_and_var(fname, varname):
+# Parse drop-restart patterns into a list for matching
+drop_patterns = None
+if options.dropRestarts:
+    drop_patterns = [p.strip() for p in options.dropRestarts.split(',') if p.strip()]
+
+def read_time_and_var(fname, varname, display_name=None, drop_patterns=None):
     with Dataset(fname, 'r') as f:
         yr = f.variables['daysSinceStart'][:] / 365.0
         yr = yr - yr[0]
@@ -232,10 +303,74 @@ def read_time_and_var(fname, varname):
         dt = f.variables.get('deltat')
         if dt is not None:
             _ = dt[:] / 3.15e7
-    return yr, data
+
+    # If drop_patterns is provided, check whether this display_name matches any pattern
+    apply_drop = False
+    if drop_patterns and display_name:
+        for pat in drop_patterns:
+            pat = pat.strip()
+            if not pat:
+                continue
+            # allow either exact match or fnmatch-style wildcard
+            if fnmatch.fnmatchcase(display_name, pat) or display_name == pat:
+                apply_drop = True
+                break
+
+            # Also allow matching ensemble or experiment components separately.
+            # display_name is in the form 'ensemble:exp' — match either side.
+            if ':' in display_name:
+                ens_part, exp_part = display_name.split(':', 1)
+                if fnmatch.fnmatchcase(ens_part, pat) or ens_part == pat or fnmatch.fnmatchcase(exp_part, pat) or exp_part == pat:
+                    apply_drop = True
+                    break
+
+    if not apply_drop:
+        return yr, data
+
+    # Smart handling: find the last non-monotonic (non-increasing) jump and replace
+    # the earlier segment between the matching timestamp and the restart with the final tail,
+    # aligning the first tail timestamp to the restart timestamp (no rezeroing globally).
+    try:
+        diffs = np.diff(yr)
+        non_increasing = np.where(diffs <= 0)[0]
+        if non_increasing.size == 0:
+            return yr, data
+
+        tail_start = int(non_increasing[-1]) + 1
+        # restart_time is the time at which the restarted tail begins
+        restart_time = float(yr[tail_start])
+
+        # earlier part before the tail
+        earlier_yr = yr[:tail_start]
+        earlier_data = data[:tail_start]
+
+        # Remove any earlier timestamps that are >= restart_time (these belong to the
+        # earlier, invalid forward run). Keep only earlier times strictly before restart_time.
+        mask = earlier_yr < restart_time
+        prefix_yr = earlier_yr[mask]
+        prefix_data = earlier_data[mask]
+
+        tail_yr = yr[tail_start:]
+        tail_data = data[tail_start:]
+
+        # shift tail so its first time equals the last value in prefix if prefix non-empty,
+        # otherwise align to restart_time (no global rezeroing)
+        if prefix_yr.size > 0:
+            align_time = float(prefix_yr[-1])
+        else:
+            align_time = restart_time
+        shift = align_time - float(tail_yr[0])
+        tail_yr_shifted = tail_yr + shift
+
+        new_yr = np.concatenate([prefix_yr, tail_yr_shifted]) if prefix_yr.size > 0 else tail_yr_shifted
+        new_data = np.concatenate([prefix_data, tail_data]) if prefix_data.size > 0 else tail_data
+
+        return new_yr, new_data
+    except Exception:
+        return yr, data
 
 def plot_variable(varname, ax, display_name, fname, color):
-    yr, data = read_time_and_var(fname, varname)
+    yr, data = read_time_and_var(fname, varname, display_name=display_name, drop_patterns=drop_patterns)
 
     plot_data = data
     # Apply unit conversions for specific variables
@@ -334,7 +469,19 @@ for varname in vars_to_plot:
             # fallback: let matplotlib autoscale if anything goes wrong
             pass
 
-    ax.legend(loc='best', prop={'size': 6})
+    # Replace per-experiment legend with ensemble-level legend (one entry per ensemble)
+    ensemble_handles = []
+    ensemble_labels = []
+    for ens in ensemble_names_unique:
+        base_color = ensemble_to_base_color.get(ens)
+        if base_color is None:
+            continue
+        n = len(experiments_by_ensemble.get(ens, []))
+        label = f"{ens} (n={n})" if n > 0 else ens
+        ensemble_handles.append(Line2D([0], [0], color=base_color, lw=3))
+        ensemble_labels.append(label)
+    if ensemble_handles:
+        ax.legend(ensemble_handles, ensemble_labels, loc='best', prop={'size': 6})
     title_str = f"{varname} - Global Statistics\nEnsembles: {', '.join(sorted(ensemble_names))}\nExperiments: {', '.join(exp_names)}"
     fig.suptitle(title_str, fontsize=10)
     fig.tight_layout()
