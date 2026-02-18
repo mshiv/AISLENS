@@ -33,3 +33,12 @@ We extract a mean current basal melt rate field from the satellite observations,
 * Regrid the `basalmelt_forcing_anomaly` files and the `draft_dependence_params` file to the MPAS-Land Ice grid. 
     * Rename the `x,y,Time` dimensions in these files to the required names (usually `x1,y1, ...` ). 
     * Make use of `MPAS-Tools/interpolate_to_mpasli_grid.py` to perform the regridding.
+
+## Notes — extrapolation speedups and caches
+
+This project includes performance optimizations for the extrapolation step used when rasterizing ice-shelf data onto the model grid. For repeated runs (e.g., on HPC or when tuning parameters) you can enable disk caches to avoid re-rasterizing and re-computing nearest-index maps:
+
+- `prepare_model_sim_fast.py` supports the following optional flags:
+    - `--shelf-mask-cache <dir>` : directory to load/save per-shelf bounding-window + boolean mask arrays (speeds up rasterization on repeated runs)
+    - `--overwrite-shelf-mask-cache` : overwrite existing per-shelf cache files if present
+    - `--use-index-map` and `--index-map-cache <path>` : enable and cache a nearest-index map for very fast nearest-neighbor extrapolation across many time slices
