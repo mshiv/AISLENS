@@ -13,6 +13,7 @@
 
 # exclude custom HPC job scripts from source control by default
 /src/hpc_jobs/
+/src/bash-utils/
 
 # exclude scratch space notebooks
 /notebooks/SCRATCH.ipynb
