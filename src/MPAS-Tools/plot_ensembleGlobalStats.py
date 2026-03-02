@@ -336,16 +336,16 @@ ensemble_base_colors = plt.cm.Set1(np.linspace(0, 1, 9))  # Use Set1 colormap fo
 # Create mapping of ensembles to colors and experiments to color variations
 ensemble_names_unique = list(set([ensemble for ensemble, _, _, _ in experiment_specs]))
 ensemble_to_base_color = {}
-    for i, ensemble in enumerate(sorted(ensemble_names_unique)):
-        ens_up = ensemble.upper()
-        if ens_up.startswith('CTRL'):
-            ensemble_to_base_color[ensemble] = '#1f77b4'
-        elif 'SSP126' in ens_up:
-            ensemble_to_base_color[ensemble] = '#ff7f0e'
-        elif 'SSP585' in ens_up:
-            ensemble_to_base_color[ensemble] = '#d62728'
-        else:
-            ensemble_to_base_color[ensemble] = ensemble_base_colors[i % len(ensemble_base_colors)]
+for i, ensemble in enumerate(sorted(ensemble_names_unique)):
+    ens_up = ensemble.upper()
+    if ens_up.startswith('CTRL'):
+        ensemble_to_base_color[ensemble] = '#1f77b4'
+    elif 'SSP126' in ens_up:
+        ensemble_to_base_color[ensemble] = '#ff7f0e'
+    elif 'SSP585' in ens_up:
+        ensemble_to_base_color[ensemble] = '#d62728'
+    else:
+        ensemble_to_base_color[ensemble] = ensemble_base_colors[i % len(ensemble_base_colors)]
 
 # Group experiments by ensemble to assign color variations within each ensemble
 experiments_by_ensemble = {}

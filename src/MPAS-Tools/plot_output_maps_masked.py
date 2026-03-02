@@ -194,14 +194,15 @@ for ii, run in enumerate(runs):
     else:
        m = f  # use run file for mesh variables
 
+    # Handle both cases: with and without Time dimension (ncwa removes Time)
     xCell = m.variables["xCell"][:]
     yCell = m.variables["yCell"][:]
     dcEdge = m.variables["dcEdge"][:]
-    # The above should work but an error to do with how NETCDF reads record Time dimension occurs, or the way the file is created (using nco)
-    # Temporary fix below: (TODO: Clean up)
-    xCell = m.variables["xCell"][0]
-    yCell = m.variables["yCell"][0]
-    dcEdge = m.variables["dcEdge"][0]
+    # If Time dimension exists, take first timestep; otherwise use as-is
+    if xCell.ndim > 1:
+        xCell = xCell[0]
+        yCell = yCell[0]
+        dcEdge = dcEdge[0]
     #if args.mesh is not None:
     #   m.close()
 
@@ -436,7 +437,13 @@ for ii, run in enumerate(runs):
             #floating_ice = axs[index].tripcolor(triang, mask[timeLev, :])
 
             axs[index].set_aspect('equal')
-            axs[index].set_title(f'year = {yr[timeLev]:0.2f}')
+            # Handle scalar yr (when Time dimension was removed by ncwa)
+            if np.isscalar(yr) or (hasattr(yr, 'ndim') and yr.ndim == 0):
+                axs[index].set_title(f'year = {float(yr):0.2f}')
+            elif len(yr) == 1:
+                axs[index].set_title(f'year = {yr[0]:0.2f}')
+            else:
+                axs[index].set_title(f'year = {yr[timeLev]:0.2f}')
 
         cbars.append(Colorbar(ax=cbar_ax, mappable=varPlot[run][variable][0], orientation='vertical',
                  label=f'{colorbar_label_prefix}{variable} (${units}$)'))
