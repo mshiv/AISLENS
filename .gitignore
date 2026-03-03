@@ -13,7 +13,7 @@
 
 # exclude custom HPC job scripts from source control by default
 /src/hpc_jobs/
-/src/bash-utils/
+# /src/bash-utils/
 
 # exclude scratch space notebooks
 /notebooks/SCRATCH.ipynb
@@ -182,3 +182,18 @@ cython_debug/
 #  and can be added to the global gitignore or merged into this file.  For a more nuclear
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
+
+# SLURM local config (contains sensitive info)
+src/slurm-jobs/config/slurm_config.local
+src/slurm-jobs/refactored/config/slurm_config.local
+.aislens_slurm_config
+*.local.sbatch
+
+# Archive directories (contain hardcoded paths/emails)
+src/slurm-jobs/archive/
+src/bash-utils/archive/
+src/slurm-jobs-backup/
+src/slurm-jobs/active/
+src/slurm-jobs/config/
+
+src/slurm-jobs/list-of-scripts.txt
