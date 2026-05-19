@@ -1,0 +1,20 @@
+# =============================================================================
+# SLURM Configuration Example
+# =============================================================================
+# Copy this file to ~/.aislens_slurm_config and customize for the system.
+# Then source it in ~/.bashrc:
+#   source ~/.aislens_slurm_config
+# =============================================================================
+
+# SLURM account for job submission (required)
+export SLURM_ACCOUNT="account-here"
+
+# Email for job notifications (optional)
+export SLURM_EMAIL="email@institution.edu"
+
+# Data directory paths
+export AISLENS_DATA_DIR="/path/to/scratch/AISLENS/data"
+export AISLENS_REPO="/path/to/AISLENS/repo"
+
+# Conda environment name
+export AISLENS_CONDA_ENV="mpas-analysis"
