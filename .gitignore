@@ -190,8 +190,8 @@ src/slurm-jobs/refactored/config/slurm_config.local
 *.local.sbatch
 
 # Archive directories (contain hardcoded paths/emails)
-src/slurm-jobs/archive/
-src/bash-utils/archive/
+#src/slurm-jobs/archive/
+#src/bash-utils/archive/
 src/slurm-jobs-backup/
 src/slurm-jobs/active/
 src/slurm-jobs/config/
