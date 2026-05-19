@@ -17,7 +17,7 @@ This directory contains **bash utilities** designed to be run interactively from
 | Script | Purpose |
 |--------|---------|
 | `create-ensemble-dirs.sh` | Create ensemble directories with proper file structure |
-| `create-ensemble-dirs-new.sh` | Updated version with additional features |
+
 | `create-restart-ensemble-dirs.sh` | Create ensemble dirs from restart files |
 | `ensemble-job-script.sh` | Submit jobs across all ensemble member directories |
 
