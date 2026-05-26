@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=draftdep-calc
-#SBATCH --account=${SLURM_ACCOUNT:-gts-arobel3-atlas}
+#SBATCH --account=gts-arobel3-atlas
 #SBATCH --nodes=2 --ntasks-per-node=24
 #SBATCH --mem-per-cpu=12G
 #SBATCH --output=out.draftdep-calc.%j
@@ -8,7 +8,7 @@
 #SBATCH --exclusive
 #SBATCH --time=48:00:00
 #SBATCH --mail-type=BEGIN,END,FAIL
-#SBATCH --mail-user=${SLURM_EMAIL:-smurugan9@gatech.edu}
+#SBATCH --mail-user=smurugan9@gatech.edu
 
 ################################################################################
 # 02-draftdep-calc.sbatch

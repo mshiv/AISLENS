@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=dataprep-sorrm
-#SBATCH --account=${SLURM_ACCOUNT:-gts-arobel3-atlas}
+#SBATCH --account=gts-arobel3-atlas
 #SBATCH --nodes=2 --ntasks-per-node=24
 #SBATCH --mem-per-cpu=12G
 #SBATCH --output=out.dataprep-sorrm.%j
@@ -8,7 +8,7 @@
 #SBATCH --exclusive
 #SBATCH --time=12:00:00
 #SBATCH --mail-type=BEGIN,END,FAIL
-#SBATCH --mail-user=${SLURM_EMAIL:-smurugan9@gatech.edu}
+#SBATCH --mail-user=smurugan9@gatech.edu
 
 ################################################################################
 # 01-dataprep-sorrm.sbatch

@@ -1,13 +1,13 @@
 #!/bin/bash
 #SBATCH --job-name=setup-mali
-#SBATCH --account=${SLURM_ACCOUNT:-gts-arobel3-atlas}
+#SBATCH --account=gts-arobel3-atlas
 #SBATCH --nodes=1 --ntasks-per-node=24
 #SBATCH --mem-per-cpu=8G
 #SBATCH --output=out.setup-mali.%A_%a
 #SBATCH --error=err.setup-mali.%A_%a
 #SBATCH --time=01:30:00
 #SBATCH --mail-type=BEGIN,END,FAIL
-#SBATCH --mail-user=${SLURM_EMAIL:-smurugan9@gatech.edu}
+#SBATCH --mail-user=smurugan9@gatech.edu
 
 ################################################################################
 # util-setup-mali-experiments.sbatch
