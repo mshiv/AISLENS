@@ -1,13 +1,13 @@
 #!/bin/bash
 #SBATCH --job-name=trend-extract
-#SBATCH --account=${SLURM_ACCOUNT}
+#SBATCH --account=${SLURM_ACCOUNT:-gts-arobel3-atlas}
 #SBATCH --nodes=2 --ntasks-per-node=24
 #SBATCH --mem-per-cpu=12G
 #SBATCH --output=out.trend-extract.%A_%a
 #SBATCH --error=err.trend-extract.%A_%a
 #SBATCH --time=12:00:00
 #SBATCH --mail-type=BEGIN,END,FAIL
-#SBATCH --mail-user=${SLURM_EMAIL}
+#SBATCH --mail-user=${SLURM_EMAIL:-smurugan9@gatech.edu}
 
 ################################################################################
 # 05-trend-extract.sbatch

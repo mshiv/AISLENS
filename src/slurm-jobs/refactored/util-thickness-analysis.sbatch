@@ -1,13 +1,13 @@
 #!/bin/bash
 #SBATCH --job-name=util-thickness-analysis
-#SBATCH --account=${SLURM_ACCOUNT}
+#SBATCH --account=${SLURM_ACCOUNT:-gts-arobel3-atlas}
 #SBATCH --nodes=1 --ntasks-per-node=4
 #SBATCH --mem-per-cpu=24G
 #SBATCH --output=out.thickness-analysis.%j
 #SBATCH --error=err.thickness-analysis.%j
 #SBATCH --time=04:00:00
 #SBATCH --mail-type=END,FAIL
-#SBATCH --mail-user=${SLURM_EMAIL}
+#SBATCH --mail-user=${SLURM_EMAIL:-smurugan9@gatech.edu}
 
 ################################################################################
 # util-thickness-analysis.sbatch

@@ -1,13 +1,13 @@
 #!/bin/bash
 #SBATCH --job-name=util-inspect-dd
-#SBATCH --account=${SLURM_ACCOUNT}
+#SBATCH --account=${SLURM_ACCOUNT:-gts-arobel3-atlas}
 #SBATCH --nodes=1 --ntasks-per-node=24
 #SBATCH --mem-per-cpu=12G
 #SBATCH --output=out.util-inspect-dd.%j
 #SBATCH --error=err.util-inspect-dd.%j
 #SBATCH --time=4:00:00
 #SBATCH --mail-type=BEGIN,END,FAIL
-#SBATCH --mail-user=${SLURM_EMAIL}
+#SBATCH --mail-user=${SLURM_EMAIL:-smurugan9@gatech.edu}
 
 ################################################################################
 # util-inspect-draft-depen.sbatch

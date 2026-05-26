@@ -20,6 +20,12 @@ if [[ -f "${CONFIG_DIR}/aislens_env.sh" ]]; then
     source "${CONFIG_DIR}/aislens_env.sh"
 fi
 
+# Allow per-user overrides stored in ~/.aislens_env (untracked, user-specific)
+if [[ -f "${HOME}/.aislens_env" ]]; then
+    # shellcheck source=/dev/null
+    source "${HOME}/.aislens_env"
+fi
+
 # Verify required environment variables
 : "${AISLENS_DATA_DIR:?ERROR: AISLENS_DATA_DIR not set. Source config/aislens_env.sh}"
 : "${AISLENS_REPO:?ERROR: AISLENS_REPO not set. Source config/aislens_env.sh}"

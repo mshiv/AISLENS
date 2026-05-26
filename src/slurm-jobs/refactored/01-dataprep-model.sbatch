@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=dataprep-model
-#SBATCH --account=${SLURM_ACCOUNT}
+#SBATCH --account=${SLURM_ACCOUNT:-gts-arobel3-atlas}
 #SBATCH --nodes=2 --ntasks-per-node=24
 #SBATCH --mem-per-cpu=12G
 #SBATCH --output=out.dataprep-model.%j
@@ -8,7 +8,7 @@
 #SBATCH --exclusive
 #SBATCH --time=36:00:00
 #SBATCH --mail-type=BEGIN,END,FAIL
-#SBATCH --mail-user=${SLURM_EMAIL}
+#SBATCH --mail-user=${SLURM_EMAIL:-smurugan9@gatech.edu}
 
 ################################################################################
 # 01-dataprep-model.sbatch
