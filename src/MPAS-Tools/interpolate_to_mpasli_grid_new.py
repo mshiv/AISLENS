@@ -48,6 +48,7 @@ parser.add_argument("-t", "--thickness-only", dest="thicknessOnly", action="stor
 parser.add_argument("--timestart", dest="timestart", type=int, default=0, help="time level in input file to start from (0-based)")
 parser.add_argument("--timeend", dest="timeend", type=int, default=0, help="time level in input file to end with (0-based, inclusive)")
 parser.add_argument("-v", "--variables", dest="vars", nargs='*', type=str, default="all", help="Variables in the destination mesh for which interpolation should be attempted.  Interpolation will only actually occur if the requested field 1) is in the dictionary of supported fields at the end of this script and 2) exists in both the source and destination files.  'all' can be used to attempt to interpolate all fields present in the destination mesh.  Provide a space-delimited list.")
+parser.add_argument("--skip-history-update", dest="skipHistoryUpdate", action="store_true", default=False, help="Skip appending command history metadata to the output file. Useful if metadata updates hang on parallel filesystems.")
 args = parser.parse_args()
 
 
@@ -787,16 +788,24 @@ if args.timeend > args.timestart:
 
 print("\nFields successfully interpolated: " + ",".join(interpolated_vars))
 
-# Update history attribute of netCDF file
-thiscommand = datetime.now().strftime("%a %b %d %H:%M:%S %Y") + ": " + " ".join(sys.argv[:])#.join("Variables interpolated: {}".format(interpolated_vars))
-thiscommand = thiscommand+";  Variables successfully interpolated: " + ",".join(interpolated_vars)
-if hasattr(MPASfile, 'history'):
-   newhist = '\n'.join([thiscommand, getattr(MPASfile, 'history')])
+# Update history attribute of netCDF file (optional)
+if args.skipHistoryUpdate:
+    print("Skipping netCDF history attribute update (--skip-history-update set).")
 else:
-   newhist = thiscommand
-setattr(MPASfile, 'history', newhist )
+    print("Updating netCDF history attribute...")
+    thiscommand = datetime.now().strftime("%a %b %d %H:%M:%S %Y") + ": " + " ".join(sys.argv[:])#.join("Variables interpolated: {}".format(interpolated_vars))
+    thiscommand = thiscommand+";  Variables successfully interpolated: " + ",".join(interpolated_vars)
+    if hasattr(MPASfile, 'history'):
+        newhist = '\n'.join([thiscommand, getattr(MPASfile, 'history')])
+    else:
+        newhist = thiscommand
+    setattr(MPASfile, 'history', newhist )
 
+print("Closing input file...")
 inputFile.close()
+print("Syncing output file...")
+MPASfile.sync()
+print("Closing output file...")
 MPASfile.close()
 
 print('\nInterpolation completed.')
