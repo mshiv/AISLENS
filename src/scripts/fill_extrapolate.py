@@ -292,8 +292,9 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     # open netCDF for writing
     nc = netCDF4.Dataset(str(outpath), mode='w')
-    # create dims
-    nc.createDimension(time_dim, len(time_vals))
+    # create dims -- Time is UNLIMITED (record dim) so outputs are ncrcat/ncks-concatenable
+    # and downstream-friendly (avoids "no record variable" on concat).
+    nc.createDimension(time_dim, None)
     nc.createDimension(y_dim, len(y_vals))
     nc.createDimension(x_dim, len(x_vals))
 
@@ -368,7 +369,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     # data var
     dtype = 'f8'
     fillval = np.nan if args.fill_value is None else args.fill_value
-    data_var = nc.createVariable(var_name, dtype, (time_dim, y_dim, x_dim), fill_value=fillval)
+    # Explicit small per-timestep chunks (1, ny, nx) keep each HDF5 chunk well under the
+    # netCDF 4 GB limit (else a default whole-variable chunk breaks ncks --mk_rec_dmn and
+    # can choke downstream tools). Required now that Time is an unlimited dimension.
+    _chunks = (1, len(y_vals), len(x_vals))
+    data_var = nc.createVariable(var_name, dtype, (time_dim, y_dim, x_dim),
+                                 fill_value=fillval, chunksizes=_chunks)
     # copy attributes if present
     for k, v in ds.attrs.items():
         try:
