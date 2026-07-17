@@ -14,6 +14,7 @@ xtime is IDENTICAL across ensemble members (pure time axis), so the fast path is
 """
 from __future__ import annotations
 import argparse
+import sys
 import numpy as np
 from netCDF4 import Dataset, stringtochar
 
@@ -35,12 +36,36 @@ def main():
     ap.add_argument("--start-month", type=int, default=1)
     ap.add_argument("--start-day", type=int, default=1)
     ap.add_argument("--strlen", type=int, default=64)
+    ap.add_argument("--force", action="store_true",
+                    help="allow creating xtime in place even on a large classic-netCDF file (SLOW: triggers a "
+                         "full per-record file rewrite). Prefer the ncap2 fresh-copy path instead.")
     a = ap.parse_args()
 
     with Dataset(a.file, "r+") as ds:
         if "Time" not in ds.dimensions:
             raise ValueError("file has no Time dimension")
         n = len(ds.dimensions["Time"])
+
+        # FOOTGUN GUARD: adding a new RECORD variable (xtime) in place to a large CLASSIC-netCDF file forces
+        # netCDF to rewrite the ENTIRE file, shifting every record to interleave the new variable -- hours on
+        # a big forcing file, and if killed it leaves StrLen created but xtime missing (see the timeout on the
+        # 1000-yr CTRL run). Only classic (NETCDF3*) files interleave records; NETCDF4 stores vars separately.
+        if "xtime" not in ds.variables and ds.file_format.startswith("NETCDF3") and not a.force:
+            big = [v for v in ds.variables.values()
+                   if v.dimensions and v.dimensions[0] == "Time" and v.size > n]
+            if big and n >= 2000:
+                sys.exit(
+                    f"REFUSING in-place xtime create: {a.file}\n"
+                    f"  {ds.file_format}, Time={n}, existing record var(s) "
+                    f"{[v.name for v in big]} -> in-place add triggers a full per-record file rewrite (HOURS).\n"
+                    f"  Use the fresh-copy path instead (fast, no reorg):\n"
+                    f"    ncap2 -O -s 'defdim(\"StrLen\",{a.strlen}); xtime[$Time,$StrLen]=\" \"' "
+                    f"{a.file} tmp.nc\n"
+                    f"    python {sys.argv[0]} --file tmp.nc --start-year {a.start_year}   # xtime now exists -> just fills\n"
+                    f"    mv -f tmp.nc {a.file}\n"
+                    f"  (aislens_add_xtime_ctrl_2000.sbatch already does exactly this.) Override with --force."
+                )
+
         stamps = build_monthly_xtime(a.start_year, a.start_month, a.start_day, n)
         if "StrLen" not in ds.dimensions:
             ds.createDimension("StrLen", a.strlen)
