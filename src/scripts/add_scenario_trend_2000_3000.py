@@ -81,18 +81,15 @@ def main():
         os.remove(a.out)
     os.makedirs(os.path.dirname(a.out) or ".", exist_ok=True)
 
-    # read the trend into memory once (it's short: ~3600 x nCells) + get its last slice
-    with Dataset(a.trend, "r") as td:
-        tv = td.variables[a.varname] if a.varname in td.variables else td.variables[a.varname + "_var"]
-        taxis = tv.dimensions.index("Time") if "Time" in tv.dimensions else 0
-        trend = np.asarray(tv[:], dtype=float)
-        if taxis != 0:
-            trend = np.moveaxis(trend, taxis, 0)
-        trend = np.squeeze(trend)                      # (Tt, nCells)
-        if trend.ndim == 1:                            # single-slice trend
-            trend = trend[None, :]
-    Tt = trend.shape[0]
-    last = trend[-1]
+    # open the trend but DO NOT load it whole -- read only its last slice now (for the held-constant tail);
+    # the element-wise span is read chunk-by-chunk in the loop below, so peak RAM stays ~one chunk instead
+    # of the whole (~10 GB monthly) trend. Trend must have Time as dim 0 (matches the realization cadence).
+    td = Dataset(a.trend, "r")
+    tv = td.variables[a.varname] if a.varname in td.variables else td.variables[a.varname + "_var"]
+    if "Time" in tv.dimensions and tv.dimensions.index("Time") != 0:
+        sys.exit(f"trend var {tv.name} must have Time as dim 0, got {tv.dimensions}")
+    Tt = tv.shape[0] if "Time" in tv.dimensions else 1
+    last = np.squeeze(np.asarray(tv[-1] if Tt > 1 else tv[:]))   # (nCells,)
 
     shutil.copy2(a.realization, a.out)
     with Dataset(a.out, "r+") as ds:
@@ -122,8 +119,8 @@ def main():
             # region [0,off): variability-only -> add nothing.
             # region [off,trend_end): trend element-wise.
             lo, hi = max(t0, off), min(t1, trend_end)
-            if lo < hi:
-                block[lo - t0: hi - t0] += trend[lo - off: hi - off]
+            if lo < hi:                                          # read only this trend slice (bounded RAM)
+                block[lo - t0: hi - t0] += np.squeeze(np.asarray(tv[lo - off: hi - off]))
             # region [trend_end,Nf): held last slice (broadcast).
             lo, hi = max(t0, trend_end), min(t1, Nf)
             if lo < hi:
@@ -134,6 +131,7 @@ def main():
             sys.exit(f"FATAL: Time truncated {Nf} -> {len(ds.dimensions['Time'])} during write")
 
         first, lastst = write_xtime(ds, a.start_year, a.start_month, a.start_day, a.strlen)
+    td.close()
     print(f"wrote {a.out}  (xtime {first} .. {lastst})")
 
 
