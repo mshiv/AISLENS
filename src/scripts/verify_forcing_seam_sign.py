@@ -30,6 +30,15 @@ directory and comparing a window on each side of the seam:
      fraction of the base-side standard deviation (is the jump within normal
      month-to-month scatter, or a step?).
 
+IMPORTANT -- ext-file alignment: the ext file's Time=0 is NOT assumed to be the seam
+date. In practice an "extension" forcing file can be the FULL multi-century generator
+series (e.g. Time=0 labeled calendar year 2000, spanning 2000-2973) even though it's
+the file used to force the 2300+ extension run -- the model presumably starts reading
+partway through it. This script auto-detects the correct starting index by reading the
+ext file's xtime and locating the first timestep at/after (base's last valid month + 1),
+i.e. it aligns by CALENDAR DATE, not by file position. Override with --seam-year or
+--ext-start-index if auto-detection is unreliable (e.g. missing xtime).
+
 This script doesn't loads the full (Time x nCells) field. It only reads a
 `--n-months` slice (default 240 = 20 years monthly) from the tail of the base file and
 the head of the extension file via `xr.open_dataset(...)[var].isel(Time=slice(...))`,
@@ -85,6 +94,19 @@ import numpy as np
 # Core, file-independent logic (kept as plain functions so the self-test can
 # exercise it without touching any I/O).
 # ----------------------------------------------------------------------------
+
+def parse_year_month(xtime_str: str) -> "float | None":
+    """Parse 'YYYY-MM-DD_...' -> fractional year (YYYY + (MM-1)/12). None if unparseable."""
+    s = xtime_str.strip()
+    if not s:
+        return None
+    try:
+        y = int(s[0:4])
+        m = int(s[5:7])
+        return y + (m - 1) / 12.0
+    except (ValueError, IndexError):
+        return None
+
 
 def decode_xtime(values: np.ndarray) -> list[str]:
     """Decode an xtime array slice to a list of stripped strings.
@@ -197,10 +219,46 @@ def classify_verdict(base_mean: float, ext_mean: float, r: float, jump_frac: flo
 # File I/O (memory-safe: only ever materializes a small edge window)
 # ----------------------------------------------------------------------------
 
-def load_edge_block(path: str, var: str, side: str, n_months: int, buffer_months: int):
+def find_start_index_after(path: str, seam_year_month: float) -> int:
+    """Scan the FULL `xtime` of `path` (cheap: it's a small 1-D string array, not the
+    (Time x nCells) field) and return the index of the first timestep whose calendar
+    date is >= `seam_year_month` (fractional year). Raises if xtime is absent/unparseable
+    or no such timestep exists -- the caller should fall back to a manual --ext-start-index
+    in that case.
+
+    This exists because an "extension" forcing file is not guaranteed to start its Time
+    axis at the seam date -- it may be the FULL multi-century generator series (e.g.
+    Time=0 labeled year 2000even for a file used to force the 2300+ extension run), in
+    which case blindly taking Time=0 compares the wrong calendar period entirely.
+    """
+    import xarray as xr
+
+    with xr.open_dataset(path, decode_times=False) as ds:
+        if "xtime" not in ds.variables:
+            raise RuntimeError(
+                f"{path} has no 'xtime' variable; cannot locate the seam date automatically. "
+                f"Pass --ext-start-index to specify the Time index manually.")
+        xt_full = decode_xtime(ds["xtime"].values)  # full array, but xtime is tiny (Time,[StrLen])
+
+    for i, s in enumerate(xt_full):
+        y = parse_year_month(s)
+        if y is not None and y >= seam_year_month - 1e-6:
+            return i
+    raise RuntimeError(
+        f"No timestep in {path} with date >= {seam_year_month:.4f} found "
+        f"(file spans up to {xt_full[-1] if xt_full else '?'}). "
+        f"Pass --ext-start-index to specify the Time index manually.")
+
+
+def load_edge_block(path: str, var: str, side: str, n_months: int, buffer_months: int,
+                     start_at: "int | None" = None):
     """Load a `side` ('start' or 'end') window of up to `buffer_months` timesteps
     from `var` in `path`, then trim to the last/first `n_months` NON-GARBAGE
     timesteps within that window.
+
+    For side='start', if `start_at` is given, the window begins at that absolute Time
+    index instead of index 0 (use this to align to the seam date -- see
+    `find_start_index_after` -- rather than assuming the file's Time=0 is the seam).
 
     Returns (block, xtime_strs_or_None, abs_first_idx, abs_last_idx, Nt) where
     `block` is (m, nCells) with m <= n_months, and abs_first/abs_last are the
@@ -222,7 +280,8 @@ def load_edge_block(path: str, var: str, side: str, n_months: int, buffer_months
         if side == "end":
             sl = slice(Nt - buf, Nt)
         elif side == "start":
-            sl = slice(0, buf)
+            base_idx = start_at if start_at is not None else 0
+            sl = slice(base_idx, min(Nt, base_idx + buf))
         else:
             raise ValueError(f"side must be 'start' or 'end', got {side!r}")
 
@@ -280,7 +339,7 @@ def load_mesh_area(mesh_path: str, area_var: str, nCells_expected: int) -> "np.n
 # ----------------------------------------------------------------------------
 
 def run_seam_check(base_dir, ext_dir, forcing_name, var, n_months, buffer_months,
-                    mesh_path, area_var):
+                    mesh_path, area_var, seam_year=None, ext_start_index=None):
     base_path = os.path.join(base_dir, forcing_name)
     ext_path = os.path.join(ext_dir, forcing_name)
     for tag, p in (("--base-dir", base_path), ("--ext-dir", ext_path)):
@@ -293,8 +352,33 @@ def run_seam_check(base_dir, ext_dir, forcing_name, var, n_months, buffer_months
 
     base_block, base_xt, base_first, base_last, base_Nt = load_edge_block(
         base_path, var, "end", n_months, buffer_months)
+
+    # Align the ext window to the seam DATE, not to Time=0 of the ext file -- the ext
+    # file may be the full multi-century generator series (Time=0 labeled year 2000
+    # even though it's used to force the post-2300 extension), so blindly taking the
+    # first n_months would compare the wrong calendar period entirely.
+    if ext_start_index is not None:
+        start_idx = ext_start_index
+        print(f"ext start index: {start_idx} (manual --ext-start-index override)\n")
+    else:
+        if seam_year is not None:
+            target = seam_year
+            print(f"seam target: year {target:.4f} (manual --seam-year override)")
+        elif base_xt:
+            base_end_ym = parse_year_month(base_xt[-1])
+            if base_end_ym is None:
+                sys.exit(f"could not parse base's last xtime {base_xt[-1]!r} to auto-detect the "
+                          f"seam date; pass --seam-year or --ext-start-index explicitly")
+            target = base_end_ym + 1.0 / 12.0  # the month right after the base run ends
+            print(f"seam target: year {target:.4f} (auto: base's last month {base_xt[-1]} + 1)")
+        else:
+            sys.exit("base file has no xtime, so the seam date can't be auto-detected; "
+                      "pass --seam-year or --ext-start-index explicitly")
+        start_idx = find_start_index_after(ext_path, target)
+        print(f"ext start index: {start_idx} (first ext timestep >= year {target:.4f})\n")
+
     ext_block, ext_xt, ext_first, ext_last, ext_Nt = load_edge_block(
-        ext_path, var, "start", n_months, buffer_months)
+        ext_path, var, "start", n_months, buffer_months, start_at=start_idx)
 
     nCells_base, nCells_ext = base_block.shape[1], ext_block.shape[1]
     if nCells_base != nCells_ext:
@@ -458,6 +542,16 @@ def main():
                           "area-weighted domain means; if omitted, domain means are unweighted")
     ap.add_argument("--area-var", default="areaCell",
                      help="cell-area variable name in --mesh (default: %(default)s)")
+    ap.add_argument("--seam-year", type=float, default=None,
+                     help="fractional year (e.g. 2300.0) the ext window should start at or after; "
+                          "default: auto-detected as (base's last valid month's year) + 1 month. "
+                          "The ext file's own xtime is used to locate the matching index -- its "
+                          "Time=0 is NOT assumed to be the seam (it may be a full multi-century "
+                          "series whose Time=0 is calendar year 2000).")
+    ap.add_argument("--ext-start-index", type=int, default=None,
+                     help="manually specify the absolute Time index in the ext file to start "
+                          "from, bypassing xtime-based seam-date lookup entirely (use if the ext "
+                          "file lacks xtime or --seam-year auto-detection is unreliable)")
     ap.add_argument("--self-test", action="store_true",
                      help="run the built-in synthetic self-test of the correlation/verdict "
                           "logic and exit (no forcing files needed)")
@@ -475,6 +569,7 @@ def main():
     run_seam_check(
         base_dir=a.base_dir, ext_dir=a.ext_dir, forcing_name=a.forcing_name, var=a.var,
         n_months=a.n_months, buffer_months=buffer_months, mesh_path=a.mesh, area_var=a.area_var,
+        seam_year=a.seam_year, ext_start_index=a.ext_start_index,
     )
 
 
