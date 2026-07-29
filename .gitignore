@@ -11,8 +11,15 @@
 # exclude data from source control by default
 /data/
 
+# exclude reports and figures in reports (these are output datasets)
+/reports/
+
 # exclude custom HPC job scripts from source control by default
 /src/hpc_jobs/
+/src/slurm-jobs-backup/
+/src/slurm-jobs/
+/src/pace-jobs/
+
 # /src/bash-utils/
 
 # exclude scratch space notebooks
@@ -192,8 +199,8 @@ src/slurm-jobs/refactored/config/slurm_config.local
 # Archive directories (contain hardcoded paths/emails)
 #src/slurm-jobs/archive/
 #src/bash-utils/archive/
-src/slurm-jobs-backup/
-src/slurm-jobs/active/
-src/slurm-jobs/config/
+#src/slurm-jobs-backup/
+#src/slurm-jobs/active/
+#src/slurm-jobs/config/
 
 src/slurm-jobs/list-of-scripts.txt
