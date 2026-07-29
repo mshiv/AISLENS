@@ -2,8 +2,7 @@
 '''
 Script to plot common time-series from one or more landice globalStats files.
 
-Modified version that takes ensemble directory structure arguments instead of individual file paths.
-Enhanced to support multiple ensembles and flexible experiment specification.
+Supports multiple ensembles with directory-based experiment discovery.
 
 Original by Matt Hoffman, 8/23/2022
 --
@@ -64,7 +63,6 @@ def find_all_experiments(root_dir, ensemble_dirs, stats_filename):
             print(f"Warning: Ensemble directory not found: {full_ensemble_path}")
             continue
             
-        # Find all subdirectories that contain the stats file
         for item in os.listdir(full_ensemble_path):
             exp_path = os.path.join(full_ensemble_path, item)
             if os.path.isdir(exp_path):
@@ -90,7 +88,6 @@ def parse_experiment_specifications(experiment_list, ensemble_dirs, root_dir, st
     if not experiment_list:
         sys.exit("ERROR: Must specify experiment list with -e/--experiments option")
     
-    # Split by commas
     exp_parts = [exp.strip() for exp in experiment_list.split(',')]
     
     for exp_spec in exp_parts:
@@ -104,9 +101,7 @@ def parse_experiment_specifications(experiment_list, ensemble_dirs, root_dir, st
                 print(f"Warning: Specified ensemble '{ensemble_name}' not in ensemble directory list")
                 continue
                 
-            # Handle wildcards in experiment name
             if '*' in exp_name or '?' in exp_name:
-                # Find matching experiments in specific ensemble
                 if root_dir:
                     search_path = os.path.join(root_dir, ensemble_name)
                 else:
@@ -122,7 +117,6 @@ def parse_experiment_specifications(experiment_list, ensemble_dirs, root_dir, st
                                 display_name = f"{ensemble_name}:{match_exp}"
                                 experiment_specs.append((ensemble_name, match_exp, stats_file, display_name))
             else:
-                # Specific experiment in specific ensemble
                 if root_dir:
                     exp_path = os.path.join(root_dir, ensemble_name, exp_name)
                 else:
@@ -160,7 +154,6 @@ def parse_experiment_specifications(experiment_list, ensemble_dirs, root_dir, st
                                     experiment_specs.append((ensemble_dir, match_exp, stats_file, display_name))
                                     found_in_ensembles.append(ensemble_dir)
             else:
-                # Search for specific experiment in all ensembles
                 for ensemble_dir in ensemble_dirs:
                     if root_dir:
                         exp_path = os.path.join(root_dir, ensemble_dir, exp_name)
@@ -181,7 +174,6 @@ def parse_experiment_specifications(experiment_list, ensemble_dirs, root_dir, st
 # Parse ensemble directories
 ensemble_dirs = []
 if options.searchAll:
-    # Search all directories in root for ensembles
     if not options.rootDataDir:
         sys.exit("ERROR: --search-all requires --root to be specified")
     
@@ -244,7 +236,6 @@ print(f"\nFound {len(experiment_specs)} experiments to plot:")
 for ensemble, exp, file_path, display_name in experiment_specs:
     print(f"  {display_name}: {file_path}")
 
-# create axes to plot into
 fig = plt.figure(1, figsize=(12, 12), facecolor='w')
 
 nrow=3
@@ -330,10 +321,8 @@ def addSeaLevAx(axName):
     seaLevAx = axName.secondary_yaxis('right', functions=(VAF2seaLevel, seaLevel2VAF))
     seaLevAx.set_ylabel('Sea-level\nequivalent (mm)')
 
-# Define base colors for different ensembles and create color variations for experiments
-ensemble_base_colors = plt.cm.Set1(np.linspace(0, 1, 9))  # Use Set1 colormap for distinct ensemble base colors
+ensemble_base_colors = plt.cm.Set1(np.linspace(0, 1, 9))
 
-# Create mapping of ensembles to colors and experiments to color variations
 ensemble_names_unique = list(set([ensemble for ensemble, _, _, _ in experiment_specs]))
 ensemble_to_base_color = {}
 for i, ensemble in enumerate(sorted(ensemble_names_unique)):
@@ -347,7 +336,6 @@ for i, ensemble in enumerate(sorted(ensemble_names_unique)):
     else:
         ensemble_to_base_color[ensemble] = ensemble_base_colors[i % len(ensemble_base_colors)]
 
-# Group experiments by ensemble to assign color variations within each ensemble
 experiments_by_ensemble = {}
 for ensemble, exp, file_path, display_name in experiment_specs:
     if ensemble not in experiments_by_ensemble:
@@ -358,24 +346,21 @@ for ensemble, exp, file_path, display_name in experiment_specs:
 def create_color_variations(base_color, n_variations):
     """Create n color variations from a base color by adjusting brightness and saturation."""
     import matplotlib.colors as mcolors
-    
-    # Convert to HSV for easier manipulation
-    hsv = mcolors.rgb_to_hsv(base_color[:3])  # Only use RGB, ignore alpha
+
+    base_rgb = mcolors.to_rgb(base_color)
+    hsv = mcolors.rgb_to_hsv(base_rgb)
     
     variations = []
     if n_variations == 1:
         variations.append(base_color)
     else:
-        # Create variations by adjusting value (brightness) and saturation
         for i in range(n_variations):
-            # Adjust brightness: from 0.4 to 1.0
             brightness_factor = 0.4 + (0.6 * i / max(1, n_variations - 1))
-            # Adjust saturation: from 0.6 to 1.0  
             saturation_factor = 0.6 + (0.4 * i / max(1, n_variations - 1))
             
             new_hsv = hsv.copy()
-            new_hsv[1] = min(1.0, hsv[1] * saturation_factor)  # Saturation
-            new_hsv[2] = min(1.0, hsv[2] * brightness_factor)  # Value/brightness
+            new_hsv[1] = min(1.0, hsv[1] * saturation_factor)
+            new_hsv[2] = min(1.0, hsv[2] * brightness_factor)
             
             new_rgb = mcolors.hsv_to_rgb(new_hsv)
             variations.append(new_rgb)
@@ -493,7 +478,6 @@ def _update_axis_range(ax_key, yr, data):
         y_max[ax_key] = curmax
 
 
-# Parse x-axis limits if provided
 xlim_range = None
 if options.xlimits:
     try:
@@ -507,7 +491,6 @@ if options.xlimits:
     except ValueError:
         sys.exit("ERROR: X-axis limits must be numeric values separated by comma (e.g., '0,25')")
 
-# Plot each experiment with ensemble-specific color variations
 for ensemble, exp, file_path, display_name in experiment_specs:
     color = experiment_to_color[display_name]
     plotStat(file_path, display_name, color)
@@ -515,7 +498,6 @@ for ensemble, exp, file_path, display_name in experiment_specs:
 # Add sea level axis only to VAF plot (once, after all experiments are plotted)
 addSeaLevAx(axVAF)
 
-# Apply x-axis limits to all subplots if specified
 if xlim_range:
     print(f"Applying X-axis limits: {xlim_range}")
     axes_and_keys = [
@@ -551,7 +533,6 @@ for ens in sorted(ensemble_names_unique):
 if ensemble_handles:
     axTotalBMB.legend(ensemble_handles, ensemble_labels, loc='best', prop={'size': 8})
 
-# Add title with experiment information
 ensemble_names = list(set([ensemble for ensemble, _, _, _ in experiment_specs]))
 exp_names = [display_name for _, _, _, display_name in experiment_specs]
 title_str = f"Global Statistics Comparison\nEnsembles: {', '.join(sorted(ensemble_names))}\nExperiments: {', '.join(exp_names)}"

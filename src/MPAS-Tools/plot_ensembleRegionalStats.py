@@ -3,8 +3,7 @@
 Script to plot common time-series from one or more landice regionalStats files.
 Currently only useful for whole-AIS simulations.
 
-Modified version that takes ensemble directory structure arguments instead of individual file paths.
-Enhanced to support multiple ensembles and flexible experiment specification.
+Supports multiple ensembles with directory-based experiment discovery.
 
 Original by Matt Hoffman, 8/23/2022
 --
@@ -56,7 +55,6 @@ def find_all_experiments(root_dir, ensemble_dirs, stats_filename):
             print(f"Warning: Ensemble directory not found: {full_ensemble_path}")
             continue
             
-        # Find all subdirectories that contain the stats file
         for item in os.listdir(full_ensemble_path):
             exp_path = os.path.join(full_ensemble_path, item)
             if os.path.isdir(exp_path):
@@ -82,7 +80,6 @@ def parse_experiment_specifications(experiment_list, ensemble_dirs, root_dir, st
     if not experiment_list:
         sys.exit("ERROR: Must specify experiment list with -e/--experiments option")
     
-    # Split by commas
     exp_parts = [exp.strip() for exp in experiment_list.split(',')]
     
     for exp_spec in exp_parts:
@@ -96,9 +93,7 @@ def parse_experiment_specifications(experiment_list, ensemble_dirs, root_dir, st
                 print(f"Warning: Specified ensemble '{ensemble_name}' not in ensemble directory list")
                 continue
                 
-            # Handle wildcards in experiment name
             if '*' in exp_name or '?' in exp_name:
-                # Find matching experiments in specific ensemble
                 if root_dir:
                     search_path = os.path.join(root_dir, ensemble_name)
                 else:
@@ -114,7 +109,6 @@ def parse_experiment_specifications(experiment_list, ensemble_dirs, root_dir, st
                                 display_name = f"{ensemble_name}:{match_exp}"
                                 experiment_specs.append((ensemble_name, match_exp, stats_file, display_name))
             else:
-                # Specific experiment in specific ensemble
                 if root_dir:
                     exp_path = os.path.join(root_dir, ensemble_name, exp_name)
                 else:
@@ -152,7 +146,6 @@ def parse_experiment_specifications(experiment_list, ensemble_dirs, root_dir, st
                                     experiment_specs.append((ensemble_dir, match_exp, stats_file, display_name))
                                     found_in_ensembles.append(ensemble_dir)
             else:
-                # Search for specific experiment in all ensembles
                 for ensemble_dir in ensemble_dirs:
                     if root_dir:
                         exp_path = os.path.join(root_dir, ensemble_dir, exp_name)
@@ -173,7 +166,6 @@ def parse_experiment_specifications(experiment_list, ensemble_dirs, root_dir, st
 # Parse ensemble directories
 ensemble_dirs = []
 if options.searchAll:
-    # Search all directories in root for ensembles
     if not options.rootDataDir:
         sys.exit("ERROR: --search-all requires --root to be specified")
     
@@ -273,7 +265,6 @@ def create_color_variations(base_color, n_variations):
             variations.append(new_rgb)
     return variations
 
-# Determine colors for each experiment. If user supplied a colors list, use those (cycled if needed).
 experiment_to_color = {}
 if options.colors:
     user_colors = [c.strip() for c in options.colors.split(',') if c.strip()]
@@ -283,13 +274,13 @@ if options.colors:
         experiment_to_color[display_name] = user_colors[i % len(user_colors)]
 elif options.colormap:
     # Sample N colors from the requested colormap
-    cmap = plt.cm.get_cmap(options.colormap)
+    cmap = plt.get_cmap(options.colormap)
     N = len(experiment_specs)
     sampled = [cmap(x) for x in np.linspace(0, 1, N)]
     for i, (_, _, _, display_name) in enumerate(experiment_specs):
         experiment_to_color[display_name] = sampled[i]
 else:
-    ensemble_base_colors = plt.cm.Set1(np.linspace(0, 1, 9))  # Use Set1 colormap for distinct ensemble base colors
+    ensemble_base_colors = plt.cm.Set1(np.linspace(0, 1, 9))
     ensemble_names_unique = list(set([ensemble for ensemble, _, _, _ in experiment_specs]))
     ensemble_to_base_color = {}
     for i, ensemble in enumerate(sorted(ensemble_names_unique)):
@@ -324,8 +315,7 @@ else:
    sys.exit("Unknown mass/volume units")
 print("Using volume/mass units of: ", massUnit)
 
-# Get nRegions and yr from first file
-f = Dataset(experiment_specs[0][2], 'r')  # Use first experiment file path
+f = Dataset(experiment_specs[0][2], 'r')
 nRegions = len(f.dimensions['nRegions'])
 yr = f.variables['daysSinceStart'][:]/365.0
 
@@ -335,7 +325,6 @@ if options.fileRegionNames:
    rNamesIn = fn.variables['regionNames'][:]
 else:
    rNamesIn = f.variables['regionNames'][:]
-# Process region names
 rNamesOrig = list()
 for r in range(nRegions):
     thisString = rNamesIn[r, :].tobytes().decode('utf-8').strip()  # convert from char array to string
@@ -391,7 +380,6 @@ ISMIP6basinInfo = {
         }
 
 
-# Parse region names to more usable names, if available
 rNames = [None]*nRegions
 for r in range(nRegions):
     if rNamesOrig[r] in ISMIP6basinInfo:
@@ -530,7 +518,6 @@ for reg in range(nRegions):
        mlt = ISMIP6basinInfo[rNamesOrig[reg]]['shelfMelt'][0]
        axs6.flatten()[reg].plot(yr, np.ones(yr.shape)*(mlt), color='k', label='melt obs')
 
-# Set up unit conversion factors to be used when reading variables
 if options.units == "m3":
     volUnitFactor = 1.0
     massUnitFactor = 1.0 / rhoi
@@ -689,6 +676,50 @@ def plotStat(fname, display_name, color, addToLegend=False):
 
     f.close()
 
+
+def _visible_axis_ylim(ax, xmin, xmax):
+    """Return y-limits for the portion of plotted artists visible in [xmin, xmax]."""
+    y_segments = []
+
+    for line in ax.get_lines():
+        xdata = np.asarray(line.get_xdata(orig=False), dtype=float)
+        ydata = np.asarray(line.get_ydata(orig=False), dtype=float)
+        if xdata.shape != ydata.shape:
+            continue
+        mask = (xdata >= xmin) & (xdata <= xmax) & np.isfinite(ydata)
+        if np.any(mask):
+            y_segments.append(ydata[mask])
+
+    for collection in ax.collections:
+        try:
+            for path in collection.get_paths():
+                vertices = np.asarray(path.vertices, dtype=float)
+                if vertices.size == 0:
+                    continue
+                xdata = vertices[:, 0]
+                ydata = vertices[:, 1]
+                mask = (xdata >= xmin) & (xdata <= xmax) & np.isfinite(ydata)
+                if np.any(mask):
+                    y_segments.append(ydata[mask])
+        except Exception:
+            continue
+
+    if not y_segments:
+        return None
+
+    ydata = np.concatenate(y_segments)
+    ydata = ydata[np.isfinite(ydata)]
+    if ydata.size == 0:
+        return None
+
+    ymin = np.min(ydata)
+    ymax = np.max(ydata)
+    if ymin == ymax:
+        pad = abs(ymin) * 0.01 + 1e-6
+    else:
+        pad = 0.05 * (ymax - ymin)
+    return ymin - pad, ymax + pad
+
 # Plot each experiment with assigned colors
 for i, (ensemble, exp, file_path, display_name) in enumerate(experiment_specs):
     color = experiment_to_color[display_name]
@@ -708,6 +739,9 @@ if xlim_range:
     
     for ax in all_axes:
         ax.set_xlim(xlim_range)
+        ylim_range = _visible_axis_ylim(ax, xlim_range[0], xlim_range[1])
+        if ylim_range is not None:
+            ax.set_ylim(ylim_range)
 
 # Add legends and finalize plots
 axs1.flatten()[-1].legend(loc='best', prop={'size': 5})
