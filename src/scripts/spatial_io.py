@@ -138,8 +138,13 @@ def aggregate_by_region(data: np.ndarray, region_mask: np.ndarray, n_regions: in
 
 
 def default_paths():
-    """Return default paths for mesh and mask files."""
-    base = "/storage/home/hcoda1/6/smurugan9/scratch/AISLENS/data/MALI/ENSEMBLES"
+    """Return default paths for mesh and mask files.
+
+    The fb_A initialisation mesh and regional ISMIP6 mask live inside each
+    ensemble-member directory (not at the ``ENSEMBLES`` root).  We anchor on
+    ``CTRL/CTRL_00``, which is present in all production deployments.
+    """
+    base = "/storage/home/hcoda1/6/smurugan9/scratch/AISLENS/data/MALI/ENSEMBLES/CTRL/CTRL_00"
     mesh = os.path.join(base, ("AIS_4to20km_r01_20220907_m5_drop_bed_20m_bulldoze_troughs_75_to_400m_"
                                "Enderby_maxstiffness_0.8_TG_pinning_40maf_bedmap2_surface_ASE_05perc_seafloor_mu_"
                                "meanSatObsBMB_Paolo2023_draftDepenPiecewise_fb_A.nc"))

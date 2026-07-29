@@ -85,17 +85,42 @@ def discover_members(ensemble_dir: str, stats_filename: str = "globalStats.nc",
     so you can select a clean subset, e.g. include=r'^SSP585_\\d+$' to take the
     0..300 yr batch and skip short -EM runs, _V2 negative-year runs, and CHANGEPOINT
     test runs that would otherwise truncate the ensemble.
+
+    When `stats_filename` contains glob characters (``*``, ``?``, ``[...]``),
+    uses ``glob.glob`` instead of a direct ``isfile`` check — this supports
+    patterns like ``"output_state_*.nc"`` used by the spatial-output loaders.
+
+    For glob patterns the function also searches common output subdirectories
+    (``output/``, ``outputs/``) — matching the convention used by MALI's
+    ``output_state_*.nc`` chunk files — so callers don't need to know whether
+    the files sit flat or nested.
     """
     members = []
     if not os.path.isdir(ensemble_dir):
         raise FileNotFoundError(f"Ensemble directory not found: {ensemble_dir}")
+    has_glob = glob.has_magic(stats_filename)
     pat = re.compile(include) if include else None
     for name in sorted(os.listdir(ensemble_dir), key=natural_sort_key):
         if pat and not pat.search(name):
             continue
-        p = os.path.join(ensemble_dir, name, stats_filename)
-        if os.path.isfile(p):
-            members.append((name, p))
+        # Search locations priority: member root, then output/, then outputs/
+        search_dirs = [os.path.join(ensemble_dir, name)]
+        search_dirs += [os.path.join(ensemble_dir, name, s)
+                        for s in ("output", "outputs")]
+        found = None
+        for sd in search_dirs:
+            p = os.path.join(sd, stats_filename)
+            if has_glob:
+                matched = sorted(glob.glob(p))
+                if matched:
+                    found = matched[0]
+                    break
+            else:
+                if os.path.isfile(p):
+                    found = p
+                    break
+        if found is not None:
+            members.append((name, found))
     return members
 
 
