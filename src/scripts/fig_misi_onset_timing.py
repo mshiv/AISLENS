@@ -4,7 +4,7 @@ fig_misi_onset_timing.py — Map of when MISI retreat begins per basin per membe
 
 MISI onset = first year grounding line migration flux exceeds 2× baseline std (first 50 yr).
 Left: heatmap (basin × member), right: histogram. Uses regionalStats.nc.
-CTRL excluded (133-region mask).
+
 """
 from __future__ import annotations
 import os, sys, argparse
@@ -18,9 +18,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import ensemble_io as eio
 from ismip6_regions import BASIN_NAMES, SHORT_LABELS
 
-SCENARIO_DIRS = {"SSP585": "SSP585", "varScaled10x": "SSP585_varScaled10x", "SSP126": "SSP126"}
-SCENARIO_INCLUDE = {"SSP585": r"^SSP585_\d+$", "varScaled10x": r"^SSP585_\d+$", "SSP126": r"^SSP126_\d+$"}
-SCENARIO_COLORS = {"SSP585": "#C62828", "varScaled10x": "#E65100", "SSP126": "#1565C0"}
+SCENARIO_DIRS = {"CTRL": "CTRL", "SSP585": "SSP585", "varScaled10x": "SSP585_varScaled10x", "SSP126": "SSP126"}
+SCENARIO_INCLUDE = {"CTRL": r"^CTRL_\d+$", "SSP585": r"^SSP585_\d+$", "varScaled10x": r"^SSP585_\d+$", "SSP126": r"^SSP126_\d+$"}
+SCENARIO_COLORS = {"CTRL": "#888888", "SSP585": "#C62828", "varScaled10x": "#E65100", "SSP126": "#1565C0"}
 
 
 def load_regional_gl_migration(root, ensemble, include):

@@ -3,7 +3,7 @@
 fig_mass_budget_decomposition.py — Decompose regional mass loss into physical components.
 
 Two outputs: (A) stacked bars per basin at yr100/200/300, (B) 4×4 grid of budget term
-evolution. Uses regionalStats.nc. CTRL excluded (133-region mask incompatible).
+evolution. Uses regionalStats.nc.
 """
 from __future__ import annotations
 import os, sys, argparse
@@ -21,16 +21,19 @@ RHO_ICE = eio.RHO_ICE
 OCEAN_AREA = eio.OCEAN_AREA
 
 SCENARIO_DIRS = {
+    "CTRL":         "CTRL",
     "SSP585":       "SSP585",
     "varScaled10x": "SSP585_varScaled10x",
     "SSP126":       "SSP126",
 }
 SCENARIO_INCLUDE = {
+    "CTRL":         r"^CTRL_\d+$",
     "SSP585":       r"^SSP585_\d+$",
     "varScaled10x": r"^SSP585_\d+$",
     "SSP126":       r"^SSP126_\d+$",
 }
 SCENARIO_COLORS = {
+    "CTRL":         "#888888",
     "SSP585":       "#C62828",
     "varScaled10x": "#E65100",
     "SSP126":       "#1565C0",

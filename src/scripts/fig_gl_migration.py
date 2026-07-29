@@ -33,8 +33,7 @@ SCENARIO_DIRS = {
     "CTRL":         "CTRL",
 }
 
-# Only ISMIP6-mask scenarios (16 basins). CTRL has 133-region mask — skip.
-PLOT_SCENARIOS = ["SSP585", "varScaled10x", "SSP126"]
+PLOT_SCENARIOS = ["CTRL", "SSP585", "varScaled10x", "SSP126"]
 
 
 def kg_yr_to_mm_sle(kg_yr):

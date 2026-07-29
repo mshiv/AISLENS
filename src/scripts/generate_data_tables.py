@@ -191,7 +191,7 @@ KEY RESULTS SUMMARY (AISLENS vs GrISLENS)
 
 2. CROSS-SCENARIO COMPARISON:
    - SSP585 vs SSP126: both use native 16-basin mask
-   - CTRL uses 133-region mask (not directly comparable per-basin)
+    - CTRL now uses native 16-basin mask (comparable per-basin)
 
 3. NOISE-INDUCED DRIFT:
    - SSP585 mean vs CTRL mean difference

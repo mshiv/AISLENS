@@ -1,12 +1,5 @@
 #!/usr/bin/env python3
-"""Cross-scenario regional comparison: SSP585 vs SSP126 (both native 16-basin mask).
-
-CTRL uses a different 133-region mask, so it's excluded from basin-level comparisons.
-CTRL is shown as a global reference only in Figure 1.
-
-NOTE: CTRL's 133-region mask and SSP's 16-basin mask define different regional
-boundaries. Mapping CTRL→ISMIP6 via overlap introduces ~20% per-basin bias.
-"""
+"""Cross-scenario regional comparison: SSP585 vs SSP126 vs CTRL (all native 16-basin mask)."""
 
 from __future__ import annotations
 import os, sys, argparse
@@ -57,33 +50,6 @@ def load_ismip6_regional(ens_name, include, min_years=50):
     return year, vaf, vol
 
 
-def load_ctrl_global(include, min_years=50):
-    """Load CTRL global VAF from globalStats for reference."""
-    ens_dir = os.path.join(ROOT, "CTRL")
-    members = eio.discover_members(ens_dir, stats_filename="globalStats.nc",
-                                   include=include)
-    all_vaf, all_year = [], []
-    for name, path in members:
-        try:
-            ds = eio.load_member_globalstats(path)
-            ds = eio.to_year_dim(ds)
-        except Exception:
-            continue
-        yr = ds.year.values.astype(float)
-        if len(yr) < min_years or yr[0] > 5.0:
-            continue
-        vaf = ds["volumeAboveFloatation"].values
-        all_vaf.append(vaf)
-        all_year.append(yr)
-        ds.close()
-    if not all_vaf:
-        return None, None
-    min_len = min(len(y) for y in all_year)
-    year = all_year[0][:min_len]
-    vaf = np.stack([v[:min_len] for v in all_vaf])
-    return year, vaf
-
-
 def vaf_to_sle(vaf_m3):
     RHO_ICE, RHO_OCEAN, OCEAN_AREA = 910.0, 1028.0, 3.62e14
     return -vaf_m3 * (RHO_ICE / RHO_OCEAN) / OCEAN_AREA * 1000.0
@@ -95,20 +61,16 @@ def main():
     args = parser.parse_args()
     os.makedirs(args.out_dir, exist_ok=True)
 
-    # Load SSP585 and SSP126 (both native 16-basin)
+    # Load all scenarios (all native 16-basin)
     ssp_data = {}
-    for ens_name, include in [("SSP585", r"^SSP585_\d+$"), ("SSP126", r"^SSP126_\d+$")]:
+    for ens_name, include in [("CTRL", r"^CTRL_\d+$"),
+                               ("SSP585", r"^SSP585_\d+$"),
+                               ("SSP126", r"^SSP126_\d+$")]:
         print(f"Loading {ens_name}...")
         year, vaf, vol = load_ismip6_regional(ens_name, include)
         if year is not None:
             print(f"  {vaf.shape[0]} members, {vaf.shape[1]} years, {vaf.shape[2]} basins")
             ssp_data[ens_name] = (year, vaf, vol)
-
-    # Load CTRL global for reference
-    print("Loading CTRL (global)...")
-    ctrl_year, ctrl_vaf = load_ctrl_global(r"^CTRL_\d+$")
-    if ctrl_year is not None:
-        print(f"  {ctrl_vaf.shape[0]} members, {ctrl_year.shape[0]} steps")
 
     # --- Figure 1: Cross-scenario per-basin VAF (SLE) ---
     fig, axes = plt.subplots(4, 4, figsize=(16, 14), sharex=True)
@@ -116,7 +78,7 @@ def main():
 
     for b in range(16):
         ax = axes[b]
-        for ens_name in ["SSP585", "SSP126"]:
+        for ens_name in ["CTRL", "SSP585", "SSP126"]:
             if ens_name not in ssp_data:
                 continue
             yr, vaf, _ = ssp_data[ens_name]
@@ -140,13 +102,7 @@ def main():
 
     # Panel 16: Global total with all scenarios
     ax = axes[15]
-    if ctrl_year is not None:
-        ctrl_sle = vaf_to_sle(ctrl_vaf)
-        ctrl_mean = np.nanmean(ctrl_sle, axis=0)
-        ctrl_std = np.nanstd(ctrl_sle, axis=0, ddof=1) if ctrl_sle.shape[0] > 1 else np.zeros_like(ctrl_mean)
-        ax.plot(ctrl_year[:len(ctrl_mean)], ctrl_mean, color=COLORS["CTRL"], lw=2, ls="--", label="CTRL")
-        ax.fill_between(ctrl_year[:len(ctrl_mean)], ctrl_mean - ctrl_std, ctrl_mean + ctrl_std, color=COLORS["CTRL"], alpha=0.1)
-    for ens_name in ["SSP585", "SSP126"]:
+    for ens_name in ["CTRL", "SSP585", "SSP126"]:
         if ens_name not in ssp_data:
             continue
         yr, vaf, _ = ssp_data[ens_name]
@@ -159,7 +115,7 @@ def main():
     ax.set_title("GLOBAL TOTAL", fontsize=9, fontweight="bold", color="red")
     ax.legend(fontsize=8)
 
-    fig.suptitle("Cross-Scenario VAF by ISMIP6 Basin (SSP585 vs SSP126)", fontsize=14, y=1.01)
+    fig.suptitle("Cross-Scenario VAF by ISMIP6 Basin (SSP585 vs SSP126 vs CTRL)", fontsize=14, y=1.01)
     fig.tight_layout()
     f1 = os.path.join(args.out_dir, "cross_scenario_regional_vaf.png")
     fig.savefig(f1, dpi=200, bbox_inches="tight")

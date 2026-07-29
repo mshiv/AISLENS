@@ -3,7 +3,6 @@
 fig_regional_pdf_evolution.py — Per-region ensemble member spread over time.
 
 Per-basin panel: member lines + ensemble mean + min–max band of VAF→SLE (mm).
-CTRL: 133-region mask (100 shelves, pass --regions 33-132). Forced: 16 ISMIP6 regions (4×4 grid).
 """
 from __future__ import annotations
 import os, sys, argparse
