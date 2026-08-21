@@ -148,8 +148,14 @@ def main():
         d.close()
         print(f"\n{'region':>7} {'MALI VAF':>13} {'recomputed':>13} {'rel diff':>9}"
               f" | {'MALI vol':>13} {'recomputed':>13} {'rel diff':>9}")
-        j = min(len(ry) - 1, len(yr) - 1)
-        k = int(np.argmin(np.abs(yr - ry[j])))
+        # Compare at the LATEST year both series share. Matching by INDEX would
+        # pick an arbitrary early time (regionalStats is written far more often
+        # than output_state), and early years are the easy case: the sub-grid
+        # grounding-line scheme only diverges once grounding lines have migrated.
+        tmax = min(ry.max(), yr.max())
+        j = int(np.argmin(np.abs(ry - tmax)))
+        k = int(np.argmin(np.abs(yr - tmax)))
+        print(f"comparing at yr {ry[j]:.1f} (MALI) vs yr {yr[k]:.1f} (recomputed)")
         dv, di = [], []
         for r in range(mask.shape[0]):
             a1, b1 = rv[j, r], vaf[k, r]
