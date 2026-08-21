@@ -74,6 +74,53 @@ def state_files(member_dir):
     return []
 
 
+def flux_files(member_dir):
+    for sub in ("output", "outputs", ""):
+        f = sorted(glob.glob(os.path.join(member_dir, sub,
+                                          "output_flux_all_timesteps_[12]*.nc")))
+        if f:
+            return f
+    return []
+
+
+def compute_melt(member_dir, mesh, mask):
+    """Regional APPLIED sub-shelf melt from the flux stream.
+
+    Two quantities, because their ratio is the thing that gets misread:
+        meltFluxSum   sum_{c in r} m(c,t) * A(c)      total applied melt over the region
+        floatingArea  sum_{c in r} A(c) where m != 0  the area it was applied over
+
+    globalStats reports only the AREA-AVERAGE, which changes when shelves shrink even
+    if the prescribed melt did not. Keeping the numerator and denominator separate lets
+    the average be reconstructed while making the geometry dependence explicit.
+    """
+    d = netCDF4.Dataset(mesh)
+    area = np.asarray(d["areaCell"][:], dtype=np.float64).ravel()
+    d.close()
+    files = flux_files(member_dir)
+    if not files:
+        return None, None, None
+    W = mask * area[None, :]
+    yrs, FLX, ARE = [], [], []
+    for f in files:
+        ds = netCDF4.Dataset(f)
+        if "floatingBasalMassBalApplied" not in ds.variables:
+            ds.close(); continue
+        t = np.asarray(ds["daysSinceStart"][:], dtype=np.float64) / 365.0
+        m = np.asarray(ds["floatingBasalMassBalApplied"][:], dtype=np.float64)
+        ds.close()
+        if m.ndim == 1:
+            m = m[None, :]
+        FLX.append(m @ W.T)
+        ARE.append((m != 0.0).astype(np.float64) @ W.T)
+        yrs.append(t)
+    if not FLX:
+        return None, None, None
+    yrs = np.concatenate(yrs)
+    o = np.argsort(yrs)
+    return yrs[o], np.concatenate(FLX, 0)[o], np.concatenate(ARE, 0)[o]
+
+
 def compute(member_dir, mesh, mask, chunk_report=True):
     d = netCDF4.Dataset(mesh)
     area = np.asarray(d["areaCell"][:], dtype=np.float64).ravel()
@@ -122,6 +169,8 @@ def main():
     ap.add_argument("--out", default=None)
     ap.add_argument("--validate", action="store_true",
                     help="compare against the member's own regionalStats.nc")
+    ap.add_argument("--with-melt", action="store_true",
+                    help="also sum applied sub-shelf melt from the output_flux stream")
     a = ap.parse_args()
 
     mask, names = load_mask(a.mask)
@@ -183,6 +232,22 @@ def main():
     ds.setncattr("source", "compute_regional_stats_custom_mask.py")
     ds.setncattr("mask_file", os.path.basename(a.mask))
     ds.setncattr("member", os.path.basename(os.path.normpath(a.member)))
+    if a.with_melt:
+        myr, mflx, mare = compute_melt(a.member, a.mesh, mask)
+        if mflx is None:
+            print("  WARNING: no floatingBasalMassBalApplied found; melt not written")
+        else:
+            # the melt series has its own time axis (flux stream vs state stream),
+            # so interpolate onto the volume axis rather than assuming they match
+            F = np.empty_like(vol); A_ = np.empty_like(vol)
+            for r in range(vol.shape[1]):
+                F[:, r] = np.interp(yr, myr, mflx[:, r])
+                A_[:, r] = np.interp(yr, myr, mare[:, r])
+            ds.createVariable("regionalMeltFluxSum", "f8", ("Time", "nRegions"),
+                              zlib=True)[:] = F
+            ds.createVariable("regionalFloatingArea", "f8", ("Time", "nRegions"),
+                              zlib=True)[:] = A_
+            print(f"  added melt on {len(myr)} flux timesteps")
     ds.setncattr("note", "VAF from fixed bed (config_uplift_method=none); no sub-grid GL scheme")
     if names:
         ds.setncattr("region_names", "|".join(names))
