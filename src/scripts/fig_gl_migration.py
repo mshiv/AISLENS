@@ -125,7 +125,10 @@ def main():
             ens_std = np.nanstd(arr, axis=0)
 
             for r in range(nreg):
-                name = BASIN_NAMES[r]
+                # CTRL and SSP585-3X carry the 133-region draft-dependent mask while the
+                # other ensembles carry 16 ISMIP6 basins, so nreg is not always 16 and
+                # BASIN_NAMES cannot be indexed blindly.
+                name = BASIN_NAMES[r] if r < len(BASIN_NAMES) else f"region {r}"
                 lbl = SHORT_LABELS.get(name, name)
                 c = plt.cm.tab20(r / nreg)
                 ax.plot(yrs, ens_mean[:, r], color=c, lw=1.0, label=lbl)
