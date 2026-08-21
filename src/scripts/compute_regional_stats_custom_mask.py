@@ -130,9 +130,14 @@ def main():
     print(f"computed {vol.shape[0]} timesteps x {vol.shape[1]} regions")
 
     if a.validate:
-        f = os.path.join(a.member, "regionalStats.nc")
-        if not os.path.exists(f):
-            sys.exit("no regionalStats.nc to validate against")
+        # On the cluster regionalStats.nc sits in <member>/output/; local copies
+        # have it flattened to <member>/. Check both.
+        f = next((c for c in (os.path.join(a.member, "output", "regionalStats.nc"),
+                              os.path.join(a.member, "regionalStats.nc"))
+                  if os.path.exists(c)), None)
+        if f is None:
+            sys.exit(f"no regionalStats.nc under {a.member} or {a.member}/output")
+        print(f"validating against {f}")
         d = netCDF4.Dataset(f)
         if len(d.dimensions["nRegions"]) != mask.shape[0]:
             d.close(); sys.exit("mask nRegions differs from regionalStats -- "
