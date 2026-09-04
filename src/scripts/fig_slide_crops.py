@@ -46,6 +46,16 @@ RECUTS = [
      (0.075, 0.315, 0.222, 0.497), "one Amundsen ratio map, year 50 — map only"),
     ("S16_dynamic_gating", f"{FIGS}/tierB/F8_dynamic_gating_SSP585.png",
      (0.0, 0.0, 1.0, 1.0), "where the spread lives"),
+    ("S21_site", f"{CORAL}/reports/chapter4_final_local/coral_domain_context.png",
+     (0.47, 0.0, 1.0, 1.0), "Pin Point in the Vernon River estuary, panel (b)"),
+    ("S21_track", f"{CORAL}/reports/chapter4_final_local/coral_domain_context.png",
+     (0.0, 0.0, 0.47, 1.0), "Matthew track and the nested domains, panel (a)"),
+    # panel titles in the source overlap their right-hand neighbour, so these crop
+    # below the title -- the slide names the intervention anyway
+    ("S22_intervention_wall", f"{CORAL}/reports/figures/intervention_anatomy_v2.png",
+     (0.030, 0.118, 0.250, 0.500), "floodwall — map and DEM section, panel A"),
+    ("S22_intervention_marsh", f"{CORAL}/reports/figures/intervention_anatomy_v2.png",
+     (0.012, 0.620, 0.245, 0.695), "marsh restoration — footprint only, panel E"),
     ("S23_model_chain", f"{CH1}/ch1_emulation_framework.png",
      (0.0, 0.53, 1.0, 1.0), "coastal half of the emulation framework"),
     ("S25_compound", f"{CORAL}/reports/chapter4_final_local/coral_compound_effect.png",
