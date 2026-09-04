@@ -44,8 +44,8 @@ RHO_I, RHO_O = 910.0, 1028.0
 YEARS = [0, 100, 200, 300]
 
 # the shelves worth naming on a slide: warm-cavity Amundsen, plus cold-cavity controls
-SHELVES = ["Thwaites", "Pine_Island", "Crosson", "Dotson", "Getz",
-           "Totten", "Filchner", "Ronne", "Ross" if False else "Western_Ross"]
+SHELVES = ["Thwaites", "Pine_Island", "Crosson", "Dotson", "Getz", "Totten",
+           "Filchner", "Ronne", "Western_Ross", "Amery", "Larsen_C", "Shackleton"]
 LABEL = {"Pine_Island": "Pine Island", "Western_Ross": "Ross (west)"}
 
 

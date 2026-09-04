@@ -221,6 +221,75 @@ def fig_scenarios(g, memdir, shelf, out, xlim=None, ylim=None):
         print(f"  {label:20s} N={nk:2d}/{nall:2d}  last yr {tf:3.0f}  retreat {gf:6.1f} km   "
               f"IQR median {qmed:5.2f} km, peak {qmax:5.1f} km at yr {tq:3.0f}")
 
+def fig_shelves(ens, memdir, out, shelves, xlim=None, ylim=None):
+    """Grounding-line retreat for many shelves under one ensemble.
+
+    The companion to fig_grounded_area: same question, but in kilometres of grounding
+    line rather than fraction of catchment area, and computed per member.
+    """
+    fig = plt.figure(figsize=(13.4, 6.4))
+    ax = fig.add_axes([0.062, 0.115, 0.700, 0.800])
+    rows = []
+    for sh in shelves:
+        g = geometry(sh)
+        d = series(ens, g, memdir)
+        if d is None:
+            print(f"  {sh:14s} not covered by the extract"); continue
+        gl = d["gl"][d["complete"]]
+        if gl.size == 0 or not np.isfinite(gl).any():
+            print(f"  {sh:14s} no grounding line on this flowline"); continue
+        t = np.concatenate([[0], d["years"] - 2000])
+        G = np.column_stack([np.zeros(gl.shape[0]), gl])
+        live = np.isfinite(G).sum(axis=0) >= max(2, int(0.8 * G.shape[0]))
+        last_yr = t[int(np.flatnonzero(live)[-1])]
+        if live.sum() < 3 or last_yr < 50:
+            print(f"  {sh:14s} grounding line lost by year {last_yr:.0f} — dropped"); continue
+        med = np.where(live, np.nanmedian(np.where(live, G, np.nan), axis=0), np.nan)
+        q1 = np.where(live, np.nanpercentile(np.where(live, G, np.nan), 25, axis=0), np.nan)
+        q3 = np.where(live, np.nanpercentile(np.where(live, G, np.nan), 75, axis=0), np.nan)
+        last = int(np.flatnonzero(live)[-1])
+        rows.append((sh, t, med, q1, q3, last, med[last]))
+
+    rows.sort(key=lambda r: r[6])
+    for sh, t, med, q1, q3, last, fin in rows:
+        col = ds.MARSH if fin > 100 else ds.ICE if fin > 10 else ds.INK_SOFT
+        lw = 2.6 if fin > 100 else 1.8
+        ax.fill_between(t, q1, q3, color=col, alpha=.20, linewidth=0, zorder=2)
+        ax.plot(t, med, color=col, lw=lw, zorder=3, solid_capstyle="round")
+        ax.plot([t[last]], [fin], "o", ms=5.5, color=col, zorder=4)
+
+    # end labels, nudged apart
+    if rows:
+        span = max(r[6] for r in rows) - min(r[6] for r in rows)
+        gap, prev = max(span * 0.055, 4.0), -1e9
+        for sh, t, med, q1, q3, last, fin in rows:
+            col = ds.MARSH if fin > 100 else ds.ICE if fin > 10 else ds.INK_SOFT
+            ly = max(fin, prev + gap); prev = ly
+            if abs(ly - fin) > 0.4:
+                ax.plot([t[last], t[last] + 7], [fin, ly], color=col, lw=.8,
+                        alpha=.6, clip_on=False, zorder=3)
+            trunc = "" if last == len(t) - 1 else f"  (to yr {t[last]:.0f})"
+            ax.text(t[last] + 11, ly, f"{sh.replace('_', ' ')}   {fin:.0f} km{trunc}",
+                    color=col, fontsize=11, va="center", ha="left", clip_on=False)
+
+    ds.strip(ax)
+    ax.set_xlim(*(xlim or (0, 300)))
+    if ylim:
+        ax.set_ylim(*ylim)
+    ax.set_xlabel("model year", labelpad=7)
+    ax.set_ylabel("grounding-line retreat  (km inland of year 0)", labelpad=8)
+    ax.tick_params(length=3)
+    ax.text(0.0, 1.05, f"{ens} · median across realisations, band is the interquartile range",
+            transform=ax.transAxes, fontsize=11, color=ds.INK_SOFT, ha="left", va="bottom")
+
+    fig.savefig(out, bbox_inches="tight", pad_inches=0.14)
+    plt.close(fig)
+    print(f"wrote {out}")
+    for sh, t, med, q1, q3, last, fin in reversed(rows):
+        print(f"  {sh:14s} {fin:7.1f} km by year {t[last]:3.0f}   "
+              f"IQR {np.nanmedian(q3 - q1):5.2f} km")
+
+
 def fig_section(ens, g, memdir, shelf, out, xlim=None, ylim=None, year=None):
     d = series(ens, g, memdir)
     if d is None:
@@ -313,6 +382,8 @@ def main():
     ap.add_argument("--principal-axis", action="store_true",
                     help="use the old principal-axis transect instead of the flowline")
     ap.add_argument("--suffix", default="", help="appended to the output filename")
+    ap.add_argument("--shelves", nargs="+", default=None,
+                    help="many-shelf mode: retreat against time for each named shelf")
     ap.add_argument("--year", type=int, default=None,
                     help="--section only: model year to draw (default: last year most members have a GL)")
     a = ap.parse_args()
@@ -321,6 +392,11 @@ def main():
     os.makedirs(a.outdir, exist_ok=True)
     ds.apply()
 
+    if a.shelves:
+        fig_shelves(a.section or "SSP585", a.members,
+                    f"{a.outdir}/fig_gl_shelves_{a.section or 'SSP585'}{a.suffix}.png",
+                    a.shelves, a.xlim, a.ylim)
+        return
     g = geometry(a.shelf, flowline=not a.principal_axis)
     if a.section:
         fig_section(a.section, g, a.members, a.shelf,
