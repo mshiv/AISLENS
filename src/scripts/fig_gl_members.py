@@ -29,7 +29,7 @@ sys.path.insert(0, HERE)
 import slidestyle as ds                      # noqa: E402
 from fig_gl_transect import (           # noqa: E402
     MESH, SHELF_MASK, BASIN_MASK, RHO_I, RHO_O,
-    region_names, rd, build_transect, gl_position,
+    region_names, rd, build_transect, build_flowline, gl_position, gl_position_main,
 )
 
 ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
@@ -47,28 +47,38 @@ ENSEMBLES = [
 BACKSTEP_KM = 50.0      # a seaward jump this large means the crossing rule has failed
 
 
-def geometry(shelf):
-    """Transect, bed and flotation thickness along it, plus the map into the extract."""
+def geometry(shelf, flowline=True):
+    """Transect, bed and flotation thickness along it, plus the map into the extract.
+
+    The section follows observed ice flow by default. The principal-axis alternative
+    runs across flow on coast-parallel shelves -- Getz and Ross never left grounded
+    ice on it, so no grounding line existed to find.
+    """
     names, masks = region_names(SHELF_MASK)
     x, y = rd(MESH, "xCell"), rd(MESH, "yCell")
     bed, h0 = rd(MESH, "bedTopography"), rd(MESH, "thickness")
-    bm = netCDF4.Dataset(BASIN_MASK)
-    basins = np.asarray(bm["regionCellMasks"][:]); bm.close()
     tree = cKDTree(np.column_stack([x, y]))
-
     sel = masks[:, names.index(shelf)] > 0
-    home = np.bincount(np.argmax(basins[np.where(sel)[0]], axis=1),
-                       minlength=basins.shape[1]).argmax()
-    s, pts, _, _ = build_transect(x, y, sel, bed, h0, basins[:, home] > 0)
-    _, idx = tree.query(pts)
-    inb = basins[idx, home] > 0
-    if inb.any():
-        j0, j1 = np.where(inb)[0][[0, -1]]
-        s, idx = s[j0:j1 + 1], idx[j0:j1 + 1]
+
+    if flowline:
+        vx, vy = rd(MESH, "observedSurfaceVelocityX"), rd(MESH, "observedSurfaceVelocityY")
+        s, pts = build_flowline(x, y, sel, vx, vy, tree, bed, h0)
+        idx = tree.query(pts)[1]
+    else:
+        bm = netCDF4.Dataset(BASIN_MASK)
+        basins = np.asarray(bm["regionCellMasks"][:]); bm.close()
+        home = np.bincount(np.argmax(basins[np.where(sel)[0]], axis=1),
+                           minlength=basins.shape[1]).argmax()
+        s, pts, _, _ = build_transect(x, y, sel, bed, h0, basins[:, home] > 0)
+        idx = tree.query(pts)[1]
+        inb = basins[idx, home] > 0
+        if inb.any():
+            j0, j1 = np.where(inb)[0][[0, -1]]
+            s, idx, pts = s[j0:j1 + 1], idx[j0:j1 + 1], pts[j0:j1 + 1]
 
     b = bed[idx]
     hflot = (RHO_O / RHO_I) * np.maximum(0.0, -b)
-    s_gl0, _ = gl_position(s, h0[idx], hflot)
+    s_gl0, _ = gl_position_main(s, h0[idx], hflot)
     s_gl0 = s_gl0 if np.isfinite(s_gl0) else 0.0
     return dict(s=s, sk=(s - s_gl0) / 1e3, b=b, hflot=hflot, s_gl0=s_gl0,
                 idx=idx, ncell=x.size, x=x, y=y, ice=h0 > 1.0, shelf=sel,
@@ -120,7 +130,7 @@ def series(ens, g, memdir):
     for mi in range(len(members)):
         for ti in range(len(years)):
             if got[mi, ti]:
-                p, _ = gl_position(g["s"], h_of(mi, ti), g["hflot"])
+                p, _ = gl_position_main(g["s"], h_of(mi, ti), g["hflot"])
                 gl[mi, ti] = (p - g["s_gl0"]) / 1e3 if np.isfinite(p) else np.nan
         # once the line jumps back seaward the crossing rule has picked a different
         # feature; everything after that is not a grounding line for this glacier
@@ -139,7 +149,7 @@ def series(ens, g, memdir):
                 complete=complete)
 
 
-def fig_scenarios(g, memdir, shelf, out):
+def fig_scenarios(g, memdir, shelf, out, xlim=None, ylim=None):
     """Grounding line against time, every member, every ensemble, plus how far apart
     the realisations get. Spread uses complete-record members only."""
     fig = plt.figure(figsize=(15.4, 7.8))
@@ -174,9 +184,11 @@ def fig_scenarios(g, memdir, shelf, out):
 
     for a in (ax, axs):
         ds.strip(a)
-        a.set_xlim(0, 300)
+        a.set_xlim(*(xlim or (0, 300)))
         a.tick_params(length=3)
     ax.tick_params(labelbottom=False)
+    if ylim:
+        ax.set_ylim(*ylim)
     ax.set_ylabel("grounding-line retreat\n(km inland of year 0)", labelpad=6)
     axs.set_ylabel("spread across\nrealisations (km, IQR)", labelpad=6)
     axs.set_xlabel("model year", labelpad=7)
@@ -209,20 +221,43 @@ def fig_scenarios(g, memdir, shelf, out):
         print(f"  {label:20s} N={nk:2d}/{nall:2d}  last yr {tf:3.0f}  retreat {gf:6.1f} km   "
               f"IQR median {qmed:5.2f} km, peak {qmax:5.1f} km at yr {tq:3.0f}")
 
-def fig_section(ens, g, memdir, shelf, out):
+def fig_section(ens, g, memdir, shelf, out, xlim=None, ylim=None, year=None):
     d = series(ens, g, memdir)
     if d is None:
         sys.exit(f"no usable extract for {ens}")
     years, gl, got, members, sk, b = (d["years"], d["gl"], d["got"], d["members"],
                                       g["sk"], g["b"])
     need = max(2, int(0.8 * len(members)))
-    ti = int(np.max(np.where(np.isfinite(gl).sum(axis=0) >= need)[0]))
+    if year is not None:
+        ti = int(np.argmin(np.abs(years - (year + 2000))))
+    else:
+        ti = int(np.max(np.where(np.isfinite(gl).sum(axis=0) >= need)[0]))
     ti_data = int(np.max(np.where(got.sum(axis=0) >= need)[0]))
+
+    # member fields first: the ocean fill has to stop where the ice is grounded,
+    # and members disagree about where that is
+    HH, BB = [], []
+    for mi in range(len(members)):
+        if not got[mi, ti]:
+            continue
+        hm = d["h_of"](mi, ti)
+        fl = hm < g["hflot"] - 1e-6
+        HH.append(hm)
+        BB.append(np.where(fl, -(RHO_I / RHO_O) * hm, b))
+    HH, BB = np.array(HH), np.array(BB)
+    gr_frac = np.nanmean((HH > 1.0) & (HH > g["hflot"]), axis=0)
+    wet = (b < 0) & (gr_frac < 0.5)
 
     fig = plt.figure(figsize=(15.0, 6.0))
     ax = fig.add_axes([0.060, 0.135, 0.905, 0.700])
-    ax.fill_between(sk, b, 0, where=(b < 0), color=ds.ICE_TINT, alpha=.45,
-                    linewidth=0, zorder=1)
+    # water tops out at the shallowest member's ice base where a shelf is present
+    otop = np.where(np.nanmin(np.where(HH > 1.0, BB, 0.0), axis=0) < 0,
+                    np.nanmin(np.where(HH > 1.0, BB, 0.0), axis=0), 0.0)
+    ax.fill_between(sk, b, otop, where=wet & (b < otop), color=ds.ICE,
+                    alpha=.32, linewidth=0, zorder=1)
+    ax.fill_between(sk, np.nanmedian(BB, axis=0),
+                    np.nanmedian(BB + np.where(HH > 1.0, HH, np.nan), axis=0),
+                    color=ds.FIELD, linewidth=0, zorder=2)
     ax.fill_between(sk, b, b.min() - 800, color="#DCD3C2", linewidth=0, zorder=2)
     ax.plot(sk, b, color="#7C6F58", lw=1.6, zorder=3)
     ax.axhline(0, color=ds.INK_SOFT, lw=.8, ls=(0, (4, 3)), zorder=3)
@@ -243,8 +278,8 @@ def fig_section(ens, g, memdir, shelf, out):
     fin = gl[:, ti][np.isfinite(gl[:, ti])]
     xhi = min(sk.max(), (fin.max() if fin.size else 120) + 70)
     win = (sk >= max(sk.min(), -80)) & (sk <= xhi)
-    ax.set_xlim(max(sk.min(), -80), xhi)
-    ax.set_ylim(float(np.nanmin(b[win])) - 120, 420)
+    ax.set_xlim(*(xlim or (max(sk.min(), -80), xhi)))
+    ax.set_ylim(*(ylim or (float(np.nanmin(b[win])) - 120, 420)))
     ds.strip(ax)
     ax.set_xlabel("distance from the year-0 grounding line, seaward → inland  (km)", labelpad=7)
     ax.set_ylabel("elevation  (m)", labelpad=6)
@@ -271,18 +306,30 @@ def main():
                     help="draw the per-member year slice for one ensemble instead")
     ap.add_argument("--members", default=MEMDIR)
     ap.add_argument("--outdir", default=OUTDIR)
+    ap.add_argument("--xlim", nargs=2, type=float, default=None, metavar=("LO", "HI"),
+                    help="zoom: model years for the default figure, km along the section for --section")
+    ap.add_argument("--ylim", nargs=2, type=float, default=None, metavar=("LO", "HI"),
+                    help="zoom: km of retreat for the default figure, elevation for --section")
+    ap.add_argument("--principal-axis", action="store_true",
+                    help="use the old principal-axis transect instead of the flowline")
+    ap.add_argument("--suffix", default="", help="appended to the output filename")
+    ap.add_argument("--year", type=int, default=None,
+                    help="--section only: model year to draw (default: last year most members have a GL)")
     a = ap.parse_args()
     if not os.path.isdir(a.members):
         sys.exit(f"missing {a.members} — run hpc_extract_member_thickness.py first")
     os.makedirs(a.outdir, exist_ok=True)
     ds.apply()
 
-    g = geometry(a.shelf)
+    g = geometry(a.shelf, flowline=not a.principal_axis)
     if a.section:
         fig_section(a.section, g, a.members, a.shelf,
-                    f"{a.outdir}/fig_gl_members_{a.shelf}_{a.section}.png")
+                    f"{a.outdir}/fig_gl_members_{a.shelf}_{a.section}{a.suffix}.png",
+                    a.xlim, a.ylim, a.year)
     else:
-        fig_scenarios(g, a.members, a.shelf, f"{a.outdir}/fig_gl_scenarios_{a.shelf}.png")
+        fig_scenarios(g, a.members, a.shelf,
+                      f"{a.outdir}/fig_gl_scenarios_{a.shelf}{a.suffix}.png",
+                      a.xlim, a.ylim)
 
 
 if __name__ == "__main__":
