@@ -35,7 +35,6 @@ import numpy as np
 import xarray as xr
 import geopandas as gpd
 
-# Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from aislens import config
 
@@ -242,21 +241,7 @@ def get_time_mask(da: xr.DataArray, time_dim: str,
 
 def zero_variability(da: xr.DataArray, mask: xr.DataArray, time_dim: str,
                      year_start: int = None, year_end: int = None) -> xr.DataArray:
-    """
-    Set anomaly/variability values to zero in masked regions.
-    The function simply sets values to 0 in the specified
-    regions, effectively removing variability.
-    
-    Args:
-        da: Input DataArray with time dimension (anomaly/variability values)
-        mask: Boolean spatial mask (True = zero out variability here)
-        time_dim: Name of time dimension
-        year_start: Start year to zero (None = from beginning)
-        year_end: End year to zero (None = to end)
-        
-    Returns:
-        DataArray with variability set to 0 in masked regions/times
-    """
+    """Set anomaly/variability values to zero in masked regions and years."""
     # Create time mask if year range specified
     time_mask = get_time_mask(da, time_dim, year_start, year_end)
     

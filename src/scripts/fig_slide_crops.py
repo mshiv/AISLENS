@@ -3,14 +3,13 @@
 fig_slide_crops.py — crop chapter figures down to single-claim slide panels.
 
 Chapter figures run to 9-13 panels and do not survive projection. This crops the panel that
-carries the claim and re-grounds it on the paper colour. A cropper, not a re-plotter: pixels
-come from figures already reviewed, so nothing new enters the talk. --contact writes a sheet
-for checking the crop boxes, which are fractions of each source image.
+carries the claim. A cropper, not a re-plotter: pixels come from figures already reviewed, so
+nothing new enters the talk. --contact writes a sheet for checking the crop boxes, which are
+fractions of each source image.
 """
 from __future__ import annotations
 
 import os, sys, argparse
-import numpy as np
 from PIL import Image
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -67,20 +66,11 @@ def recut(src, box, pad=0.02):
     w, h = im.size
     l, t, r, b = box
     crop = im.crop((int(l * w), int(t * h), int(r * w), int(b * h)))
-
-    # composite onto the deck's paper ground: chapter figures are saved on white,
-    # which reads as a bright rectangle when projected on a warm slide
     cw, ch = crop.size
     m = int(round(pad * max(cw, ch)))
     ground = Image.new("RGB", (cw + 2 * m, ch + 2 * m), ds.PAPER)
     ground.paste(crop, (m, m), crop)
-
-    # white pixels from the source become paper too
-    a = np.asarray(ground).astype(int)
-    near_white = (a > 246).all(axis=2)
-    pr, pg, pb = (int(ds.PAPER[i:i + 2], 16) for i in (1, 3, 5))
-    a[near_white] = (pr, pg, pb)
-    return Image.fromarray(a.astype(np.uint8))
+    return ground
 
 
 def main():

@@ -3,7 +3,8 @@
 fig_amplitude_vs_color.py — separates AMPLITUDE from SPECTRAL COLOR in ensemble spread.
 
 Uses SSP585 (1x) vs SSP585_varScaled10x (10x) to calibrate amplitude sensitivity,
-then decomposes CTRL-EXT spread into amplitude-explained and color-residual components.
+then decomposes the legacy 1000yr-generator no-offset run (CTRL-1000GEN-NOOFF) spread
+into amplitude-explained and color-residual components.
 Four panels: calibration, rectification, color decomposition, summary.
 Data: globalStats from ensemble runs.
 
@@ -24,6 +25,9 @@ import matplotlib.pyplot as plt
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import ensemble_io as eio
+
+# sigma ratios above this are treated as divide-by-near-zero artefacts, not physics
+RATIO_SANITY_MAX = 50.0
 
 
 # ----------------------------------------------------------------------------
@@ -182,14 +186,16 @@ def main():
     ap.add_argument("--root", default=eio.default_ensembles_root())
     ap.add_argument("--amp-ensembles", default="SSP585,SSP585_varScaled10x",
                      help="comma-separated (1x_ensemble,10x_ensemble) pair for amplitude calibration")
-    ap.add_argument("--color-ensembles", default="CTRL,CTRL-EXT",
-                     help="comma-separated (CTRL,CTRL-EXT) pair for color decomposition; "
-                          "second entry may be absent if that ensemble doesn't exist yet")
+    ap.add_argument("--color-ensembles", default="CTRL,CTRL-1000GEN-NOOFF",
+                     help="comma-separated (CTRL,CTRL-1000GEN-NOOFF) pair for color decomposition; "
+                          "second entry is the legacy 1000yr-generator no-offset run and may be "
+                          "absent if that ensemble doesn't exist")
     ap.add_argument("--amplitude-ratio", type=float, default=1.82,
                      help="ratio of forcing STANDARD DEVIATIONS between the 1000yr and 300yr "
-                          "melt-forcing generators (CTRL-EXT vs CTRL). Default 1.82 = "
+                          "melt-forcing generators (CTRL-1000GEN-NOOFF, the legacy 1000yr-generator "
+                          "no-offset run, vs CTRL). Default 1.82 = "
                           "sqrt(3.3), from a measured forcing VARIANCE ratio of ~3.3x. This is "
-                          "the amplitude-only part of the CTRL-EXT/CTRL difference; the "
+                          "the amplitude-only part of the CTRL-1000GEN-NOOFF/CTRL difference; the "
                           "generators also differ in spectral color (~8x more multidecadal "
                           "power in the 1000yr generator), which this ratio does NOT capture.")
     ap.add_argument("--horizons", default="50,100,200",
@@ -321,11 +327,25 @@ def main():
                 dropped_horizons.append(h)
                 continue
             i = int(np.argmin(np.abs(yr_ratio - h)))
+            # Guard against a near-zero denominator: sigma_CTRL passes close to zero at early
+            # horizons (all members start from the same state), so sigma_EXT/sigma_CTRL can blow
+            # up by many orders of magnitude and is meaningless there. Such a ratio also produces
+            # a bootstrap CI whose lower bound sits below the mean, which matplotlib rejects as a
+            # negative yerr. Drop the horizon instead of plotting a spurious number.
+            r_i, lo_i, hi_i = ratio_mean[i], ratio_lo[i], ratio_hi[i]
+            if (not np.isfinite(r_i)) or r_i <= 0 or r_i > RATIO_SANITY_MAX:
+                dropped_horizons.append(h)
+                print(f"  [WARN] horizon yr{h:.0f}: sigma ratio {r_i:.3g} is not physical "
+                      f"(sigma_{name_ctrl} near zero) — dropped from panel D")
+                continue
+            # clip the CI so it brackets the mean (bootstrap tails can invert near zero)
+            lo_i = min(lo_i, r_i) if np.isfinite(lo_i) else r_i
+            hi_i = max(hi_i, r_i) if np.isfinite(hi_i) else r_i
             valid_horizons.append(h)
-            obs_ratio_h.append(ratio_mean[i])
-            obs_lo_h.append(ratio_lo[i])
-            obs_hi_h.append(ratio_hi[i])
-            color_factor_h.append(ratio_mean[i] / amp_factor)
+            obs_ratio_h.append(r_i)
+            obs_lo_h.append(lo_i)
+            obs_hi_h.append(hi_i)
+            color_factor_h.append(r_i / amp_factor)
         if dropped_horizons:
             print(f"  Dropped horizon(s) {dropped_horizons} yr from panel D "
                   f"(exceed {name_ctrl} usable span of {ctrl_max_yr:.1f} yr)")
@@ -363,10 +383,11 @@ def main():
     print("1. beta is measured under SSP585 (forced) noise and transferred to CTRL "
           "(unforced) noise -- an ASSUMPTION. Recommend a CTRL_varScaled10x run to "
           "measure beta directly in the unforced regime.")
-    print("2. CTRL-EXT was run WITHOUT the OFFSET baseline correction CTRL has, so it "
-          "also carries a mean-melt bias that shifts the operating state -- a confound "
-          "for spread independent of amplitude/color. Compare early years where "
-          "feasible; see the CAVEAT 2 numeric check above (if color pair available).")
+    print(f"2. {name_ctrlext or 'the color-pair second ensemble'} was run WITHOUT the OFFSET "
+          "baseline correction CTRL has, so it also carries a mean-melt bias that shifts "
+          "the operating state -- a confound for spread independent of amplitude/color. "
+          "Compare early years where feasible; see the CAVEAT 2 numeric check above "
+          "(if color pair available).")
     print("3. The color factor C = observed_ratio / amplitude_factor is a RESIDUAL: it "
           "absorbs every unmodeled difference (including caveats 1 and 2), so it is "
           "NOT a clean, isolated measurement of spectral color alone.")

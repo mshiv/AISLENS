@@ -122,19 +122,33 @@ def main():
               f"e-folding = {np.nanmedian(efolds):.1f} ± {np.nanstd(efolds):.1f} yr")
 
         # ---- PSD via Welch ----
-        psds = []
+        # Members can have DIFFERENT valid record lengths (e.g. an in-progress CTRL whose
+        # members end anywhere from yr 76 to 228). A per-member nperseg would then give each
+        # member a different frequency grid, and averaging the PSDs raises
+        # "inhomogeneous shape". Fix nperseg ONCE from the shortest usable member so every
+        # PSD shares one grid.
+        series = []
         for m in range(n_mem):
             ts = (sle.isel(member=m) - ens_mean).values   # anomaly = internal variability
             ok = np.isfinite(ts)
             if ok.sum() < 50:
                 continue
-            ts_clean = ts[ok] - np.nanmean(ts[ok])
-            nperseg = min(len(ts_clean) // 4, 128)
-            f, pxx = welch(ts_clean, fs=1.0 / dt, nperseg=nperseg, noverlap=nperseg // 2)
-            psds.append(pxx)
+            series.append(ts[ok] - np.nanmean(ts[ok]))
+        psds = []
+        if series:
+            shortest = min(len(s) for s in series)
+            nperseg = max(8, min(shortest // 4, 128))
+            for s in series:
+                f, pxx = welch(s, fs=1.0 / dt, nperseg=nperseg, noverlap=nperseg // 2)
+                psds.append(pxx)
+            if len({p.shape for p in psds}) > 1:      # defensive: should not happen now
+                print(f"    [WARN] {label}: inconsistent PSD lengths, skipping PSD")
+                psds = []
         if psds:
             freq = f
-            psd_data[label] = (freq, np.mean(psds, axis=0))
+            psd_data[label] = (freq, np.mean(np.asarray(psds), axis=0))
+            print(f"    PSD from {len(psds)} members (nperseg={nperseg}, "
+                  f"shortest record {min(len(s) for s in series)} yr)")
 
     lag_years = np.arange(len(list(acf_ensemble.values())[0])) * dt
 

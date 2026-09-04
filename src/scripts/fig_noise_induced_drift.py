@@ -53,6 +53,8 @@ def main():
     ap.add_argument("--root", default=eio.default_ensembles_root())
     ap.add_argument("--start-year", type=float, default=2000.0)
     ap.add_argument("--out-dir", default="reports/figures/presentations/20260722-IceT")
+    ap.add_argument("--no-member-counts", action="store_true",
+                    help="omit '(n=N)' from legend labels (publication style)")
     a = ap.parse_args()
     os.makedirs(a.out_dir, exist_ok=True)
 
@@ -79,7 +81,8 @@ def main():
 
     fig, (ax_a, ax_b, ax_c) = plt.subplots(3, 1, figsize=(9, 10), sharex=True)
 
-    ax_a.plot(cal, mean_e_plot, "C3", lw=2, label=f"SSP585 ensemble mean (n={n_e})")
+    drift_lbl = "SSP585 ensemble mean" if a.no_member_counts else f"SSP585 ensemble mean (n={n_e})"
+    ax_a.plot(cal, mean_e_plot, "C3", lw=2, label=drift_lbl)
     ax_a.plot(cal, sle_d_plot, "0.3", lw=2, ls="--", label="DET-SSP585 (deterministic)")
     ax_a.fill_between(cal, mean_e_plot - 1.96*se_ens, mean_e_plot + 1.96*se_ens,
                       color="C3", alpha=0.2, label="95% CI of ensemble mean")

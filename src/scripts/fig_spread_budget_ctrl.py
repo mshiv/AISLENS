@@ -43,6 +43,7 @@ def load_133_region_names():
 
 
 def load_ctrl_shelf_data(root, include=r"^CTRL_\d+$", shelf_start=33, min_years=50):
+    """min_years drops short members so the intersection span is not capped by them."""
     """Load CTRL regional data for the 100 shelf basins (regions 33-132)."""
     ens_dir = os.path.join(root, "CTRL")
     members = eio.discover_members(ens_dir, stats_filename="regionalStats.nc", include=include)
@@ -55,7 +56,9 @@ def load_ctrl_shelf_data(root, include=r"^CTRL_\d+$", shelf_start=33, min_years=
         if "regionalVolumeAboveFloatation" not in ds:
             continue
         yr = ds["year"].values
-        if yr[0] > 5.0 or len(yr) < min_years:
+        # NOTE: compare SPAN IN YEARS, not sample count. Output cadence varies, so a
+        # member can have many samples over a short record (CTRL_09: 297 samples, 91.8 yr).
+        if yr[0] > 5.0 or (yr[-1] - yr[0]) < min_years:
             continue
         vaf = ds["regionalVolumeAboveFloatation"].values  # (year, 133)
         sle_shelves = np.column_stack([
@@ -66,8 +69,14 @@ def load_ctrl_shelf_data(root, include=r"^CTRL_\d+$", shelf_start=33, min_years=
         nmin = len(yr) if nmin is None else min(nmin, len(yr))
     if len(stacks) < 3:
         return None, None, None
-    years = stacks[0][0][:nmin]
-    arr = np.stack([s[:nmin] for _, s in stacks], axis=0)  # (member, year, 100)
+    # Common span in YEARS (not index): interpolate every member onto one annual grid,
+    # so the horizon label means the same thing for all members regardless of cadence.
+    y_end = min(s[0][-1] for s in stacks)
+    years = np.arange(0.0, y_end + 1e-9, 1.0)
+    arr = np.stack([
+        np.column_stack([np.interp(years, yr_m, sh[:, c]) for c in range(sh.shape[1])])
+        for yr_m, sh in stacks
+    ], axis=0)  # (member, year, 100)
     return years, arr, len(stacks)
 
 
@@ -109,6 +118,10 @@ def main():
     ap.add_argument("--mesh", default=MESH)
     ap.add_argument("--start-year", type=float, default=2000.0)
     ap.add_argument("--horizon", type=float, default=300.0)
+    ap.add_argument("--min-years", type=float, default=50.0,
+                    help="drop members shorter than this (yr). CTRL has 3 short members "
+                         "(~92/109/145 yr) that otherwise cap the intersection span; "
+                         "--min-years 150 keeps 7 members over ~215 yr.")
     ap.add_argument("--out-dir", default="reports/figures/presentations/20260722-IceT")
     a = ap.parse_args()
     os.makedirs(a.out_dir, exist_ok=True)
@@ -117,7 +130,7 @@ def main():
     shelf_names = all_names[33:]  # 100 shelf names
     nshelves = len(shelf_names)
 
-    years, arr, n_mem = load_ctrl_shelf_data(a.root)
+    years, arr, n_mem = load_ctrl_shelf_data(a.root, min_years=a.min_years)
     if arr is None:
         sys.exit("CTRL: no usable members")
     cal = a.start_year + years
@@ -125,6 +138,13 @@ def main():
     print(f"CTRL: {n_mem} members, {n_yr} years, {nshelves} shelves")
 
     idx = int(np.argmin(np.abs(years - a.horizon)))
+    # argmin CLAMPS to the nearest available year: if the ensemble is shorter than the
+    # requested horizon (e.g. an in-progress CTRL reaching only ~77 yr), the figure would
+    # otherwise be labelled "yr300" while showing yr77. Use the ACTUAL year everywhere.
+    horizon_actual = float(years[idx])
+    if abs(horizon_actual - a.horizon) > 1.0:
+        print(f"[WARN] requested horizon yr{a.horizon:.0f} exceeds the ensemble's span "
+              f"(max yr{years.max():.1f}); using yr{horizon_actual:.1f} and labelling it as such.")
     arr_h = arr[:, idx, :]  # (member, shelf) at horizon
 
     # ---- Per-shelf sigma and variance fraction ----
@@ -139,7 +159,7 @@ def main():
     total_sig2_t = (sig_t ** 2).sum(axis=1)
     fraction_t = sig_t ** 2 / np.maximum(total_sig2_t[:, None], 1e-9)
 
-    print(f"\nPer-shelf variance at yr{a.horizon:.0f} (cal {a.start_year + a.horizon:.0f}):")
+    print(f"\nPer-shelf variance at yr{horizon_actual:.0f} (cal {a.start_year + horizon_actual:.0f}):")
     cumsum = 0
     for r in sorted_idx[:15]:
         cumsum += fraction[r]
@@ -187,7 +207,7 @@ def main():
     ax_c.set_yticks(y_pos_c)
     ax_c.set_yticklabels([shelf_names[r] for r in sorted_idx[:10]], fontsize=7)
     ax_c.set_xlabel("ensemble spread σ (mm SLE)")
-    ax_c.set_title(f"(c) Top 10 shelves @ yr{a.horizon:.0f}")
+    ax_c.set_title(f"(c) Top 10 shelves @ yr{horizon_actual:.0f}")
     ax_c.grid(axis="x", alpha=0.2)
 
     fig.suptitle(f"CTRL spread budget: spatial decomposition of ensemble uncertainty "

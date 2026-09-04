@@ -53,6 +53,17 @@ FAMILIES = {
 }
 KEYS = ["regionalIceVolume", "regionalVolumeAboveFloatation"]
 
+# The "common" family reads the RECOMPUTED stats (compute_regional_stats_custom_mask.py),
+# where every ensemble has been put on the 133-region shelf mask. That removes the
+# mask split entirely -- all five ensembles on any shelf. Validated against MALI's own
+# regionalStats at yr 300 to 0.00 % on both quantities.
+FAMILIES["common"] = dict(
+    nreg=133, sub="by_shelf_all_ensembles",
+    root="data/MALI/diagnostics/COMMON_MASK",
+    ens=[("CTRL", None, "#444444"), ("SSP126", None, "#0072B2"),
+         ("SSP585", None, "#D55E00"), ("SSP585_varScaled10x", None, "#7B3FA0"),
+         ("SSP585-3X", None, "#8B0000")])
+
 
 def region_names(n):
     if n == 16:
@@ -69,6 +80,25 @@ def region_names(n):
             if i < n:
                 nm[i] = r["name_133"]
     return nm
+
+
+def load_common(root, ens, nreg):
+    """Recomputed per-member stats: <root>/<ENSEMBLE>/<MEMBER>_shelfStats.nc"""
+    out = []
+    for f in sorted(glob.glob(os.path.join(root, ens, "*_shelfStats.nc"))):
+        try:
+            ds = netCDF4.Dataset(f)
+            if len(ds.dimensions["nRegions"]) != nreg:
+                ds.close(); continue
+            yr = np.asarray(ds["daysSinceStart"][:], float) / 365.0
+            V = {k: np.asarray(ds[k][:], float) for k in KEYS if k in ds.variables}
+            ds.close()
+        except Exception:
+            continue
+        if len(V) < 2 or len(yr) < 20:
+            continue
+        out.append((yr, V))
+    return out
 
 
 def load(root, ens, pat, nreg):
@@ -127,8 +157,10 @@ def main():
     grid = np.arange(1.0, a.horizon + 1e-9, 1.0)
 
     data = {}
+    src = F.get("root", a.root)
     for ens, pat, col in F["ens"]:
-        m = load(a.root, ens, pat, F["nreg"])
+        m = (load_common(src, ens, F["nreg"]) if a.family == "common"
+             else load(src, ens, pat, F["nreg"]))
         if len(m) >= 3:
             data[ens] = (m, col)
             print(f"  {ens}: N={len(m)}")
@@ -137,7 +169,9 @@ def main():
     if not data:
         sys.exit("no ensembles with this mask")
 
-    idxs = range(SHELF_START, F["nreg"]) if a.family == "shelves" else range(F["nreg"])
+    # idx 0..32 are nested aggregates (Antarctica, West Antarctica, Peninsula) and
+    # IMBIE basins -- they overlap the shelves and would dominate any ranking.
+    idxs = (range(SHELF_START, F["nreg"]) if F["nreg"] == 133 else range(F["nreg"]))
     want = {s.strip() for s in a.only.split(",")} if a.only else None
 
     summary, made = [], 0

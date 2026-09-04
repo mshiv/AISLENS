@@ -31,7 +31,8 @@ RHO_I, RHO_O, A_O = 910.0, 1028.0, 3.625e14   # kg/m3, kg/m3, m2
 # exists wins, newest first. DETERMINISTIC/DET-CTRL is the 2026-08 re-run (133-region,
 # matching CTRL); DET-CTRL/DET-CTRL is the superseded 16-region version.
 DET_PATHS = {
-    "CTRL": ["DETERMINISTIC/DET-CTRL/globalStats.nc",
+    "CTRL": ["DETERMINISTIC/DET-CTRL/output/globalStats.nc",
+             "DETERMINISTIC/DET-CTRL/globalStats.nc",
              "DET-CTRL/DET-CTRL/globalStats.nc"],
     "SSP585": ["DETERMINISTIC/DET-SSP585/globalStats.nc",
                "DET-SSP585/globalStats.nc"],
@@ -72,6 +73,26 @@ def load(root, ens, keys, pat="*_[0-9][0-9]"):
         if len(yr) < 50 or yr[0] > 5.0:
             continue
         out.append((yr, v))
+    return out
+
+
+def annual_mean(yr, v, grid):
+    """Mean of v within +/-0.5 yr of each grid year.
+
+    MUST be used instead of np.interp for any melt or mass-balance quantity.
+    globalStats is written every ~118 days and the seasonal cycle in
+    avgSubshelfMelt / totalFloatingBasalMassBal has a within-year CV of ~23%, so
+    sampling at integer years lands on an arbitrary seasonal phase and biases the
+    value by ~32%. That artefact previously produced a spurious 17% "forcing
+    mismatch" between CTRL and its deterministic twin -- with the wrong SIGN.
+    Cumulative quantities (VAF, ice volume, area) have within-year CV < 0.3% and
+    are unaffected either way.
+    """
+    out = np.full(grid.size, np.nan)
+    for i, t in enumerate(grid):
+        m = (yr >= t - 0.5) & (yr < t + 0.5) & np.isfinite(v)
+        if m.any():
+            out[i] = np.mean(v[m])
     return out
 
 
@@ -143,7 +164,7 @@ def section_B(root):
             if len(ts) >= 3:
                 ts = np.array(ts)
                 print(f"     SLE={L:5d} mm : mean yr {ts.mean():6.1f}  sd {ts.std(ddof=1):5.2f} yr"
-                      f"  range {ts.ptp():5.2f} yr  (n={len(ts)})")
+                      f"  range {np.ptp(ts):5.2f} yr  (n={len(ts)})")
 
 
 # ----------------------------------------------------------------- C
@@ -225,13 +246,15 @@ def section_E(root):
         dy, dV = read_member(det, ("volumeAboveFloatation", "avgSubshelfMelt", "floatingIceArea"))
         mem = load(root, ens, ("volumeAboveFloatation", "avgSubshelfMelt", "floatingIceArea"))
         g = np.arange(1.0, min(dy[-1], 300.0) + 1e-9, 1.0)
-        mu = np.nanmean(regrid(mem, "avgSubshelfMelt", g), axis=0)
-        mua = np.nanmean(regrid(mem, "floatingIceArea", g), axis=0)
-        dmelt = np.interp(g, dy, dV["avgSubshelfMelt"])
-        darea = np.interp(g, dy, dV["floatingIceArea"])
+        mu = np.nanmean(np.array([annual_mean(yr, V["avgSubshelfMelt"], g)
+                                  for yr, V in mem]), axis=0)
+        mua = np.nanmean(np.array([annual_mean(yr, V["floatingIceArea"], g)
+                                   for yr, V in mem]), axis=0)
+        dmelt = annual_mean(dy, dV["avgSubshelfMelt"], g)
+        darea = annual_mean(dy, dV["floatingIceArea"], g)
 
         rows = []
-        for H in (2, 5, 10, 25):
+        for H in (5, 10, 25, 50):
             if H > g[-1]:
                 continue
             i = int(np.argmin(abs(g - H)))
@@ -247,7 +270,7 @@ def section_E(root):
         print(f"          {'yr':>4} {'melt dev':>10} {'area dev':>10}")
         for H, md, ad in rows:
             print(f"          {H:4d} {md:+9.1f}% {ad:+9.2f}%")
-        print(f"          mean |melt dev| over yr2-25 = {early:.1f} %   "
+        print(f"          mean |melt dev| over yr5-50 = {early:.1f} %   "
               f"(geometry has moved only {geom:.2f} %)")
         print(f"          {'OK -- twin reproduces the prescribed input' if early < 2 else 'FAIL -- different input file; geometry cannot explain a yr-2 offset'}")
         print(f"     VERDICT: {'MATCHED -- Eq 3.12 usable' if ok else 'NOT MATCHED -- do not report drift'}")

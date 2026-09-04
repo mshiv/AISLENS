@@ -187,15 +187,16 @@ def load_jourdain_timeseries(csv_path: str, y0: int, y1: int) -> list[dict]:
     return series
 
 
-def load_mali_ensemble(y0: int, y1: int, min_members: int = 3):
-    """Load SSP585_00–09 ensemble.
+def load_mali_ensemble(y0: int, y1: int, min_members: int = 3,
+                       ensemble: str = "SSP585", pattern_glob: str = "SSP585_0[0-9]"):
+    """Load an AISLENS ensemble.
 
     Returns (std_per_basin, mean_per_basin, full_timeseries, member_aligned)
     - full_timeseries: basin_index -> (years, mean_ts, min_ts, max_ts)
     - member_aligned: list of (years, melt_array_per_member) with shape (n_members, n_years, 16)
     """
     pattern = os.path.join(
-        REPO, "data/MALI/diagnostics/ENSEMBLES/SSP585/SSP585_0[0-9]/regionalStats.nc"
+        REPO, f"data/MALI/diagnostics/ENSEMBLES/{ensemble}/{pattern_glob}/regionalStats.nc"
     )
     files = sorted(glob.glob(pattern))
     all_stds, all_means = [], []
@@ -464,9 +465,11 @@ def fig_bubble(all_data: dict[str, pd.DataFrame], mali_mean: dict, mali_std: dic
 # ─── Figure 4b: Scatter plot (no jitter, full legend) ───────────────────────
 
 def fig_scatter(all_data: dict[str, pd.DataFrame], mali_vals: dict, outpath: str,
-                metric: str = "std", ylabel: str | None = None):
+                metric: str = "std", ylabel: str | None = None,
+                mali_vals2: dict | None = None, mali_label2: str = "AISLENS-var10x"):
     """Scatter of a per-model metric ('std' or 'mean_melt'), 4 regions on x-axis.
-    mali_vals: {basin_index: value}; AISLENS star = mean over the region's basins."""
+    mali_vals: {basin_index: value}; AISLENS star = mean over the region's basins.
+    mali_vals2: optional second AISLENS variant (e.g. variance-scaled) as additional stars."""
     regions = list(REGIONS.keys())
 
     fig, ax = plt.subplots(figsize=(14, 7))
@@ -477,12 +480,20 @@ def fig_scatter(all_data: dict[str, pd.DataFrame], mali_vals: dict, outpath: str
             ax.scatter(ridx, row[metric], c=row["color"], marker=row["marker"],
                        s=90, alpha=0.85, edgecolors="white", linewidths=0.5, zorder=3)
 
-    # AISLENS stars
+    # AISLENS stars (primary)
     for rname in regions:
         ridx = regions.index(rname)
         m_s = np.mean([mali_vals[b] for b in REGIONS[rname]["basins"]])
         ax.scatter(ridx, m_s, c="black", marker="*", s=350, zorder=5,
                    edgecolors="white", linewidths=1.0)
+
+    # AISLENS stars (secondary, e.g. variance-scaled)
+    if mali_vals2 is not None:
+        for rname in regions:
+            ridx = regions.index(rname)
+            m_s = np.mean([mali_vals2[b] for b in REGIONS[rname]["basins"]])
+            ax.scatter(ridx, m_s, c="crimson", marker="*", s=350, zorder=5,
+                       edgecolors="white", linewidths=1.0)
 
     ax.set_yscale(YSCALE)
     ax.set_xticks(range(len(regions)))
@@ -495,6 +506,9 @@ def fig_scatter(all_data: dict[str, pd.DataFrame], mali_vals: dict, outpath: str
     handles = _gcm_legend_handles()
     handles.append(Line2D([0], [0], color="black", marker="*", markersize=12,
                           linestyle="None", label="AISLENS (MALI SSP585)"))
+    if mali_vals2 is not None:
+        handles.append(Line2D([0], [0], color="crimson", marker="*", markersize=12,
+                              linestyle="None", label=mali_label2))
     ax.legend(handles=handles, loc="upper right", fontsize=8, framealpha=0.9, ncol=3)
 
     fig.tight_layout()
@@ -502,10 +516,13 @@ def fig_scatter(all_data: dict[str, pd.DataFrame], mali_vals: dict, outpath: str
     print(f"Saved: {outpath}")
     plt.close(fig)
 
-    # summary CSV (all models + AISLENS, per region)
+    # summary CSV (all models + AISLENS variants, per region)
     recs = [(r, row["model"], row["forcing"], row[metric]) for r in regions for _, row in all_data[r].iterrows()]
     recs += [(r, "AISLENS SSP585", "AISLENS", float(np.mean([mali_vals[b] for b in REGIONS[r]["basins"]])))
              for r in regions]
+    if mali_vals2 is not None:
+        recs += [(r, mali_label2, "AISLENS", float(np.mean([mali_vals2[b] for b in REGIONS[r]["basins"]])))
+                 for r in regions]
     csvp = os.path.join(REPO, "reports", os.path.basename(outpath).replace(".png", f"_{metric}.csv"))
     pd.DataFrame(recs, columns=["region", "series", "family", f"{metric}_m_per_yr"]).to_csv(csvp, index=False)
     print(f"Saved: {csvp}")
@@ -513,10 +530,11 @@ def fig_scatter(all_data: dict[str, pd.DataFrame], mali_vals: dict, outpath: str
 
 # ─── Figure 5: Time series (Jourdain Fig 10 style) ─────────────────────────
 
-def fig_timeseries(all_ts, mali_ts, mali_members, outpath: str):
+def fig_timeseries(all_ts, mali_ts, mali_members, outpath: str,
+                   mali_members2: np.ndarray | None = None, mali_label2: str = "AISLENS-var10x"):
     """4-panel time series matching original Jourdain figure styling:
     MeanAnt = thin solid, PIGL = thick solid, FESOM = dashed.
-    MALI ensemble mean + spread band overlaid."""
+    MALI ensemble mean + spread band overlaid. mali_members2 = second AISLENS variant."""
     region_items = list(REGIONS.items())
     fig, axes = plt.subplots(2, 2, figsize=(13, 9), sharex=True)
     axes = axes.ravel()
@@ -545,6 +563,21 @@ def fig_timeseries(all_ts, mali_ts, mali_members, outpath: str):
         ax.fill_between(mali_yr, mali_min, mali_max, color="black", alpha=0.12, zorder=9,
                         label="AISLENS ensemble spread")
 
+        # --- Second AISLENS variant overlay ---
+        if mali_members2 is not None:
+            regional_member_means2 = []
+            for b in basins:
+                regional_member_means2.append(mali_members2[:, :, b])
+            regional_stack2 = np.stack(regional_member_means2, axis=0)
+            regional_mean_per_member2 = np.mean(regional_stack2, axis=0)
+            mali_mean2 = np.mean(regional_mean_per_member2, axis=0)
+            mali_min2 = np.min(regional_mean_per_member2, axis=0)
+            mali_max2 = np.max(regional_mean_per_member2, axis=0)
+            ax.plot(mali_yr, mali_mean2, color="crimson", lw=2.2, ls=":", zorder=10,
+                    label=mali_label2)
+            ax.fill_between(mali_yr, mali_min2, mali_max2, color="crimson", alpha=0.10,
+                            zorder=9, label=f"{mali_label2} spread")
+
         ax.set_title(rname, fontsize=12, fontweight="bold", loc="left")
         ax.set_ylabel("Sub-shelf melt (m/yr)", fontsize=10)
         ax.grid(alpha=0.2)
@@ -565,6 +598,13 @@ def fig_timeseries(all_ts, mali_ts, mali_members, outpath: str):
         Line2D([0], [0], color="black", lw=0, marker="", label=""),
         Line2D([0], [0], color="black", lw=2.2, ls=":", label="AISLENS mean"),
         mpatches.Patch(facecolor="black", alpha=0.12, label="AISLENS spread"),
+    ]
+    if mali_members2 is not None:
+        legend_elements += [
+            Line2D([0], [0], color="crimson", lw=2.2, ls=":", label=f"{mali_label2} mean"),
+            mpatches.Patch(facecolor="crimson", alpha=0.10, label=f"{mali_label2} spread"),
+        ]
+    legend_elements += [
         Line2D([0], [0], color="black", lw=0, marker="", label=""),
         Line2D([0], [0], color="black", lw=1, label="CCSM4"),
         Line2D([0], [0], color="grey",  lw=1, label="CSIRO-MK3.6"),
@@ -578,9 +618,12 @@ def fig_timeseries(all_ts, mali_ts, mali_members, outpath: str):
     ]
     fig.legend(handles=legend_elements, loc="lower center", ncol=3, fontsize=8,
                framealpha=0.9, bbox_to_anchor=(0.5, -0.06))
-    fig.suptitle("Digitized Jourdain et al. (2020) — sub-shelf melt time series\n"
-                 "with AISLENS (MALI SSP585) ensemble mean and spread",
-                 fontsize=13, fontweight="bold", y=1.01)
+    tit = ("Digitized Jourdain et al. (2020) — sub-shelf melt time series\n"
+           "with AISLENS (MALI SSP585) ensemble mean and spread")
+    if mali_members2 is not None:
+        tit = ("Digitized Jourdain et al. (2020) — sub-shelf melt time series\n"
+               "with AISLENS SSP585 (black) and SSP585_varScaled10x (crimson)")
+    fig.suptitle(tit, fontsize=13, fontweight="bold", y=1.01)
     fig.tight_layout(rect=[0, 0.06, 1, 0.95])
     fig.savefig(outpath, dpi=200, bbox_inches="tight")
     print(f"Saved: {outpath}")
@@ -866,7 +909,27 @@ def main():
         mali_std, mali_mean, mali_ts, mali_members = load_mali_ensemble(mali_y0, mali_y1)
     else:
         mali_std, mali_mean, mali_ts, mali_members = mali_std_full, mali_mean_full, mali_ts_full, mali_members_full
-    print(f"  {len(mali_std)} basins")
+    print(f"  {len(mali_std)} basins (SSP585)")
+
+    # Load variance-scaled ensemble for var10x overlay
+    print("Loading SSP585_varScaled10x ensemble...")
+    try:
+        mali_std_var10x_tmp, _, mali_ts_var10x, mali_members_var10x = load_mali_ensemble(
+            mali_y0, min(mali_y1, 2100),
+            ensemble="SSP585_varScaled10x", pattern_glob="SSP585_*")
+        mali_std_var10x = {b: _std(mali_members_var10x[:, :, b], detrend=DETREND)
+                           for b in range(mali_members_var10x.shape[-1])}
+        _, _, mali_ts_var10x_full, mali_members_var10x_full = load_mali_ensemble(
+            Y0, 2300, ensemble="SSP585_varScaled10x", pattern_glob="SSP585_*")
+        print(f"  {mali_members_var10x.shape[0]} members loaded")
+    except (FileNotFoundError, IndexError, OSError) as exc:
+        print(f"  WARNING: SSP585_varScaled10x not available — skipping var10x overlay ({exc})")
+        mali_std_var10x = None
+        mali_std_var10x_tmp = None
+        mali_members_var10x = None
+        mali_members_var10x_full = None
+        mali_ts_var10x = None
+        mali_ts_var10x_full = None
 
     all_data = {}
     all_ts = {}
@@ -893,29 +956,43 @@ def main():
                    os.path.join(figdir, "jourdain_model_universe_bubble.png"))
     if "scatter" in a.which:
         base = f"jourdain_model_universe_{'variability' if DETREND else 'raw'}_{YSCALE}"
-        fig_scatter(all_data, mali_std, os.path.join(figdir, base + ".png"))
+        fig_scatter(all_data, mali_std, os.path.join(figdir, base + ".png"),
+                    mali_vals2=mali_std_var10x)
         if a.member is not None:
             std_mem = {b: _std(mali_members[a.member, :, b], detrend=DETREND) for b in mali_std}
-            fig_scatter(all_data, std_mem, os.path.join(figdir, f"{base}_mem{a.member}.png"))
+            std_mem2 = ({b: _std(mali_members_var10x[a.member, :, b], detrend=DETREND) for b in mali_std_var10x}
+                        if mali_std_var10x is not None else None)
+            fig_scatter(all_data, std_mem, os.path.join(figdir, f"{base}_mem{a.member}.png"),
+                        mali_vals2=std_mem2)
         if a.region_agg:
             std_ra = region_agg_std(mali_members, DETREND, member=a.member)
             suf = f"_mem{a.member}" if a.member is not None else ""
-            fig_scatter(all_data, std_ra, os.path.join(figdir, f"{base}_regionagg{suf}.png"))
+            std_ra2 = (region_agg_std(mali_members_var10x, DETREND, member=a.member)
+                       if mali_members_var10x is not None else None)
+            fig_scatter(all_data, std_ra, os.path.join(figdir, f"{base}_regionagg{suf}.png"),
+                        mali_vals2=std_ra2)
     if "timeseries" in a.which:
         fig_timeseries(all_ts, mali_ts, mali_members,
-                       os.path.join(figdir, "jourdain_timeseries.png"))
+                       os.path.join(figdir, "jourdain_timeseries.png"),
+                       mali_members2=mali_members_var10x)
         fig_timeseries(all_ts, mali_ts_full, mali_members_full,
-                       os.path.join(figdir, "jourdain_timeseries_2300.png"))
+                       os.path.join(figdir, "jourdain_timeseries_2300.png"),
+                       mali_members2=mali_members_var10x_full)
     if "scatter_mean" in a.which:
         mw0, mw1 = (int(x) for x in a.mean_window.split(","))
         all_mw = {rn: load_jourdain(os.path.join(JOURDAIN_DIR, info["csv"]), mw0, mw1)
                   for rn, info in REGIONS.items()}
         mm, mts = ((mali_members, mali_ts) if mw1 <= mali_y1 else (mali_members_full, mali_ts_full))
         ais_mean = region_agg_mean(mm, mts, mw0, mw1, member=a.member)
+        mm2 = mali_members_var10x if (mw1 <= 2100 and mali_members_var10x is not None) else mali_members_var10x_full
+        mts2 = mali_ts_var10x if (mw1 <= 2100 and mali_ts_var10x is not None) else mali_ts_var10x_full
+        ais_mean2 = (region_agg_mean(mm2, mts2, mw0, mw1, member=a.member)
+                     if mm2 is not None else None)
         suf = f"_mem{a.member}" if a.member is not None else ""
         fig_scatter(all_mw, ais_mean,
                     os.path.join(figdir, f"jourdain_model_universe_mean_{mw0}_{mw1}_{YSCALE}{suf}.png"),
-                    metric="mean_melt", ylabel=f"mean {mw0}–{mw1} sub-shelf melt rate (m/yr)")
+                    metric="mean_melt", ylabel=f"mean {mw0}–{mw1} sub-shelf melt rate (m/yr)",
+                    mali_vals2=ais_mean2)
     if "timeseries_detrended" in a.which:
         suf = f"_mem{a.member}" if a.member is not None else ""
         fig_timeseries_detrended(all_ts, mali_ts, mali_members,

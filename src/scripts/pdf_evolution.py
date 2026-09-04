@@ -45,8 +45,15 @@ def parse_args():
     p.add_argument("--year-step", type=float, default=None,
                    help="If set, show distributions every N years up to the available "
                         "max (overrides --years), e.g. --year-step 10")
+    p.add_argument("--variable", default="volumeAboveFloatation",
+                   choices=["volumeAboveFloatation", "totalIceVolume",
+                            "floatingIceVolume", "groundedIceVolume"],
+                   help="globalStats variable (default: volumeAboveFloatation; "
+                        "totalIceVolume also reasonable)")
     p.add_argument("--out-dir", default=None,
                    help="Figure output dir (default: <root>/figures)")
+    p.add_argument("--no-member-counts", action="store_true",
+                   help="omit '(n=N)' from legend labels (publication style)")
     return p.parse_args()
 
 
@@ -76,14 +83,19 @@ def main():
         include = "".join(f"(?!^{n}$)" for n in bad) + include
 
     ds = eio.load_ensemble_globalstats(
-        ens_dir, variables=["volumeAboveFloatation", "daysSinceStart"],
+        ens_dir, variables=[args.variable, "daysSinceStart"],
         include=include, min_years=args.min_years, align=args.align,
     )
-    vaf = ds["volumeAboveFloatation"]
-    sle = xr.apply_ufunc(lambda a: eio.vaf_to_sle_mm(a, reference="first"), vaf)
+    raw = ds[args.variable]
+    if args.variable == "volumeAboveFloatation":
+        data = xr.apply_ufunc(lambda a: eio.vaf_to_sle_mm(a, reference="first"), raw)
+        units = "mm SLE"
+    else:
+        data = raw * 1e-15  # m^3 -> 10^6 km^3
+        units = "10$^6$ km$^3$"
     year = ds["year"].values
-    n_members = sle.sizes["member"]
-    print(f"Loaded {n_members} members for {args.ensemble}; year "
+    n_members = data.sizes["member"]
+    print(f"Loaded {n_members} members for {args.ensemble} ({args.variable}); year "
           f"{year[0]:.1f}..{year[-1]:.1f}")
 
     avail_max = year[-1]
@@ -95,20 +107,20 @@ def main():
     if any(y != r for y, r in zip(plot_years, sorted(req_years))):
         print(f"  [pdf_evolution] requested years {req_years} clamped to available "
               f"range -> using {plot_years}")
-
     # ---- gather per-year member samples + mean/skew ----
     samples_by_year = []
     for y in plot_years:
         i = int(np.argmin(np.abs(year - y)))
-        vals = sle.isel(year=i).values
+        vals = data.isel(year=i).values
         vals = vals[np.isfinite(vals)]
         samples_by_year.append((year[i], vals))
 
-    print("Ensemble MEAN and skewness of VAF->SLE distribution by year:")
+    print(f"Ensemble MEAN and skewness of {args.variable} ({units}) by year:")
+
     for yr_actual, vals in samples_by_year:
         m = np.mean(vals)
         sk = skew(vals) if len(vals) > 2 else np.nan
-        print(f"  year {yr_actual:6.1f}: n={len(vals):3d}  mean={m:8.3f} mm SLE  "
+        print(f"  year {yr_actual:6.1f}: n={len(vals):3d}  mean={m:8.3f}  "
               f"std={np.std(vals):7.3f}  skewness={sk:7.3f}")
 
     # ---- ridgeline figure ----
@@ -142,12 +154,13 @@ def main():
         m = np.mean(vals)
         ax.plot([m], [baseline], marker="o", color="k", ms=6, zorder=n_rows + 1)
         y_ticks.append(baseline)
-        y_labels.append(f"yr {yr_actual:.0f}\nn={len(vals)}, mean={m:.0f}")
+        row_lbl = f"yr {yr_actual:.0f}" if args.no_member_counts else f"yr {yr_actual:.0f}\nn={len(vals)}"
+        y_labels.append(row_lbl)
 
     ax.set_yticks(y_ticks)
     ax.set_yticklabels(y_labels)
-    ax.set_xlabel("VAF -> SLE (mm, rise positive)")
-    ax.set_title(f"{args.ensemble}: ensemble distribution of SLE over time "
+    ax.set_xlabel(f"{args.variable} ({units})")
+    ax.set_title(f"{args.ensemble}: ensemble distribution of {args.variable} over time "
                  f"({n_members} members)\nblack dot = ensemble mean, | = individual members")
     fig.tight_layout()
 

@@ -1,7 +1,7 @@
 """
 slidestyle.py — shared palette, fonts and rcParams for talk figures.
 
-Cover-plate palette (paper #F8F6F1, ink #0B2545, accent #1673A6) extended with three warm
+Cover-plate palette (ink #0B2545, accent #1673A6) on a white ground, extended with three warm
 tones for the coastal half. POS/NEG are the signed-response pair used in both halves:
 warm = more ice lost / more water, cool = less. Figures carry no title -- the slide does.
 """
@@ -15,7 +15,7 @@ from matplotlib.colors import LinearSegmentedColormap
 # ---------------------------------------------------------------- palette
 # Shiva's authoritative cover-plate palette, extended with three warm tones for the
 # coastal half.  Figures and illustrations therefore share one colour system.
-PAPER = "#F8F6F1"      # background / light ground
+PAPER = "#FFFFFF"      # background / light ground
 INK = "#0B2545"        # dominant hue -- all titles and body text
 INK_DEEP = "#1B1B1B"   # darkest detail and shadow
 INK_SOFT = "#4A5568"   # muted detail -- secondary labels

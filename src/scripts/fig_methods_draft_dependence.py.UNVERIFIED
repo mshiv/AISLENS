@@ -1,0 +1,121 @@
+#!/usr/bin/env python3
+"""
+fig_methods_draft_dependence.py -- orienting Methods figure for the background melt.
+
+Shows the draft-dependent melt relationship actually applied by the model, read from
+the initial-condition file rather than reconstructed from notes. Per cell the file
+carries a piecewise-linear parameterisation,
+
+    m(d) = alpha0 + alpha1 * d        for d below the breakpoint minDraft
+    m(d) = constantMeltValue          for d above it
+
+with d the ice-shelf draft (negative downward). Stored fields are mass balance in
+kg m^-2 s^-1 and negative for melting; they are converted here to a positive melt
+rate in m of ice per year via  -m / rho_i * s_per_yr.
+
+Two panels:
+  (a) the applied curve for each of several named shelf catchments, drawn over the
+      draft range those catchments actually occupy, so no curve is extrapolated
+      beyond where it is used
+  (b) the distribution of present-day draft in each catchment, which is what makes
+      the difference between a warm and a cold cavity legible: the curve matters
+      only where there is ice at that depth
+
+Usage
+    python3 fig_methods_draft_dependence.py
+    python3 fig_methods_draft_dependence.py --shelves Thwaites,Ronne,Totten
+"""
+from __future__ import annotations
+import os, csv, argparse
+import numpy as np
+import netCDF4
+import matplotlib; matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+
+RHO_I, RHO_O, SPY = 910.0, 1028.0, 3.15576e7
+MESH = ("data/MALI/AIS_4to20km_r01_20220907_m5_drop_bed_20m_bulldoze_troughs_75_to_400m"
+        "_Enderby_maxstiffness_0.8_TG_pinning_40maf_bedmap2_surface_ASE_05perc_seafloor_mu"
+        "_meanSatObsBMB_Paolo2023_draftDepenPiecewise_fb_A.nc")
+MASK133 = "data/MALI/aislens_draftDepen_regionMasks.nc"
+DEFAULT = ["Thwaites", "Pine_Island", "Crosson", "Totten", "Ronne", "Filchner"]
+COLS = ["#8B0000", "#D55E00", "#E69F00", "#009E73", "#0072B2", "#3B3B6D"]
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--shelves", default=",".join(DEFAULT))
+    ap.add_argument("--out", default="reports/dissertation/figures/tierA/"
+                                     "F19_methods_draft_dependence.png")
+    a = ap.parse_args()
+    shelves = [s.strip() for s in a.shelves.split(",")]
+    os.makedirs(os.path.dirname(a.out), exist_ok=True)
+
+    d = netCDF4.Dataset(MESH)
+    g = lambda k: np.asarray(d[k][:], float).ravel()
+    a0, a1 = g("draftDepenBasalMeltAlpha0"), g("draftDepenBasalMeltAlpha1")
+    brk, const = g("draftDepenBasalMelt_minDraft"), g("draftDepenBasalMelt_constantMeltValue")
+    thick, bed = g("thickness"), g("bedTopography")
+    # The parameterisation is evaluated only beneath FLOATING ice, so grounded cells
+    # must be excluded: including them produces impossible drafts (a 4 km grounded
+    # column is not a 3.5 km shelf draft) and mixes in cells the curve never sees.
+    floating = (thick > 1.0) & (thick < (RHO_O / RHO_I) * np.maximum(0.0, -bed))
+    lower = -(RHO_I / RHO_O) * thick        # hydrostatic draft, valid where floating
+    d.close()
+
+    names = [f"r{i}" for i in range(133)]
+    for r in csv.DictReader(open("docs/region_mapping_133_to_ismip6.csv")):
+        names[int(r["idx_133"])] = r["name_133"]
+    dm = netCDF4.Dataset(MASK133)
+    M = np.asarray(dm["regionCellMasks"][:])
+    dm.close()
+    if M.shape[0] > M.shape[1]:
+        M = M.T
+
+    def rate(mb):                      # kg m^-2 s^-1 (negative = melt) -> m ice / yr
+        return -mb / RHO_I * SPY
+
+    fig, (axA, axB) = plt.subplots(1, 2, figsize=(12.4, 4.8))
+    print(f"{'shelf':<14}{'cells':>7}{'draft p5':>10}{'p95':>9}"
+          f"{'melt@median draft':>20}")
+    for k, sh in enumerate(shelves):
+        if sh not in names:
+            print(f"  {sh}: not in mask"); continue
+        sel = M[names.index(sh)].astype(bool) & floating & (a0 != 0)
+        if sel.sum() < 20:
+            print(f"  {sh}: too few cells"); continue
+        draft = lower[sel]
+        lo, hi = np.percentile(draft, 2), np.percentile(draft, 98)
+        dd = np.linspace(lo, hi, 200)
+        # catchment-representative parameters: median over its cells
+        p0, p1 = np.median(a0[sel]), np.median(a1[sel])
+        pb, pc = np.median(brk[sel]), np.median(const[sel])
+        curve = np.where(dd < pb, p0 + p1 * dd, pc)
+        axA.plot(rate(curve), dd, color=COLS[k % len(COLS)], lw=2,
+                 label=sh.replace("_", " "))
+        axA.plot([rate(p0 + p1 * pb)], [pb], "o", color=COLS[k % len(COLS)], ms=4)
+        axB.hist(draft, bins=40, orientation="horizontal", histtype="step",
+                 color=COLS[k % len(COLS)], lw=1.6, density=True)
+        med = np.median(draft)
+        mm = rate(p0 + p1 * med if med < pb else pc)
+        print(f"{sh:<14}{sel.sum():7d}{lo:10.0f}{hi:9.0f}{mm:20.2f}")
+
+    axA.set_xlabel("applied basal melt (m ice yr$^{-1}$)")
+    axA.set_ylabel("ice-shelf draft (m)")
+    axA.set_title("(a) draft-dependent melt relationship\n"
+                  "drawn only over the draft range each catchment occupies", fontsize=10)
+    axA.grid(alpha=.3); axA.legend(fontsize=8)
+    axA.axvline(0, color="k", lw=.5, ls=":")
+    axB.set_xlabel("density"); axB.set_ylabel("ice-shelf draft (m)")
+    axB.set_title("(b) present-day draft distribution", fontsize=10)
+    axB.grid(alpha=.3)
+    axB.set_ylim(axA.get_ylim())
+    fig.suptitle("Background sub-shelf melt parameterisation, as applied "
+                 "(filled circle = piecewise breakpoint)", fontsize=12)
+    fig.tight_layout(rect=(0, 0, 1, 0.93))
+    fig.savefig(a.out, dpi=150, bbox_inches="tight")
+    print(f"\nwrote {a.out}")
+
+
+if __name__ == "__main__":
+    main()

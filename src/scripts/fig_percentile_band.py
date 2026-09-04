@@ -25,6 +25,8 @@ def main():
     ap.add_argument("--align", default="intersection",
                     help="intersection = full-ensemble years only (recommended)")
     ap.add_argument("--out-dir", default="reports")
+    ap.add_argument("--no-member-counts", action="store_true",
+                    help="omit '(n=N)' from legend labels (publication style)")
     a = ap.parse_args()
     os.makedirs(a.out_dir, exist_ok=True)
 
@@ -39,9 +41,10 @@ def main():
         q25, q75 = np.nanpercentile(v, 25, 0), np.nanpercentile(v, 75, 0)
         q05, q95 = np.nanpercentile(v, 5, 0), np.nanpercentile(v, 95, 0)
         n = sle.sizes["member"]
+        lbl = ens if a.no_member_counts else f"{ens} (n={n})"
         ax.fill_between(yr, q05, q95, color=col, alpha=0.12)
         ax.fill_between(yr, q25, q75, color=col, alpha=0.28)
-        ax.plot(yr, med, col, lw=2, label=f"{ens} (n={n})")
+        ax.plot(yr, med, col, lw=2, label=lbl)
         # (b) band WIDTH over time = division-free "uncertainty magnitude" (mm); no |mean| in it
         w90, wiqr = q95 - q05, q75 - q25
         axw.plot(yr, w90, col, lw=2, label=f"{ens} 90% (Q95−Q5)")
