@@ -34,6 +34,11 @@ RECUTS = [
      (0.63, 0.48, 1.0, 1.0), "Fort Pulaski scenario panel alone"),
     ("S08_observed_melt", f"{CH1}/ch1_adusumilli_fig1.png",
      (0.0, 0.0, 1.0, 1.0), "observed basal melt, full plate"),
+    # source field for this one is not on the laptop -- the SORRM symlink in
+    # data/external is dangling and the MALI-mesh regrid is a 20-step test file --
+    # so it goes in as a plate rather than being replotted in the deck palette
+    ("S09_melt_spectrum", f"{AIS}/reports/figures/sorrm_sector_spectrum.png",
+     (0.0, 0.0, 1.0, 1.0), "F_v power by frequency band, per sector"),
     ("S10_experiment_design", f"{CH1}/ch1_emulation_framework.png",
      (0.0, 0.0, 1.0, 0.53), "Antarctic half of the emulation framework"),
     ("S11_mean_trajectory", f"{FIGS}/tierA/std_vs_mean_volumeAboveFloatation.png",

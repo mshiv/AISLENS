@@ -46,9 +46,23 @@ def main():
     bed, h0 = glt.rd(glt.MESH, "bedTopography"), glt.rd(glt.MESH, "thickness")
     tree = cKDTree(np.column_stack([x, y]))
 
-    def sample(field, pts):
+    def sample(field, pts, only=None):
+        """Inverse-distance blend of the 3 nearest cells -- the mesh is 4-20 km, so plain
+        nearest-neighbour turns a smooth bed into a staircase.
+
+        `only` restricts the blend to cells satisfying a mask, and zeroes the result
+        where the nearest cell fails it. Without that, blending across the calving
+        front mixes 300 m of ice with open water and draws the terminus as a taper
+        instead of a cliff -- which reads as a shelf that is thickest at its seaward
+        edge, the opposite of the truth.
+        """
         d, idx = tree.query(pts, k=3)
         w = 1.0 / np.maximum(d, 1.0)
+        if only is not None:
+            w = w * only[idx]
+            tot = w.sum(axis=1)
+            w = np.where(tot[:, None] > 0, w / np.maximum(tot[:, None], 1e-30), 0.0)
+            return np.where(only[idx[:, 0]], np.nansum(field[idx] * w, axis=1), 0.0)
         w /= w.sum(axis=1, keepdims=True)
         return np.nansum(field[idx] * w, axis=1)
 
@@ -63,7 +77,7 @@ def main():
         s, pts = s[j0:j1 + 1], pts[j0:j1 + 1]
 
     b = sample(bed, pts)
-    h = sample(h0, pts)
+    h = sample(h0, pts, only=h0 > 1.0)
     hflot = (RHO_O / RHO_I) * np.maximum(0.0, -b)
     s_gl, _ = glt.gl_position(s, h, hflot)
     s = s - s_gl
@@ -93,11 +107,14 @@ def main():
     ax.plot(sk, b, color=BED, lw=2.0, zorder=3)
     ax.axhline(0, color=ds.INK_SOFT, lw=.8, ls=(0, (4, 3)), zorder=3)
 
-    # ice reads white against blue water -- the two must not share a tone
-    ax.fill_between(sk, base, surf, where=grounded, color=ds.FIELD, zorder=4)
-    ax.fill_between(sk, base, surf, where=floating & ice, color=ds.FIELD, zorder=4)
+    # ice reads white against blue water -- the two must not share a tone. One fill
+    # for grounded and floating together, or where= leaves a gap at the grounding line.
+    ax.fill_between(sk, base, surf, where=ice, color=ds.FIELD, interpolate=True, zorder=4)
     ax.plot(sk, surf, color=ds.INK, lw=2.2, zorder=5)
     ax.plot(sk, base, color=ds.INK, lw=2.2, zorder=5)
+    # the terminus is a cliff, so close the profile with the calving face
+    j = int(np.flatnonzero(ice)[0])
+    ax.plot([sk[j], sk[j]], [base[j], surf[j]], color=ds.INK, lw=2.2, zorder=5)
     ax.plot([0], [np.interp(0.0, sk, b)], "v", ms=13, color=ds.MARSH_DEEP, zorder=8,
             clip_on=False)
     ax.axvline(0, color=ds.MARSH_DEEP, lw=1.1, alpha=.55, zorder=3)
