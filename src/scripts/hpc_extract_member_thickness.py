@@ -2,10 +2,11 @@
 """
 hpc_extract_member_thickness.py — per-member ice thickness, subset to shelf catchments. RUN ON HPC.
 
-Writes one .npz per ensemble: cells (indices into nCells), years, members, h (M, T, n) float32.
-Only thickness is pulled -- bed, coordinates and areas are static in the mesh file, and
-grounded/floating is recomputed from flotation because cellMask is written as zeros in these runs.
-Takes explicit years or a START:STOP:STEP range.
+Writes one .npz per ensemble: cells (indices into nCells), years, members, h (M, T, n) float32,
+have (M, T) bool. Only thickness is pulled -- bed, coordinates and areas are static in the mesh
+file, and grounded/floating is recomputed from flotation because cellMask is written as zeros in
+these runs. Takes explicit years or a START:STOP:STEP range; each output_state file holds five
+annual slices, so any year can be asked for and the slice is matched on xtime.
 """
 from __future__ import annotations
 
@@ -29,6 +30,17 @@ ENS_ROOT = os.path.join(_MALI, "ENSEMBLES")
 def year_of(path):
     m = re.search(r"(\d{4})", os.path.basename(path))
     return int(m.group(1)) if m else None
+
+
+def slice_of(ds, year):
+    """Index of `year` among the file's time slices, or None if it is not in this file."""
+    if "xtime" not in ds.variables:
+        return 0
+    years = []
+    for r in ds["xtime"][:]:
+        s = "".join(c.decode() if isinstance(c, bytes) else str(c) for c in r)
+        years.append(int(s[:4]) if s[:4].isdigit() else -1)
+    return years.index(year) if year in years else None
 
 
 def main():
@@ -111,35 +123,38 @@ def main():
             print(f"  {ens}: using {len(members)} of {len(cand)} dirs "
                   f"(skipped {', '.join(sorted(set(cand) - set(members))[:4])} ...)")
         H = np.full((len(members), len(a.years), cells.size), np.nan, np.float32)
-        got = 0
+        have = np.zeros((len(members), len(a.years)), bool)
         for mi, mem in enumerate(members):
-            files = states(mem)
-            by_year = {}
-            for f in files:
-                yr = year_of(f)
-                if yr in a.years:
-                    by_year.setdefault(yr, f)
+            # each file starts at the year in its name and runs five annual slices,
+            # so the file for a given year is the latest one starting at or before it
+            starts = sorted((year_of(f), f) for f in states(mem) if year_of(f))
             for ti, yr in enumerate(a.years):
-                f = by_year.get(yr)
+                f = next((p for y0, p in reversed(starts) if y0 <= yr), None)
                 if f is None:
                     continue
-                if mi == 0 and ti == 0:
-                    print(f"  {ens}: {len(members)} members, first file {f}")
                 dd = netCDF4.Dataset(f)
                 th = np.asarray(dd["thickness"][:])
+                si = slice_of(dd, yr) if th.ndim == 2 else 0
                 dd.close()
-                th = th[-1] if th.ndim == 2 else th          # last slice in the file
-                H[mi, ti] = th.ravel()[cells].astype(np.float32)
-                got += 1
+                if si is None:
+                    continue
+                if not have.any():
+                    print(f"  {ens}: {len(members)} members, first read {yr} = "
+                          f"slice {si} of {f}")
+                H[mi, ti] = (th[si] if th.ndim == 2 else th).ravel()[cells].astype(np.float32)
+                have[mi, ti] = True
         icy = np.nansum(H > 1.0, axis=2)          # cells with ice, per member and year
-        if got and not icy.any():
+        if have.any() and not icy.any():
             print(f"  ! {ens}: every field read is empty -- the output_state files hold "
                   f"no thickness. Check one with ncdump -v thickness before trusting this.")
         np.savez_compressed(out, cells=cells, years=np.array(a.years, np.int32),
-                            members=np.array(members), h=H)
-        print(f"wrote {out}   members={len(members)}  fields={got}  "
+                            members=np.array(members), h=H, have=have)
+        span = [f"{m}:{a.years[np.flatnonzero(have[i])[0]]}-{a.years[np.flatnonzero(have[i])[-1]]}"
+                for i, m in enumerate(members) if have[i].any()]
+        print(f"wrote {out}   members={len(members)}  fields={int(have.sum())}  "
               f"median icy cells/field {int(np.median(icy[icy > 0])) if (icy > 0).any() else 0}  "
               f"{os.path.getsize(out)/1e6:.1f} MB")
+        print(f"  coverage: {' '.join(span)}")
 
 
 if __name__ == "__main__":
