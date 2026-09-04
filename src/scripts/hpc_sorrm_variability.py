@@ -103,7 +103,11 @@ def main():
                     help="Welch segment length; sets the longest period resolved")
     ap.add_argument("--rows", type=int, default=20, help="grid rows per streamed block")
     ap.add_argument("--min-mean", type=float, default=0.0,
-                    help="skip cells whose |mean| is below this (open ocean, land)")
+                    help="skip cells whose |mean| is below this")
+    ap.add_argument("--var-percentile", type=float, default=0.0,
+                    help="drop cells below this percentile of standard deviation; a first "
+                         "pass measures the distribution. Cells that are flat apart from a "
+                         "slow drift otherwise put all their power in the lowest band.")
     ap.add_argument("--out", default="reports/sorrm_variability")
     ap.add_argument("--list-vars", action="store_true")
     a = ap.parse_args()
@@ -141,11 +145,28 @@ def main():
             raise SystemExit(f"seasonality grid {Vs.shape[1:]} != field grid {V.shape[1:]}")
         print(f"seasonality {Vs.name} {Vs.shape}")
 
+    # first pass for the variance threshold: std only, no spectra
+    std_thresh = 0.0
+    if a.var_percentile > 0:
+        allsd = np.full(ny * nx, np.nan, np.float32)
+        for r0 in range(0, ny, a.rows):
+            r1 = min(r0 + a.rows, ny)
+            b0 = np.ma.filled(np.asarray(V[:, r0:r1, :], dtype=np.float32), np.nan)
+            b0 = b0.reshape(nt, -1)
+            allsd[r0 * nx: r0 * nx + b0.shape[1]] = np.nanstd(b0, axis=0)
+            print(f"  pass 1 rows {r1}/{ny}", end="\r")
+        good = np.isfinite(allsd) & (allsd > 0)
+        std_thresh = float(np.percentile(allsd[good], a.var_percentile))
+        print(f"\n  std threshold at p{a.var_percentile:g} = {std_thresh:.4g}; "
+              f"keeps {int((allsd[good] >= std_thresh).sum()):,} of {int(good.sum()):,} cells")
+
     # streamed pass: domain and sector sums, and the per-cell band split
     dom_sum = np.zeros(nt); dom_n = 0
     sec_sum = np.zeros((len(SECTORS), nt)); sec_n = np.zeros(len(SECTORS), int)
     cell_frac = np.full((len(BANDS), ny * nx), np.nan, np.float32)
     seas_frac = np.full(ny * nx, np.nan, np.float32)
+    var_v_cell = np.full(ny * nx, np.nan, np.float32)
+    var_s_cell = np.full(ny * nx, np.nan, np.float32)
     var_v_tot = var_s_tot = 0.0
     nok = 0
     for r0 in range(0, ny, a.rows):
@@ -156,6 +177,8 @@ def main():
         ok = np.isfinite(blk).all(axis=0) & (np.nanstd(blk, axis=0) > 0)
         if a.min_mean > 0:
             ok &= np.abs(np.nanmean(blk, axis=0)) >= a.min_mean
+        if std_thresh > 0:
+            ok &= np.nanstd(blk, axis=0) >= std_thresh
         if ok.any():
             dom_sum += blk[:, ok].sum(axis=1); dom_n += int(ok.sum())
             if sec is not None:
@@ -175,6 +198,8 @@ def main():
                     seas_frac[base + np.flatnonzero(ok)] = np.where(
                         (vv + vs) > 0, vs / (vv + vs), np.nan)
                 var_v_tot += float(np.nansum(vv)); var_s_tot += float(np.nansum(vs))
+                var_v_cell[base + np.flatnonzero(ok)] = vv
+                var_s_cell[base + np.flatnonzero(ok)] = vs
             nok += int(ok.sum())
         print(f"  rows {r1}/{ny}  cells kept {nok:,}", end="\r")
     d.close()
@@ -203,7 +228,10 @@ def main():
     np.savez_compressed(a.out + "_series.npz", domain=dom.astype(np.float32),
                         dt_years=dt_yr, freq=f, psd=p, ny=ny, nx=nx,
                         band_fraction=cell_frac.reshape(len(BANDS), ny, nx),
-                        seasonal_fraction=seas_frac.reshape(ny, nx))
+                        seasonal_fraction=seas_frac.reshape(ny, nx),
+                        var_v=var_v_cell.reshape(ny, nx),
+                        var_s=var_s_cell.reshape(ny, nx),
+                        nperseg=nps, std_threshold=std_thresh)
     print(f"wrote {a.out}_bands.csv and {a.out}_series.npz\n")
     for nm, v, n in rows:
         print(f"  {nm:10s} n={n:9,}  " +
