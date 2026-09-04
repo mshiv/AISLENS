@@ -1,13 +1,10 @@
 #!/usr/bin/env python3
 """
-fig_mali_mesh.py — what the ice-sheet model is, for people who have not seen one.
+fig_mali_mesh.py -- the ice-sheet model in two panels.
 
-Two panels from the MALI mesh file itself: the variable-resolution grid, and the observed
-surface speed it is refined to resolve. The point is that the mesh is fine exactly where the
-ice moves fast and the grounding line lives, and coarse over the slow interior.
-
-Cell spacing is sqrt(areaCell), which is the effective spacing of a Voronoi cell to within a
-few percent -- close enough to label a mesh, and it is what the file actually stores.
+Variable-resolution mesh, and the observed surface speed it is refined for. Cell spacing
+is sqrt(areaCell). Statistics are area-weighted: by cell count the median spacing is the
+same everywhere.
 """
 from __future__ import annotations
 

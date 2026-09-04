@@ -1,19 +1,17 @@
 #!/usr/bin/env python3
 """
-fig_gl_members.py — grounding-line migration drawn from members, not the ensemble mean.
+fig_gl_members.py -- grounding-line retreat from members, computed per member.
 
-Averaging geometry across members smears a moving ice edge, and the averaged geometry satisfies
-no member's flotation condition. Everything here is computed per member and only then compared.
+Default: retreat against time for every member of every ensemble, scenario separation
+and realisation spread on one axis.
+  --shelves ENS  retreat against time for several shelves under one ensemble
+  --section ENS  ice surface and base along the transect at one year
 
-Default: grounding-line position against time for every member of every ensemble, which puts
-scenario separation and realisation spread in the same units on the same axis.
---section ENS: the year-slice view, every member's ice surface and base along the transect.
+Sections follow observed ice flow. The grounding line is the seaward edge of the
+grounded body connected to the interior. Spread uses members with a complete record.
 
-Needs the per-member extract from hpc_extract_member_thickness.py in
-reports/dissertation/figures/spatial/members/.
-
-Validated for Thwaites. The 1-D crossing rule depends on where the transect is drawn -- see
-fig_gl_transect.py -- so use fig_grounded_area.py for multi-shelf comparison.
+Needs the extract from hpc_extract_member_thickness.py under
+reports/dissertation/figures/spatial/.
 """
 from __future__ import annotations
 
@@ -132,8 +130,7 @@ def series(ens, g, memdir):
             if got[mi, ti]:
                 p, _ = gl_position_main(g["s"], h_of(mi, ti), g["hflot"])
                 gl[mi, ti] = (p - g["s_gl0"]) / 1e3 if np.isfinite(p) else np.nan
-        # once the line jumps back seaward the crossing rule has picked a different
-        # feature; everything after that is not a grounding line for this glacier
+        # a seaward jump means the rule has picked up a different feature
         run = -np.inf
         for ti in range(len(years)):
             if np.isfinite(gl[mi, ti]):
@@ -141,9 +138,7 @@ def series(ens, g, memdir):
                     gl[mi, ti:] = np.nan
                     break
                 run = max(run, gl[mi, ti])
-    # Spread is only meaningful across members that ran the whole record. SSP585_10
-    # and _11 hold output from 2200 only and sit a full output step behind the ten
-    # production members; counting them turns a 0.7 km spread into 73 km.
+    # spread is only meaningful across members that ran the whole record
     complete = got.all(axis=1)
     return dict(years=years, gl=gl, H=H, got=got, members=members, h_of=h_of,
                 complete=complete)
@@ -176,6 +171,10 @@ def fig_scenarios(g, memdir, shelf, out, xlim=None, ylim=None):
                      np.nanpercentile(np.where(live, G, np.nan), 75, axis=0)
                      - np.nanpercentile(np.where(live, G, np.nan), 25, axis=0), np.nan)
         axs.plot(t, q, color=colr, lw=2.0, zorder=3)
+        # full range as well: a pair that jumps early sits outside the quartiles
+        rr = np.where(live, np.nanmax(np.where(live, G, np.nan), axis=0)
+                      - np.nanmin(np.where(live, G, np.nan), axis=0), np.nan)
+        axs.plot(t, rr, color=colr, lw=1.0, alpha=.45, ls=(0, (3, 2)), zorder=2)
 
         fin = np.flatnonzero(np.isfinite(G).sum(axis=0) >= 2)[-1]
         j = int(np.nanargmax(q)) if np.isfinite(q).any() else 0
@@ -190,8 +189,11 @@ def fig_scenarios(g, memdir, shelf, out, xlim=None, ylim=None):
     if ylim:
         ax.set_ylim(*ylim)
     ax.set_ylabel("grounding-line retreat\n(km inland of year 0)", labelpad=6)
-    axs.set_ylabel("spread across\nrealisations (km, IQR)", labelpad=6)
+    axs.set_ylabel("spread across\nrealisations (km)", labelpad=6)
     axs.set_xlabel("model year", labelpad=7)
+    axs.text(0.995, 0.92, "solid: interquartile   dashed: full range",
+             transform=axs.transAxes, fontsize=9.5, color=ds.INK_SOFT,
+             ha="right", va="top")
     ax.text(0.0, 1.045, f"{shelf.replace('_', ' ')} · one line per realisation, "
             f"bold line is that ensemble's mean",
             transform=ax.transAxes, fontsize=11, color=ds.INK_SOFT, ha="left", va="bottom")

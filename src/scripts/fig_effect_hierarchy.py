@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-fig_effect_hierarchy.py — every effect Chapter 3 measures, ranked on one log axis in mm SLE.
+fig_effect_hierarchy.py -- every effect Chapter 3 measures, ranked on one log axis.
 
 Scenario change, 3x melt trend, gross regional reorganisation, net continental drift, and
-ensemble sigma at 1x and 10x. The ordering is the result: gross reorganisation is the
-second-largest term, and almost none of it survives the continental sum.
+ensemble sigma at 1x and 10x. Position carries the value; the top axis reads the same
+positions as a share of the scenario effect. Open markers are measured at 10x amplitude.
 """
 from __future__ import annotations
 
@@ -19,18 +19,15 @@ import slidestyle as ds  # noqa: E402
 
 ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
 
-# label, value (mm SLE), family, footnote, diagnostic-only
-# `diag` marks quantities measured under the exaggerated 10x forcing. Those are
-# diagnostics of the response, not predictions -- 10x is not a climate anyone runs.
-# sigma at 1x is NOT one of them: it is a physical number and the note used to say
-# otherwise by lumping every variability term together.
+# label, value (mm SLE), family, footnote, measured-at-10x
+# the last flag marks quantities measured under the exaggerated 10x forcing
 BARS = [
     ("changing the emissions scenario", 1619.1, "forced",
      "SSP5-8.5 − SSP1-2.6 ensemble mean · year 300", False),
     ("gross regional reorganisation\nfrom ocean variability", 177.0, "var",
      "sum of |basin drift| · year 300", True),
-    ("tripling the melt trend", 292.9, "forced",
-     "SSP585-3X − SSP585 · year 178", False),
+    ("tripling the melt trend", 349.8, "forced",
+     "SSP585-3X − SSP585 · year 200 · N = 8", False),
     ("what that reorganisation leaves\nin the continental total", 12.1, "var",
      "net drift · year 300", True),
     ("spread across realisations, 10×", 6.6, "var",
@@ -62,9 +59,7 @@ def main():
     fig, ax = plt.subplots(figsize=(12.6, 5.8))
     fig.subplots_adjust(left=0.285, right=0.965, top=0.715, bottom=0.145)
 
-    # Dots, not bars. On a log axis a bar's length depends on where the axis starts,
-    # so the 1,619 mm bar read as ten times the 2.1 mm bar when it is really 771 times.
-    # A dot carries position only, which is the honest encoding here.
+    # dots, not bars: on a log axis bar length depends on where the axis starts
     for y, v, c, b in zip(ypos, vals, cols, bars):
         ax.plot([ax_lo, v], [y, y], color=ds.RULE, lw=0.8, zorder=2)
         if b[4]:
@@ -80,8 +75,7 @@ def main():
     ax.set_xlabel("effect on Antarctic sea-level contribution  (mm)", labelpad=8)
     ax.tick_params(axis="x", length=3)
 
-    # the same axis read as a share of the scenario effect, which is the comparison
-    # the slide is actually making
+    # the same positions read as a share of the scenario effect
     sec = ax.secondary_xaxis("top", functions=(lambda x: 100 * x / REF,
                                                lambda x: x * REF / 100))
     sec.set_xscale("log")
@@ -124,7 +118,7 @@ def main():
 
     fig.text(0.008, 0.008,
              "logarithmic axis, so position carries the value and spacing carries ratios · "
-             "the 3× melt term is at year 178, the deepest horizon its members share",
+             "the 3× melt term is at year 200, where eight of its members remain",
              fontsize=8.8, color=ds.INK_SOFT, ha="left", va="bottom", style="italic")
 
     fig.savefig(a.out, bbox_inches="tight", pad_inches=0.14)

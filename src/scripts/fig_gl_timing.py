@@ -1,16 +1,11 @@
 #!/usr/bin/env python3
 """
-fig_gl_timing.py — when each realisation's grounding line passes a given point.
+fig_gl_timing.py -- the year each realisation's grounding line passes a given point.
 
-Five-yearly output could not answer this: it quantises the retreat into steps, so realisation
-disagreement showed up as tens of kilometres of position at a shared year and could not be
-separated from the sampling. Annual fields turn the same disagreement into what it physically
-is, a difference in timing.
+Left: annual trajectories through the retreat. Right: crossing year per member, one dot
+each, for a set of distances.
 
-Left: annual trajectories through the retreat. Right: the year each member crosses a set of
-distances, one dot per member.
-
-Needs the annual extract in reports/dissertation/figures/spatial/members_annual/.
+Needs the annual extract under reports/dissertation/figures/spatial/members_annual/.
 """
 from __future__ import annotations
 

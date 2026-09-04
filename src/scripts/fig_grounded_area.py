@@ -7,10 +7,8 @@ partition of grounded ice among the named shelves in the 133-region mask. No tra
 crossing rule, so it is comparable across shelves. Band recomputes the area at h_mean -/+
 sigma_h.
 
-This computes f(mean(h)) rather than mean(f(h)). Checked against the per-member extract on the
-60,281 cells it covers, SSP585: the two agree to -0.005% at year 50, -0.33% at its worst
-(years 200-250) and -0.03% at year 300. An area integral averages out the member disagreement
-that makes the 1-D transect unusable, so this figure does not need rebuilding from members.
+Computes f(mean(h)). Against the per-member extract under SSP585 the two agree to within
+0.33%, so an area integral does not need rebuilding from members.
 """
 from __future__ import annotations
 

@@ -1,24 +1,16 @@
 #!/usr/bin/env python3
 """
-hpc_sorrm_variability.py — how SORRM's melt variance splits across frequency. RUN ON HPC.
+hpc_sorrm_variability.py -- frequency split of SORRM melt variance. RUN ON HPC.
 
-Feed this the VARIABILITY component F_v, not the full regridded field. The full field carries
-a linear drift and the draft dependence, so its spectrum reports the trend rather than the
-variability the generator resamples.
+Takes the variability component F_v; the full field carries the drift and the draft
+dependence. Fields are several GB and are streamed in row blocks.
 
-Fields are several GB, so they are streamed in row blocks and never held whole. What comes
-back is small: the domain and per-sector band splits as CSV, plus an npz with the domain
-anomaly series, its spectrum, the per-cell band fractions and the per-cell seasonal fraction.
-
-The question it answers is whether the ocean forcing the generator resamples is mostly the
-seasonal cycle or mostly slower. That decides whether phase randomisation is doing anything an
-ice sheet can feel: a 4-20 km model integrating over centuries responds to a multidecadal
-signal quite differently than to a seasonal one. Passing --seasonality alongside gives
-var(F_s)/(var(F_s)+var(F_v)) directly, which is a cleaner statement of the same thing than
-reading a seasonal band off one file's spectrum.
+Writes a bands CSV and an npz holding the domain anomaly series, its spectrum, the
+per-cell band fractions and the per-cell seasonal fraction. Passing --seasonality adds
+var(F_s)/(var(F_s)+var(F_v)).
 
 Bands, in years: seasonal < 1.5, interannual 1.5-10, decadal 10-30, multidecadal > 30.
-The timestep is read from the file; --dt-months overrides it. Run --list-vars first.
+Timestep is read from the file. Run --list-vars first.
 """
 from __future__ import annotations
 
@@ -71,9 +63,8 @@ def pick_var(d, want=None):
 def band_fractions(psd, freq_per_yr):
     """Fraction of total power per band. psd is (nfreq,) or (nfreq, ncell).
 
-    Rectangular sums, not trapezoid: welch spacing is uniform so df cancels, the bands
-    tile the axis so the fractions sum to one, and the multidecadal band holds a single
-    bin at any realistic segment length -- which a trapezoid rule drops entirely.
+    Rectangular sums: welch spacing is uniform so df cancels, the bands tile the axis
+    so the fractions sum to one, and a band holding a single bin still counts.
     """
     out, tot = [], psd.sum(axis=0)
     for _, lo, hi in BANDS:
@@ -100,8 +91,7 @@ def main():
 
     ap = argparse.ArgumentParser()
     ap.add_argument("--field", required=True,
-                    help="the variability component F_v, not the full field -- the full "
-                         "field carries the linear drift and the draft dependence")
+                    help="the variability component F_v")
     ap.add_argument("--seasonality", default=None,
                     help="optional F_s file; adds var(F_s)/(var(F_s)+var(F_v)) per cell "
                          "and for the domain. Variance needs no time alignment, so the "

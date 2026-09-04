@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
 """
-fig_ice_ocean_system.py — how the ocean reaches grounded ice, on a real section.
+fig_ice_ocean_system.py -- the ice-ocean system on a real section.
 
-An explainer for people who do not work on ice sheets, drawn on the actual Thwaites bed and
-initial ice geometry rather than a cartoon: grounded sheet, floating shelf, grounding line,
-cavity, and the bed that deepens inland. The lower panel measures that inland deepening,
-which is the geometric condition behind marine ice-sheet instability.
+Grounded sheet, floating shelf, grounding line and cavity along the present-day Thwaites
+flowline, with warm inflow and basal melt marked. The lower panel measures how far the
+bed deepens inland, which is the geometric condition behind marine ice-sheet instability.
 
-Year 0 only -- no ensemble, no result. The transect machinery is shared with fig_gl_transect.py.
+Year 0 only. An explainer, not a result.
 """
 from __future__ import annotations
 
@@ -47,14 +46,10 @@ def main():
     tree = cKDTree(np.column_stack([x, y]))
 
     def sample(field, pts, only=None):
-        """Inverse-distance blend of the 3 nearest cells -- the mesh is 4-20 km, so plain
-        nearest-neighbour turns a smooth bed into a staircase.
+        """Inverse-distance blend of the 3 nearest cells; the mesh is 4-20 km, so
+        nearest-neighbour alone turns a smooth bed into a staircase.
 
-        `only` restricts the blend to cells satisfying a mask, and zeroes the result
-        where the nearest cell fails it. Without that, blending across the calving
-        front mixes 300 m of ice with open water and draws the terminus as a taper
-        instead of a cliff -- which reads as a shelf that is thickest at its seaward
-        edge, the opposite of the truth.
+        `only` keeps the blend inside a mask, so the calving front stays a cliff.
         """
         d, idx = tree.query(pts, k=3)
         w = 1.0 / np.maximum(d, 1.0)
@@ -107,8 +102,7 @@ def main():
     ax.plot(sk, b, color=BED, lw=2.0, zorder=3)
     ax.axhline(0, color=ds.INK_SOFT, lw=.8, ls=(0, (4, 3)), zorder=3)
 
-    # ice reads white against blue water -- the two must not share a tone. One fill
-    # for grounded and floating together, or where= leaves a gap at the grounding line.
+    # one fill for grounded and floating together, so no gap at the grounding line
     ax.fill_between(sk, base, surf, where=ice, color=ds.FIELD, interpolate=True, zorder=4)
     ax.plot(sk, surf, color=ds.INK, lw=2.2, zorder=5)
     ax.plot(sk, base, color=ds.INK, lw=2.2, zorder=5)
@@ -140,8 +134,7 @@ def main():
             ax.annotate("", xy=(xm, yb - .012 * span), xytext=(xm, yb - .10 * span),
                         arrowprops=dict(arrowstyle="-|>,head_width=.22,head_length=.5",
                                         color=ds.MARSH, lw=1.8, alpha=.9), zorder=7)
-        # the cavity is too thin to letter -- the note goes in the air above the shelf,
-        # where orange is used nowhere else
+        # the cavity is too thin to letter, so the note sits above the shelf
         ax.text(xlo + 3, hi - .10 * span,
                 "warm ocean water enters the cavity\nand melts the shelf from below",
                 fontsize=11.5, color=ds.MARSH_DEEP, ha="left", va="top",

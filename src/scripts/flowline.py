@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """
-flowline.py — along-flow transects and grounding-line location, numpy only.
+flowline.py -- along-flow transects and grounding-line location.
 
-Split out of fig_gl_transect.py so the HPC extractor can build the same flowlines
-without importing matplotlib.
+Numpy only, so the HPC extractor can build the same sections without matplotlib.
 """
 from __future__ import annotations
 
@@ -16,20 +15,15 @@ def build_flowline(x, y, sel, vx, vy, tree, bed, h0, step_m=2000.0,
                    n_up=500, n_down=120, smooth=9, tail_up_km=380.0, tail_down_km=40.0):
     """Transect traced along observed ice flow through the shelf centroid.
 
-    build_transect uses the shelf's principal axis, which is the long axis of the
-    polygon. For a coast-parallel shelf like Getz or Ross that axis runs across flow,
-    so the section never leaves grounded ice and no grounding line exists on it. Here
-    the path is integrated up- and downstream through the observed velocity field, so
-    it is along flow by construction.
-
-    Returns (s, pts) with s increasing inland, matching build_transect.
+    The path is integrated up- and downstream through the observed velocity field,
+    so it is along flow by construction. Returns (s, pts) with s increasing inland.
     """
     P = np.column_stack([x[sel], y[sel]])
     c = P.mean(axis=0)
     spd = np.hypot(vx, vy)
 
-    # Filchner-Ronne and Ross are 500+ km long, so a fixed step count never reaches
-    # grounded ice; march until the condition is met instead, then run on a little.
+    # march until the condition is met, then run on a little: a fixed step count
+    # never reaches grounded ice on a 500+ km shelf
     hflot_all = (RHO_O / RHO_I) * np.maximum(0.0, -bed)
     grounded_all = (h0 > 1.0) & (h0 > hflot_all)
 
@@ -53,8 +47,7 @@ def build_flowline(x, y, sel, vx, vy, tree, bed, h0, step_m=2000.0,
     # start from the fastest cell in the shelf: the centroid can sit on a slow margin
     idx_shelf = np.flatnonzero(sel)
     start = np.column_stack([x, y])[idx_shelf[np.argmax(spd[idx_shelf])]]
-    # the inland tail must outrun the retreat itself: Thwaites moves 300 km, and a
-    # line that stops just past the present grounding line goes fully afloat by year 30
+    # the inland tail must outrun the retreat itself
     up = march(start, -1.0, n_up, lambda j: grounded_all[j], tail_up_km)
     down = march(start, +1.0, n_down, lambda j: h0[j] <= 1.0, tail_down_km)
     pts = np.vstack([down[::-1], start[None, :], up])
@@ -70,12 +63,9 @@ def build_flowline(x, y, sel, vx, vy, tree, bed, h0, step_m=2000.0,
 def gl_position_main(s, h, hflot, min_run_km=15.0):
     """Seaward edge of the grounded body connected to the interior. (s_gl, slope).
 
-    gl_position below takes the seaward-most floating->grounded crossing, so any
-    pinning point, ice rise or bedrock bump seaward of the real grounding line
-    captures it -- that is what returns -203 km for Filchner. The transect always
-    ends in the grounded interior, so the run containing the inland end is the ice
-    sheet proper; its seaward edge is the grounding line. Runs shorter than
-    min_run_km are ignored as pinning points.
+    The transect ends in the grounded interior, so the run reaching the inland end
+    is the ice sheet proper and its seaward edge is the grounding line. Runs shorter
+    than min_run_km are pinning points and are ignored.
     """
     grounded = (h > 1.0) & (h > hflot)
     if not grounded.any():

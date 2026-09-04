@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 """
-fig_slide_crops.py — crop chapter figures down to single-claim slide panels.
+fig_slide_crops.py -- crop chapter figures down to single-claim slide panels.
 
-Chapter figures run to 9-13 panels and do not survive projection. This crops the panel that
-carries the claim. A cropper, not a re-plotter: pixels come from figures already reviewed, so
-nothing new enters the talk. --contact writes a sheet for checking the crop boxes, which are
-fractions of each source image.
+Chapter figures run to 9-13 panels and do not survive projection. A cropper, not a
+re-plotter: pixels come from figures already reviewed. --contact writes a sheet for
+checking the boxes, which are fractions of each source image.
 """
 from __future__ import annotations
 

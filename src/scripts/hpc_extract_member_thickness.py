@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
 """
-hpc_extract_member_thickness.py — per-member ice thickness, subset to shelf catchments. RUN ON HPC.
+hpc_extract_member_thickness.py -- per-member ice thickness on a cell subset. RUN ON HPC.
 
-Writes one .npz per ensemble: cells (indices into nCells), years, members, h (M, T, n) float32,
-year_got (M, T) int16 holding the year each field was actually read at (-1 where missing).
-Only thickness is pulled -- bed, coordinates and areas are static in the mesh file, and
-grounded/floating is recomputed from flotation because cellMask is written as zeros in these
-runs. Takes explicit years or a START:STOP:STEP range; each output_state file holds five annual
+Writes one .npz per ensemble: cells (indices into nCells), years, members, h (M, T, n)
+float32, year_got (M, T) int16 giving the year each field was read at, -1 where missing.
+
+Only thickness is pulled; bed, coordinates and areas are static in the mesh file, and
+grounded/floating is recomputed from flotation. Each output_state file holds five annual
 slices, so any year can be asked for and the slice is matched on xtime.
+
+--along-flowline selects a corridor around each shelf's along-flow line, which covers
+long shelves that no disc radius reaches.
 """
 from __future__ import annotations
 
@@ -39,8 +42,7 @@ def year_of(path):
 def slice_of(ds, year, tol):
     """(index, year) of the slice nearest `year`, or (None, None) if none is within tol.
 
-    The tolerance exists because the last file of a run holds a single slice dated
-    2299-12-01 -- the final state, a month short of 2300.
+    The last file of a run holds one slice dated 2299-12-01, hence the tolerance.
     """
     if "xtime" not in ds.variables:
         return 0, year
@@ -64,9 +66,8 @@ def main():
                     help='explicit years, or a START:STOP:STEP range like 2000:2300:5')
     ap.add_argument("--radius-km", type=float, default=300.0)
     ap.add_argument("--along-flowline", action="store_true",
-                    help="select a corridor around each shelf's along-flow line instead of a "
-                         "disc around its centroid -- Filchner, Ronne and Ross have 900 km "
-                         "flowlines that no sane radius covers")
+                    help="corridor around each shelf's along-flow line, rather than a disc "
+                         "around its centroid")
     ap.add_argument("--corridor-km", type=float, default=25.0,
                     help="--along-flowline: half-width of the corridor")
     ap.add_argument("--year-tol", type=int, default=1,
