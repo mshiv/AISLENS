@@ -11,9 +11,12 @@ slices, so any year can be asked for and the slice is matched on xtime.
 """
 from __future__ import annotations
 
-import os, re, glob, argparse
+import os, re, glob, argparse, sys
 import numpy as np
 import netCDF4
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from flowline import build_flowline  # noqa: E402
 
 try:
     from aislens.config import config
@@ -60,6 +63,12 @@ def main():
     ap.add_argument("--years", nargs="+", default=["2000:2300:5"],
                     help='explicit years, or a START:STOP:STEP range like 2000:2300:5')
     ap.add_argument("--radius-km", type=float, default=300.0)
+    ap.add_argument("--along-flowline", action="store_true",
+                    help="select a corridor around each shelf's along-flow line instead of a "
+                         "disc around its centroid -- Filchner, Ronne and Ross have 900 km "
+                         "flowlines that no sane radius covers")
+    ap.add_argument("--corridor-km", type=float, default=25.0,
+                    help="--along-flowline: half-width of the corridor")
     ap.add_argument("--year-tol", type=int, default=1,
                     help="how far a slice may sit from the requested year and still be used")
     ap.add_argument("--state-glob", default="output_state*.nc",
@@ -99,13 +108,29 @@ def main():
     d.close()
 
     keep = np.zeros(x.size, bool)
+    if a.along_flowline:
+        from scipy.spatial import cKDTree
+        d = netCDF4.Dataset(a.mesh)
+        bed = np.asarray(d["bedTopography"][:]).ravel()
+        h0 = np.asarray(d["thickness"][:]).ravel()
+        vx = np.asarray(d["observedSurfaceVelocityX"][:]).ravel()
+        vy = np.asarray(d["observedSurfaceVelocityY"][:]).ravel()
+        d.close()
+        tree = cKDTree(np.column_stack([x, y]))
     for sh in a.shelves:
         if sh not in names:
             print(f"  ! shelf not in mask: {sh}")
             continue
         cells = masks[:, names.index(sh)] > 0
-        cx, cy = x[cells].mean(), y[cells].mean()
-        keep |= np.hypot(x - cx, y - cy) < a.radius_km * 1e3
+        if a.along_flowline:
+            _, pts = build_flowline(x, y, cells, vx, vy, tree, bed, h0)
+            near = cKDTree(pts).query(np.column_stack([x, y]))[0]
+            keep |= near < a.corridor_km * 1e3
+            print(f"  {sh}: flowline {np.hypot(*(pts[-1] - pts[0])) / 1e3:.0f} km end to end, "
+                  f"{int((near < a.corridor_km * 1e3).sum())} cells in corridor")
+        else:
+            cx, cy = x[cells].mean(), y[cells].mean()
+            keep |= np.hypot(x - cx, y - cy) < a.radius_km * 1e3
     cells = np.where(keep)[0].astype(np.int32)
     print(f"subset: {cells.size} of {x.size} cells "
           f"({100*cells.size/x.size:.1f}%)")
