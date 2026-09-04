@@ -71,7 +71,28 @@ def geometry(shelf):
     s_gl0, _ = gl_position(s, h0[idx], hflot)
     s_gl0 = s_gl0 if np.isfinite(s_gl0) else 0.0
     return dict(s=s, sk=(s - s_gl0) / 1e3, b=b, hflot=hflot, s_gl0=s_gl0,
-                idx=idx, ncell=x.size)
+                idx=idx, ncell=x.size, x=x, y=y, ice=h0 > 1.0, shelf=sel,
+                tx=pts[:, 0], ty=pts[:, 1])
+
+
+def locator(fig, rect, g, shelf):
+    """Small plan view: the sheet, this shelf, and where the section is cut."""
+    ax = fig.add_axes(rect)
+    x, y, ice = g["x"] / 1e3, g["y"] / 1e3, g["ice"]
+    ax.scatter(x[ice][::12], y[ice][::12], s=.12, color=ds.RULE, linewidths=0,
+               rasterized=True, zorder=1)
+    ax.scatter(x[g["shelf"]], y[g["shelf"]], s=2.2, color=ds.ICE, linewidths=0,
+               rasterized=True, zorder=2)
+    ax.plot(g["tx"] / 1e3, g["ty"] / 1e3, color=ds.MARSH_DEEP, lw=2.4, zorder=3)
+    ax.plot([g["tx"][0] / 1e3], [g["ty"][0] / 1e3], "o", ms=3.0,
+            color=ds.MARSH_DEEP, zorder=4)
+    ax.set_aspect("equal"); ax.set_xticks([]); ax.set_yticks([])
+    for sp in ax.spines.values():
+        sp.set_visible(False)
+    ax.text(0.5, -0.02, f"section through {shelf.replace('_', ' ')}",
+            transform=ax.transAxes, fontsize=9, color=ds.INK_SOFT,
+            ha="center", va="top")
+    return ax
 
 
 def series(ens, g, memdir):
@@ -110,62 +131,83 @@ def series(ens, g, memdir):
                     gl[mi, ti:] = np.nan
                     break
                 run = max(run, gl[mi, ti])
-    return dict(years=years, gl=gl, H=H, got=got, members=members, h_of=h_of)
+    # Spread is only meaningful across members that ran the whole record. SSP585_10
+    # and _11 hold output from 2200 only and sit a full output step behind the ten
+    # production members; counting them turns a 0.7 km spread into 73 km.
+    complete = got.all(axis=1)
+    return dict(years=years, gl=gl, H=H, got=got, members=members, h_of=h_of,
+                complete=complete)
 
 
 def fig_scenarios(g, memdir, shelf, out):
-    fig = plt.figure(figsize=(15.0, 6.6))
-    ax = fig.add_axes([0.058, 0.115, 0.735, 0.795])
+    """Grounding line against time, every member, every ensemble, plus how far apart
+    the realisations get. Spread uses complete-record members only."""
+    fig = plt.figure(figsize=(15.4, 7.8))
+    ax = fig.add_axes([0.055, 0.400, 0.700, 0.520])
+    axs = fig.add_axes([0.055, 0.078, 0.700, 0.225], sharex=ax)
     rows = []
     for ens, label, colr in ENSEMBLES:
         d = series(ens, g, memdir)
         if d is None:
             print(f"  ! no extract for {ens}"); continue
+        keep = d["complete"]
+        if keep.sum() < 3:
+            keep = np.ones(len(d["members"]), bool)      # 3X: almost none run to 2300
         t = np.concatenate([[0], d["years"] - 2000])
-        G = np.column_stack([np.zeros(len(d["members"])), d["gl"]])
+        G = np.column_stack([np.zeros(keep.sum()), d["gl"][keep]])
+
         for mi in range(G.shape[0]):
             ax.plot(t, G[mi], color=colr, lw=0.9, alpha=.45, zorder=3)
         ax.plot(t, np.nanmean(G, axis=0), color=colr, lw=2.6, zorder=4)
 
-        # no inline labels: the three SSP5-8.5 variants converge on the same
-        # end point and their labels land on top of each other. The key names them.
-        fin = np.flatnonzero(np.isfinite(G).sum(axis=0) >= 2)[-1]
-        live = np.isfinite(G).sum(axis=0) >= 2
-        sp = np.where(live, np.nanmax(np.where(live, G, np.nan), axis=0)
-                      - np.nanmin(np.where(live, G, np.nan), axis=0), np.nan)
-        j = int(np.nanargmax(sp))
-        rows.append((label, colr, t[fin], np.nanmean(G[:, fin]), sp[j], t[j],
-                     np.nanmedian(sp[np.isfinite(sp)])))
+        # interquartile spread: robust to the single member that jumps a step early
+        live = np.isfinite(G).sum(axis=0) >= min(4, G.shape[0])
+        q = np.where(live,
+                     np.nanpercentile(np.where(live, G, np.nan), 75, axis=0)
+                     - np.nanpercentile(np.where(live, G, np.nan), 25, axis=0), np.nan)
+        axs.plot(t, q, color=colr, lw=2.0, zorder=3)
 
-    ds.strip(ax)
-    ax.set_xlim(0, 300)
-    ax.set_xlabel("model year", labelpad=7)
-    ax.set_ylabel("grounding-line retreat  (km inland of its year-0 position)", labelpad=6)
-    ax.tick_params(length=3)
-    ax.text(0.0, 1.055, f"{shelf.replace('_', ' ')} · one line per realisation, "
+        fin = np.flatnonzero(np.isfinite(G).sum(axis=0) >= 2)[-1]
+        j = int(np.nanargmax(q)) if np.isfinite(q).any() else 0
+        rows.append((label, colr, t[fin], np.nanmean(G[:, fin]), q[j], t[j],
+                     np.nanmedian(q[np.isfinite(q)]), keep.sum(), len(d["members"])))
+
+    for a in (ax, axs):
+        ds.strip(a)
+        a.set_xlim(0, 300)
+        a.tick_params(length=3)
+    ax.tick_params(labelbottom=False)
+    ax.set_ylabel("grounding-line retreat\n(km inland of year 0)", labelpad=6)
+    axs.set_ylabel("spread across\nrealisations (km, IQR)", labelpad=6)
+    axs.set_xlabel("model year", labelpad=7)
+    ax.text(0.0, 1.045, f"{shelf.replace('_', ' ')} · one line per realisation, "
             f"bold line is that ensemble's mean",
             transform=ax.transAxes, fontsize=11, color=ds.INK_SOFT, ha="left", va="bottom")
 
-    # the numbers the figure exists to make: separation between ensembles against
-    # spread inside them
-    y0 = 0.93
-    ax.text(1.030, y0 + .055, "peak spread across realisations",
+    y0 = 0.97
+    ax.text(1.035, y0 + .05, "retreat by its last year · peak IQR",
             transform=ax.transAxes, fontsize=10.5, color=ds.INK, ha="left", va="top")
-    for k, (label, colr, tf, gf, spmax, tsp, spmed) in enumerate(rows):
-        ax.text(1.030, y0 - .085 * k, f"{label}", transform=ax.transAxes,
+    for k, (label, colr, tf, gf, qmax, tq, qmed, nk, nall) in enumerate(rows):
+        ax.text(1.035, y0 - .132 * k, label, transform=ax.transAxes,
                 fontsize=10.5, color=colr, ha="left", va="top")
-        ax.text(1.030, y0 - .085 * k - .040,
-                f"{spmax:.0f} km at year {tsp:.0f} · median {spmed:.1f} km",
+        ax.text(1.035, y0 - .132 * k - .045,
+                f"{gf:.0f} km by year {tf:.0f}  ·  N = {nk}"
+                + ("" if nk == nall else f" of {nall}"),
                 transform=ax.transAxes, fontsize=9.5, color=ds.INK_SOFT,
                 ha="left", va="top")
+        ax.text(1.035, y0 - .132 * k - .085,
+                f"IQR median {qmed:.2f} km, peak {qmax:.0f} km at year {tq:.0f}",
+                transform=ax.transAxes, fontsize=9.5, color=ds.INK_SOFT,
+                ha="left", va="top")
+
+    locator(fig, [0.815, 0.075, 0.165, 0.235], g, shelf)
 
     fig.savefig(out, bbox_inches="tight", pad_inches=0.14)
     plt.close(fig)
     print(f"wrote {out}")
-    for label, _, tf, gf, spmax, tsp, spmed in rows:
-        print(f"  {label:20s} last year {tf:3.0f}  retreat {gf:6.1f} km   "
-              f"peak spread {spmax:5.1f} km at year {tsp:3.0f}   median {spmed:4.1f} km")
-
+    for label, _, tf, gf, qmax, tq, qmed, nk, nall in rows:
+        print(f"  {label:20s} N={nk:2d}/{nall:2d}  last yr {tf:3.0f}  retreat {gf:6.1f} km   "
+              f"IQR median {qmed:5.2f} km, peak {qmax:5.1f} km at yr {tq:3.0f}")
 
 def fig_section(ens, g, memdir, shelf, out):
     d = series(ens, g, memdir)
