@@ -23,7 +23,7 @@ MESH = os.path.join(_MALI, "AIS_4to20km_r01_20220907_m5_drop_bed_20m_bulldoze_tr
                     "_Enderby_maxstiffness_0.8_TG_pinning_40maf_bedmap2_surface_ASE_05perc_seafloor_mu"
                     "_meanSatObsBMB_Paolo2023_draftDepenPiecewise_fb_A.nc")
 SHELF_MASK = os.path.join(_MALI, "aislens_draftDepen_regionMasks.nc")
-ENS_ROOT = os.path.join(_MALI, "diagnostics", "ENSEMBLES")
+ENS_ROOT = os.path.join(_MALI, "ENSEMBLES")
 
 
 def year_of(path):
@@ -41,7 +41,8 @@ def main():
     ap.add_argument("--years", nargs="+", default=["2000:2300:5"],
                     help='explicit years, or a START:STOP:STEP range like 2000:2300:5')
     ap.add_argument("--radius-km", type=float, default=300.0)
-    ap.add_argument("--state-glob", default="output/output_state*.nc")
+    ap.add_argument("--state-glob", default="output_state*.nc",
+                    help="searched in the member dir and in its output/ subdir")
     ap.add_argument("--out", default=None)
     ap.add_argument("--skip-existing", action="store_true",
                     help="leave ensembles that already have an .npz alone")
@@ -95,12 +96,24 @@ def main():
         root = os.path.join(a.ens_root, ens)
         if not os.path.isdir(root):
             print(f"  ! no such ensemble dir: {root}"); continue
-        members = sorted(m for m in os.listdir(root)
-                         if os.path.isdir(os.path.join(root, m)))
+        def states(mem):
+            d = os.path.join(root, mem)
+            return sorted(glob.glob(os.path.join(d, a.state_glob))
+                          or glob.glob(os.path.join(d, "output", a.state_glob)))
+
+        cand = sorted(m for m in os.listdir(root)
+                      if os.path.isdir(os.path.join(root, m)))
+        members = [m for m in cand if states(m)]
+        if not members:
+            print(f"  ! {ens}: no {a.state_glob} under any of {len(cand)} member dirs")
+            continue
+        if len(cand) > len(members):
+            print(f"  {ens}: using {len(members)} of {len(cand)} dirs "
+                  f"(skipped {', '.join(sorted(set(cand) - set(members))[:4])} ...)")
         H = np.full((len(members), len(a.years), cells.size), np.nan, np.float32)
         got = 0
         for mi, mem in enumerate(members):
-            files = sorted(glob.glob(os.path.join(root, mem, a.state_glob)))
+            files = states(mem)
             by_year = {}
             for f in files:
                 yr = year_of(f)
