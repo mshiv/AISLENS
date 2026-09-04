@@ -2,15 +2,20 @@
 """
 hpc_sorrm_variability.py — how SORRM's melt variance splits across frequency. RUN ON HPC.
 
-The regridded field is 12000 x 601 x 601, about 17 GB as float32, so it is streamed in row
-blocks and never held whole. What comes back is small: the domain and per-sector band splits
-as CSV, plus an npz with the domain anomaly series, its spectrum, and a per-cell map of the
-seasonal fraction.
+Feed this the VARIABILITY component F_v, not the full regridded field. The full field carries
+a linear drift and the draft dependence, so its spectrum reports the trend rather than the
+variability the generator resamples.
+
+Fields are several GB, so they are streamed in row blocks and never held whole. What comes
+back is small: the domain and per-sector band splits as CSV, plus an npz with the domain
+anomaly series, its spectrum, the per-cell band fractions and the per-cell seasonal fraction.
 
 The question it answers is whether the ocean forcing the generator resamples is mostly the
 seasonal cycle or mostly slower. That decides whether phase randomisation is doing anything an
 ice sheet can feel: a 4-20 km model integrating over centuries responds to a multidecadal
-signal quite differently than to a seasonal one.
+signal quite differently than to a seasonal one. Passing --seasonality alongside gives
+var(F_s)/(var(F_s)+var(F_v)) directly, which is a cleaner statement of the same thing than
+reading a seasonal band off one file's spectrum.
 
 Bands, in years: seasonal < 1.5, interannual 1.5-10, decadal 10-30, multidecadal > 30.
 The timestep is read from the file; --dt-months overrides it. Run --list-vars first.
@@ -94,7 +99,13 @@ def main():
     from scipy.signal import welch
 
     ap = argparse.ArgumentParser()
-    ap.add_argument("--field", required=True)
+    ap.add_argument("--field", required=True,
+                    help="the variability component F_v, not the full field -- the full "
+                         "field carries the linear drift and the draft dependence")
+    ap.add_argument("--seasonality", default=None,
+                    help="optional F_s file; adds var(F_s)/(var(F_s)+var(F_v)) per cell "
+                         "and for the domain. Variance needs no time alignment, so the "
+                         "two files may differ in length.")
     ap.add_argument("--var", default=None)
     ap.add_argument("--dt-months", type=float, default=None,
                     help="override the timestep read from the file")
@@ -132,10 +143,20 @@ def main():
     lon = np.asarray(d["lon"][:]).ravel() if "lon" in d.variables else None
     sec = sector_of(lon) if lon is not None else None
 
+    ds_s = Vs = None
+    if a.seasonality:
+        ds_s = netCDF4.Dataset(a.seasonality)
+        Vs = ds_s[pick_var(ds_s, None)]
+        if Vs.shape[1:] != V.shape[1:]:
+            raise SystemExit(f"seasonality grid {Vs.shape[1:]} != field grid {V.shape[1:]}")
+        print(f"seasonality {Vs.name} {Vs.shape}")
+
     # streamed pass: domain and sector sums, and the per-cell band split
     dom_sum = np.zeros(nt); dom_n = 0
     sec_sum = np.zeros((len(SECTORS), nt)); sec_n = np.zeros(len(SECTORS), int)
     cell_frac = np.full((len(BANDS), ny * nx), np.nan, np.float32)
+    seas_frac = np.full(ny * nx, np.nan, np.float32)
+    var_v_tot = var_s_tot = 0.0
     nok = 0
     for r0 in range(0, ny, a.rows):
         r1 = min(r0 + a.rows, ny)
@@ -155,9 +176,20 @@ def main():
                         sec_sum[i] += blk[:, m].sum(axis=1); sec_n[i] += int(m.sum())
             f2, p2 = welch(blk[:, ok], fs=fs, nperseg=nps, detrend="constant", axis=0)
             cell_frac[:, base + np.flatnonzero(ok)] = band_fractions(p2[1:], f2[1:])
+            if Vs is not None:
+                sb = np.ma.filled(np.asarray(Vs[:, r0:r1, :], dtype=np.float32), np.nan)
+                sb = sb.reshape(sb.shape[0], -1)
+                vv = np.nanvar(blk[:, ok], axis=0)
+                vs = np.nanvar(sb[:, ok], axis=0)
+                with np.errstate(invalid="ignore", divide="ignore"):
+                    seas_frac[base + np.flatnonzero(ok)] = np.where(
+                        (vv + vs) > 0, vs / (vv + vs), np.nan)
+                var_v_tot += float(np.nansum(vv)); var_s_tot += float(np.nansum(vs))
             nok += int(ok.sum())
         print(f"  rows {r1}/{ny}  cells kept {nok:,}", end="\r")
     d.close()
+    if ds_s is not None:
+        ds_s.close()
     print()
     if dom_n == 0:
         raise SystemExit("no usable cells -- check --var and --min-mean")
@@ -180,11 +212,18 @@ def main():
             fh.write(f"{nm},{n}," + ",".join(f"{x:.5f}" for x in v) + "\n")
     np.savez_compressed(a.out + "_series.npz", domain=dom.astype(np.float32),
                         dt_years=dt_yr, freq=f, psd=p, ny=ny, nx=nx,
-                        seasonal_fraction=cell_frac[0].reshape(ny, nx))
+                        band_fraction=cell_frac.reshape(len(BANDS), ny, nx),
+                        seasonal_fraction=seas_frac.reshape(ny, nx))
     print(f"wrote {a.out}_bands.csv and {a.out}_series.npz\n")
     for nm, v, n in rows:
         print(f"  {nm:10s} n={n:9,}  " +
               "  ".join(f"{b[0][:4]} {100 * x:5.1f}%" for b, x in zip(BANDS, v)))
+    if var_s_tot + var_v_tot > 0:
+        sf = var_s_tot / (var_s_tot + var_v_tot)
+        print(f"\n  seasonal fraction var(F_s)/(var(F_s)+var(F_v)) = {100 * sf:.1f}% "
+              f"summed over cells; per-cell map is in the npz")
+        with open(a.out + "_bands.csv", "a") as fh:
+            fh.write(f"# seasonal_fraction_var_ratio,{sf:.5f}\n")
 
 
 if __name__ == "__main__":
