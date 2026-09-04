@@ -9,13 +9,21 @@ Takes explicit years or a START:STOP:STEP range.
 """
 from __future__ import annotations
 
-import argparse
-import glob
-import os
-import re
-
+import os, re, glob, argparse
 import numpy as np
 import netCDF4
+
+try:
+    from aislens.config import config
+    _MALI = str(config.DIR_MALI)
+except Exception:
+    _MALI = os.path.join(os.environ.get("AISLENS_DATA_DIR", "."), "data", "MALI")
+
+MESH = os.path.join(_MALI, "AIS_4to20km_r01_20220907_m5_drop_bed_20m_bulldoze_troughs_75_to_400m"
+                    "_Enderby_maxstiffness_0.8_TG_pinning_40maf_bedmap2_surface_ASE_05perc_seafloor_mu"
+                    "_meanSatObsBMB_Paolo2023_draftDepenPiecewise_fb_A.nc")
+SHELF_MASK = os.path.join(_MALI, "aislens_draftDepen_regionMasks.nc")
+ENS_ROOT = os.path.join(_MALI, "diagnostics", "ENSEMBLES")
 
 
 def year_of(path):
@@ -25,20 +33,28 @@ def year_of(path):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--ens-root", required=True)
-    ap.add_argument("--mesh", required=True)
-    ap.add_argument("--shelf-mask", required=True)
+    ap.add_argument("--ens-root", default=ENS_ROOT)
+    ap.add_argument("--mesh", default=MESH)
+    ap.add_argument("--shelf-mask", default=SHELF_MASK)
     ap.add_argument("--ensembles", nargs="+", required=True)
     ap.add_argument("--shelves", nargs="+", required=True)
     ap.add_argument("--years", nargs="+", default=["2000:2300:5"],
                     help='explicit years, or a START:STOP:STEP range like 2000:2300:5')
     ap.add_argument("--radius-km", type=float, default=300.0)
     ap.add_argument("--state-glob", default="output/output_state*.nc")
-    ap.add_argument("--out", required=True)
+    ap.add_argument("--out", default=None)
     ap.add_argument("--skip-existing", action="store_true",
                     help="leave ensembles that already have an .npz alone")
     a = ap.parse_args()
+    if a.out is None:
+        a.out = os.path.join(os.environ.get("AISLENS_DATA_DIR", "."),
+                             "reports/dissertation/figures/spatial/members")
     os.makedirs(a.out, exist_ok=True)
+    for label, path in (("mesh", a.mesh), ("shelf mask", a.shelf_mask),
+                        ("ensembles", a.ens_root)):
+        if not os.path.exists(path):
+            raise SystemExit(f"{label} not found: {path}\n"
+                             "  set AISLENS_DATA_DIR, or pass --mesh/--shelf-mask/--ens-root")
 
     if len(a.years) == 1 and ":" in str(a.years[0]):
         lo, hi, st = (int(v) for v in str(a.years[0]).split(":"))
