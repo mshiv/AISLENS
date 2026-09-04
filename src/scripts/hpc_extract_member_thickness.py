@@ -131,9 +131,14 @@ def main():
                 th = th[-1] if th.ndim == 2 else th          # last slice in the file
                 H[mi, ti] = th.ravel()[cells].astype(np.float32)
                 got += 1
+        icy = np.nansum(H > 1.0, axis=2)          # cells with ice, per member and year
+        if got and not icy.any():
+            print(f"  ! {ens}: every field read is empty -- the output_state files hold "
+                  f"no thickness. Check one with ncdump -v thickness before trusting this.")
         np.savez_compressed(out, cells=cells, years=np.array(a.years, np.int32),
                             members=np.array(members), h=H)
         print(f"wrote {out}   members={len(members)}  fields={got}  "
+              f"median icy cells/field {int(np.median(icy[icy > 0])) if (icy > 0).any() else 0}  "
               f"{os.path.getsize(out)/1e6:.1f} MB")
 
 
