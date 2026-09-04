@@ -134,8 +134,17 @@ def main():
     print(f"{nt} steps of {dt_yr * 12:.3f} months = {nt * dt_yr:.0f} years; "
           f"Welch segment {nps} steps = {nps * dt_yr:.0f} years")
 
-    lon = np.asarray(d["lon"][:]).ravel() if "lon" in d.variables else None
-    sec = sector_of(lon) if lon is not None else None
+    lon = None
+    if "lon" in d.variables:
+        lon = np.asarray(d["lon"][:]).ravel()
+    elif {"x", "y"} <= set(d.variables):
+        X, Y = np.asarray(d["x"][:]), np.asarray(d["y"][:])
+        if X.ndim == 1:
+            X, Y = np.meshgrid(X, Y)
+        lon = np.degrees(np.arctan2(X, Y)).ravel()      # polar stereographic about the pole
+    sec = sector_of(lon) if lon is not None and lon.size == ny * nx else None
+    if sec is None:
+        print("  no usable lon; sector split skipped")
 
     ds_s = Vs = None
     if a.seasonality:
