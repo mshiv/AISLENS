@@ -19,21 +19,26 @@ import slidestyle as ds  # noqa: E402
 
 ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
 
-# label, value (mm SLE), family, footnote
+# label, value (mm SLE), family, footnote, diagnostic-only
+# `diag` marks quantities measured under the exaggerated 10x forcing. Those are
+# diagnostics of the response, not predictions -- 10x is not a climate anyone runs.
+# sigma at 1x is NOT one of them: it is a physical number and the note used to say
+# otherwise by lumping every variability term together.
 BARS = [
     ("changing the emissions scenario", 1619.1, "forced",
-     "SSP5-8.5 − SSP1-2.6 ensemble mean · year 300"),
+     "SSP5-8.5 − SSP1-2.6 ensemble mean · year 300", False),
     ("gross regional reorganisation\nfrom ocean variability", 177.0, "var",
-     "sum of |basin drift| under 10× variability · year 300"),
+     "sum of |basin drift| · year 300", True),
     ("tripling the melt trend", 292.9, "forced",
-     "SSP585-3X − SSP585 · year 178, the deepest common horizon"),
+     "SSP585-3X − SSP585 · year 178", False),
     ("what that reorganisation leaves\nin the continental total", 12.1, "var",
-     "net drift under 10× variability · year 300"),
+     "net drift · year 300", True),
     ("spread across realisations, 10×", 6.6, "var",
-     "σ of SSP585_varScaled10x · year 300 · N = 15"),
+     "σ of SSP585_varScaled10x · year 300 · N = 15", True),
     ("spread across realisations, 1×", 2.1, "var",
-     "σ of SSP585 · year 300 · N = 10"),
+     "σ of SSP585 · year 300 · N = 10", False),
 ]
+REF = 1619.1        # the scenario effect, for the "share of" axis
 
 
 
@@ -53,17 +58,39 @@ def main():
     vals = np.array([b[1] for b in bars])
     cols = [ds.ICE if b[2] == "forced" else ds.MARSH for b in bars]
 
-    fig, ax = plt.subplots(figsize=(12.2, 5.4))
-    fig.subplots_adjust(left=0.285, right=0.965, top=0.79, bottom=0.145)
+    ax_lo = 1.0
+    fig, ax = plt.subplots(figsize=(12.6, 5.8))
+    fig.subplots_adjust(left=0.285, right=0.965, top=0.715, bottom=0.145)
 
-    ax.barh(ypos, vals, height=0.58, color=cols, linewidth=0, zorder=3)
+    # Dots, not bars. On a log axis a bar's length depends on where the axis starts,
+    # so the 1,619 mm bar read as ten times the 2.1 mm bar when it is really 771 times.
+    # A dot carries position only, which is the honest encoding here.
+    for y, v, c, b in zip(ypos, vals, cols, bars):
+        ax.plot([ax_lo, v], [y, y], color=ds.RULE, lw=0.8, zorder=2)
+        if b[4]:
+            ax.plot([v], [y], "o", ms=11, mfc="white", mec=c, mew=2.2, zorder=4)
+        else:
+            ax.plot([v], [y], "o", ms=11, color=c, zorder=4)
+
     ax.set_xscale("log")
-    ax.set_xlim(1.0, 4200)
+    ax.set_xlim(ax_lo, 4200)
     ax.set_xticks([1, 10, 100, 1000])
     ax.set_xticklabels(["1", "10", "100", "1,000"])
     ax.minorticks_off()
     ax.set_xlabel("effect on Antarctic sea-level contribution  (mm)", labelpad=8)
     ax.tick_params(axis="x", length=3)
+
+    # the same axis read as a share of the scenario effect, which is the comparison
+    # the slide is actually making
+    sec = ax.secondary_xaxis("top", functions=(lambda x: 100 * x / REF,
+                                               lambda x: x * REF / 100))
+    sec.set_xscale("log")
+    sec.set_xticks([0.1, 1, 10, 100])
+    sec.set_xticklabels(["0.1%", "1%", "10%", "100%"])
+    sec.minorticks_off()
+    sec.tick_params(length=3, labelsize=10, colors=ds.INK_SOFT)
+    sec.set_xlabel("share of the scenario effect", labelpad=7, fontsize=10,
+                   color=ds.INK_SOFT)
 
     ax.set_yticks(ypos)
     ax.set_yticklabels([b[0] for b in bars], fontsize=11.5, linespacing=1.35)
@@ -71,32 +98,33 @@ def main():
     ds.strip(ax, keep=("bottom",))
     ax.set_ylim(-0.7, len(bars) - 0.25)
 
-    for x in (10, 100, 1000):
-        ax.axvline(x, color=ds.RULE, lw=0.7, zorder=0)
-
     for y, b in zip(ypos, bars):
         v = b[1]
         lab = f"{v:,.0f}" if v >= 100 else f"{v:,.1f}"
-        ax.text(v * 1.13, y + 0.10, lab,
-                va="center", ha="left", fontsize=12, color=ds.INK, zorder=4)
-        ax.text(v * 1.13, y - 0.24, b[3], va="center", ha="left",
-                fontsize=8.8, color=ds.INK_SOFT, zorder=4)
+        ax.text(v * 1.22, y + 0.10, lab,
+                va="center", ha="left", fontsize=12, color=ds.INK, zorder=5)
+        ax.text(v * 1.22, y - 0.24, b[3], va="center", ha="left",
+                fontsize=8.8, color=ds.INK_SOFT, zorder=5)
 
-    # legend as two coloured words, not a box
-    ax.text(0.0, 1.055, "prescribed forcing", transform=ax.transAxes, fontsize=11.5,
+    # legend as coloured words, not a box
+    ax.text(0.0, 1.255, "prescribed forcing", transform=ax.transAxes, fontsize=11.5,
             color=ds.ICE, ha="left", va="bottom")
-    ax.text(0.185, 1.055, "ocean variability", transform=ax.transAxes, fontsize=11.5,
+    ax.text(0.185, 1.255, "ocean variability", transform=ax.transAxes, fontsize=11.5,
             color=ds.MARSH, ha="left", va="bottom")
+    ax.plot([0.375], [1.283], "o", ms=9, mfc="white", mec=ds.INK_SOFT, mew=2.0,
+            transform=ax.transAxes, clip_on=False, zorder=5)
+    ax.text(0.392, 1.255, "open = measured at 10× amplitude, a diagnostic rather "
+            "than a scenario", transform=ax.transAxes, fontsize=10,
+            color=ds.INK_SOFT, ha="left", va="bottom")
 
     if a.standalone:
-        ax.text(0.0, 1.135, "what actually moves Antarctic sea-level contribution",
+        ax.text(0.0, 1.365, "what actually moves Antarctic sea-level contribution",
                 transform=ax.transAxes, fontsize=15.5, color=ds.INK,
                 ha="left", va="bottom")
 
     fig.text(0.008, 0.008,
-             "logarithmic axis · variability terms are measured at the exaggerated 10× amplitude, "
-             "so their ordering is the result and their magnitude is not a claim about realistic "
-             "variability",
+             "logarithmic axis, so position carries the value and spacing carries ratios · "
+             "the 3× melt term is at year 178, the deepest horizon its members share",
              fontsize=8.8, color=ds.INK_SOFT, ha="left", va="bottom", style="italic")
 
     fig.savefig(a.out, bbox_inches="tight", pad_inches=0.14)
