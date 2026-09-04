@@ -2,21 +2,22 @@
 """
 hpc_sorrm_variability.py — how SORRM's melt variance splits across frequency. RUN ON HPC.
 
-The regridded SORRM melt field is far too large to work with on a laptop, so this reduces it
-there and writes back three small products: the domain-mean anomaly series, the band split for
-the domain and for four sectors, and a per-cell map of the seasonal fraction.
+The regridded field is 12000 x 601 x 601, about 17 GB as float32, so it is streamed in row
+blocks and never held whole. What comes back is small: the domain and per-sector band splits
+as CSV, plus an npz with the domain anomaly series, its spectrum, and a per-cell map of the
+seasonal fraction.
 
 The question it answers is whether the ocean forcing the generator resamples is mostly the
 seasonal cycle or mostly slower. That decides whether phase randomisation is doing anything an
-ice sheet can feel, since a 4-20 km ice-sheet model integrating over centuries cannot respond
-to a seasonal signal the way it responds to a multidecadal one.
+ice sheet can feel: a 4-20 km model integrating over centuries responds to a multidecadal
+signal quite differently than to a seasonal one.
 
 Bands, in years: seasonal < 1.5, interannual 1.5-10, decadal 10-30, multidecadal > 30.
-Run --list-vars first if you do not know what the file holds.
+The timestep is read from the file; --dt-months overrides it. Run --list-vars first.
 """
 from __future__ import annotations
 
-import os, argparse
+import os, re, argparse
 import numpy as np
 import netCDF4
 
@@ -24,12 +25,29 @@ BANDS = [("seasonal", 0.0, 1.5), ("interannual", 1.5, 10.0),
          ("decadal", 10.0, 30.0), ("multidecadal", 30.0, np.inf)]
 
 # longitude sectors, degrees east. Amundsen is the warm-cavity sector that carries the
-# Part I result; Weddell holds Filchner-Ronne, which is cold now and loud later.
+# Part I result; Weddell holds Filchner-Ronne, cold now and loud later.
 SECTORS = [("Amundsen", -140.0, -80.0), ("Weddell", -80.0, 0.0),
-           ("East", 0.0, 160.0), ("Ross", 160.0, 220.0)]
+           ("East", 0.0, 160.0), ("Ross", 160.0, -140.0)]
 
 VAR_CANDIDATES = ["timeMonthly_avg_landIceFreshwaterFlux", "landIceFreshwaterFlux",
-                  "floatingBasalMassBal", "basalMeltFlux", "melt", "ismf", "variability"]
+                  "floatingBasalMassBal", "basalMeltFlux", "melt", "ismf"]
+
+_TO_DAYS = {"microsecond": 1.0 / 86400e6, "millisecond": 1.0 / 86400e3, "second": 1.0 / 86400,
+            "minute": 1.0 / 1440, "hour": 1.0 / 24, "day": 1.0, "month": 30.4375, "year": 365.25}
+
+
+def timestep_years(d):
+    """Median timestep in years, read from whichever time variable carries units."""
+    for nm in ("Time", "time", "xtime"):
+        if nm in d.variables and d[nm].ndim == 1 and d[nm].size > 2:
+            u = getattr(d[nm], "units", "")
+            m = re.match(r"\s*(\w+?)s?\s+since", u)
+            if not m or m.group(1) not in _TO_DAYS:
+                continue
+            v = np.asarray(d[nm][:2000], dtype=np.float64)
+            step = float(np.median(np.diff(v))) * _TO_DAYS[m.group(1)]
+            return step / 365.25
+    return None
 
 
 def pick_var(d, want=None):
@@ -39,18 +57,18 @@ def pick_var(d, want=None):
         if c in d.variables:
             return c
     best = max((v for v in d.variables.values() if v.ndim >= 2),
-               key=lambda v: np.prod(v.shape), default=None)
+               key=lambda v: int(np.prod(v.shape)), default=None)
     if best is None:
         raise SystemExit("no multidimensional variable found; use --list-vars")
     return best.name
 
 
 def band_fractions(psd, freq_per_yr):
-    """Fraction of total power in each band. psd may be (nfreq,) or (nfreq, ncell).
+    """Fraction of total power per band. psd is (nfreq,) or (nfreq, ncell).
 
-    Rectangular sums, not trapezoid: welch returns uniform spacing so the df cancels,
-    the bands tile the axis so the fractions sum to one, and a band holding a single
-    bin -- the multidecadal one, at any realistic segment length -- still counts.
+    Rectangular sums, not trapezoid: welch spacing is uniform so df cancels, the bands
+    tile the axis so the fractions sum to one, and the multidecadal band holds a single
+    bin at any realistic segment length -- which a trapezoid rule drops entirely.
     """
     out, tot = [], psd.sum(axis=0)
     for _, lo, hi in BANDS:
@@ -62,16 +80,29 @@ def band_fractions(psd, freq_per_yr):
         return np.where(tot > 0, np.array(out) / tot, np.nan)
 
 
+def sector_of(lon):
+    """Index into SECTORS for each cell, -1 where none matches."""
+    L = ((np.asarray(lon) + 180.0) % 360.0) - 180.0
+    out = np.full(L.shape, -1, np.int8)
+    for i, (_, lo, hi) in enumerate(SECTORS):
+        m = (L >= lo) & (L < hi) if lo < hi else ((L >= lo) | (L < hi))
+        out[m & (out < 0)] = i
+    return out
+
+
 def main():
     from scipy.signal import welch
 
     ap = argparse.ArgumentParser()
-    ap.add_argument("--field", required=True, help="regridded SORRM melt NetCDF")
+    ap.add_argument("--field", required=True)
     ap.add_argument("--var", default=None)
-    ap.add_argument("--dt-months", type=float, default=1.0)
-    ap.add_argument("--nperseg-years", type=float, default=50.0,
-                    help="Welch segment length; caps the longest period resolved")
-    ap.add_argument("--chunk", type=int, default=20000, help="cells per FFT chunk")
+    ap.add_argument("--dt-months", type=float, default=None,
+                    help="override the timestep read from the file")
+    ap.add_argument("--nperseg-years", type=float, default=100.0,
+                    help="Welch segment length; sets the longest period resolved")
+    ap.add_argument("--rows", type=int, default=20, help="grid rows per streamed block")
+    ap.add_argument("--min-mean", type=float, default=0.0,
+                    help="skip cells whose |mean| is below this (open ocean, land)")
     ap.add_argument("--out", default="reports/sorrm_variability")
     ap.add_argument("--list-vars", action="store_true")
     a = ap.parse_args()
@@ -81,75 +112,66 @@ def main():
         print(f"dims: { {k: v.size for k, v in d.dimensions.items()} }")
         for k, v in d.variables.items():
             print(f"  {k:38s} {v.dimensions} {v.shape} {getattr(v, 'units', '')}")
+        dt = timestep_years(d)
+        if dt:
+            print(f"\ninferred timestep {dt * 12:.3f} months ({dt:.4f} yr)")
         return
 
     var = pick_var(d, a.var)
     V = d[var]
-    print(f"variable {var} {V.shape} {V.dimensions}")
-    F = np.ma.filled(np.asarray(V[:], dtype=np.float32), np.nan)
-    # coordinates, for the sector split
-    lon = None
-    for c in ("lon", "longitude", "LONGITUDE"):
-        if c in d.variables:
-            lon = np.asarray(d[c][:], dtype=np.float64)
-            break
-    if lon is None and {"x", "y"} <= set(d.variables):
-        X, Y = np.asarray(d["x"][:]), np.asarray(d["y"][:])
-        if X.ndim == 1:
-            X, Y = np.meshgrid(X, Y)
-        lon = np.degrees(np.arctan2(X, Y))     # polar stereographic, pole at origin
-    d.close()
-
-    nt = F.shape[0]
-    F = F.reshape(nt, -1)
-    if lon is not None:
-        lon = np.asarray(lon).ravel()
-        if lon.size != F.shape[1]:
-            print(f"  ! lon has {lon.size} points against {F.shape[1]} cells; "
-                  f"sector split skipped")
-            lon = None
-
-    dt_yr = a.dt_months / 12.0
+    nt, ny, nx = V.shape
+    dt_yr = (a.dt_months / 12.0) if a.dt_months else timestep_years(d)
+    if not dt_yr:
+        raise SystemExit("could not infer the timestep; pass --dt-months")
     fs = 1.0 / dt_yr
     nps = int(min(nt, max(64, a.nperseg_years / dt_yr)))
-    print(f"{nt} steps at {a.dt_months} month(s) = {nt * dt_yr:.0f} years; "
+    print(f"{var} {V.shape}, {getattr(V, 'units', '')}")
+    print(f"{nt} steps of {dt_yr * 12:.3f} months = {nt * dt_yr:.0f} years; "
           f"Welch segment {nps} steps = {nps * dt_yr:.0f} years")
 
-    ok = np.isfinite(F).all(axis=0) & (np.nanstd(F, axis=0) > 0)
-    print(f"{ok.sum():,} of {F.shape[1]:,} cells usable")
+    lon = np.asarray(d["lon"][:]).ravel() if "lon" in d.variables else None
+    sec = sector_of(lon) if lon is not None else None
 
-    # ---- domain aggregate
-    dom = np.nanmean(F[:, ok], axis=1)
-    dom = dom - dom.mean()
-    f, p = welch(dom, fs=fs, nperseg=nps, detrend="constant")
-    frac = band_fractions(p[1:, None], f[1:])[:, 0]
-    print("\ndomain aggregate:")
-    for (nm, _, _), v in zip(BANDS, frac):
-        print(f"  {nm:14s} {100 * v:5.1f}%")
-
-    # ---- per cell, in chunks
-    idx = np.flatnonzero(ok)
-    cell_frac = np.full((len(BANDS), F.shape[1]), np.nan, np.float32)
-    for i in range(0, idx.size, a.chunk):
-        j = idx[i:i + a.chunk]
-        f2, p2 = welch(F[:, j], fs=fs, nperseg=nps, detrend="constant", axis=0)
-        cell_frac[:, j] = band_fractions(p2[1:], f2[1:]).astype(np.float32)
-        print(f"  cells {i + j.size:,}/{idx.size:,}", end="\r")
+    # streamed pass: domain and sector sums, and the per-cell band split
+    dom_sum = np.zeros(nt); dom_n = 0
+    sec_sum = np.zeros((len(SECTORS), nt)); sec_n = np.zeros(len(SECTORS), int)
+    cell_frac = np.full((len(BANDS), ny * nx), np.nan, np.float32)
+    nok = 0
+    for r0 in range(0, ny, a.rows):
+        r1 = min(r0 + a.rows, ny)
+        blk = np.ma.filled(np.asarray(V[:, r0:r1, :], dtype=np.float32), np.nan)
+        blk = blk.reshape(nt, -1)
+        base = r0 * nx
+        ok = np.isfinite(blk).all(axis=0) & (np.nanstd(blk, axis=0) > 0)
+        if a.min_mean > 0:
+            ok &= np.abs(np.nanmean(blk, axis=0)) >= a.min_mean
+        if ok.any():
+            dom_sum += blk[:, ok].sum(axis=1); dom_n += int(ok.sum())
+            if sec is not None:
+                s = sec[base:base + blk.shape[1]]
+                for i in range(len(SECTORS)):
+                    m = ok & (s == i)
+                    if m.any():
+                        sec_sum[i] += blk[:, m].sum(axis=1); sec_n[i] += int(m.sum())
+            f2, p2 = welch(blk[:, ok], fs=fs, nperseg=nps, detrend="constant", axis=0)
+            cell_frac[:, base + np.flatnonzero(ok)] = band_fractions(p2[1:], f2[1:])
+            nok += int(ok.sum())
+        print(f"  rows {r1}/{ny}  cells kept {nok:,}", end="\r")
+    d.close()
     print()
+    if dom_n == 0:
+        raise SystemExit("no usable cells -- check --var and --min-mean")
 
-    # ---- sectors
-    rows = [("domain", frac, int(ok.sum()))]
-    if lon is not None:
-        L = ((lon + 180.0) % 360.0) - 180.0
-        for nm, lo, hi in SECTORS:
-            lo2, hi2 = ((lo + 180) % 360) - 180, ((hi + 180) % 360) - 180
-            m = (L >= lo2) & (L < hi2) if lo2 < hi2 else ((L >= lo2) | (L < hi2))
-            m &= ok
-            if m.sum() < 20:
-                print(f"  ! sector {nm}: only {m.sum()} cells, skipped"); continue
-            s = np.nanmean(F[:, m], axis=1); s = s - s.mean()
-            fs_, ps_ = welch(s, fs=fs, nperseg=nps, detrend="constant")
-            rows.append((nm, band_fractions(ps_[1:, None], fs_[1:])[:, 0], int(m.sum())))
+    dom = dom_sum / dom_n
+    dom -= dom.mean()
+    f, p = welch(dom, fs=fs, nperseg=nps, detrend="constant")
+    rows = [("domain", band_fractions(p[1:, None], f[1:])[:, 0], dom_n)]
+    for i, (nm, _, _) in enumerate(SECTORS):
+        if sec_n[i] < 20:
+            continue
+        s = sec_sum[i] / sec_n[i]; s = s - s.mean()
+        fi, pi = welch(s, fs=fs, nperseg=nps, detrend="constant")
+        rows.append((nm, band_fractions(pi[1:, None], fi[1:])[:, 0], int(sec_n[i])))
 
     os.makedirs(os.path.dirname(a.out) or ".", exist_ok=True)
     with open(a.out + "_bands.csv", "w") as fh:
@@ -157,12 +179,12 @@ def main():
         for nm, v, n in rows:
             fh.write(f"{nm},{n}," + ",".join(f"{x:.5f}" for x in v) + "\n")
     np.savez_compressed(a.out + "_series.npz", domain=dom.astype(np.float32),
-                        dt_years=dt_yr, freq=f, psd=p,
-                        seasonal_fraction=cell_frac[0], shape=np.array(V.shape[1:]))
-    print(f"\nwrote {a.out}_bands.csv and {a.out}_series.npz")
+                        dt_years=dt_yr, freq=f, psd=p, ny=ny, nx=nx,
+                        seasonal_fraction=cell_frac[0].reshape(ny, nx))
+    print(f"wrote {a.out}_bands.csv and {a.out}_series.npz\n")
     for nm, v, n in rows:
-        print(f"  {nm:10s} n={n:8,}  " +
-              "  ".join(f"{b[0][:4]} {100 * x:4.1f}%" for b, x in zip(BANDS, v)))
+        print(f"  {nm:10s} n={n:9,}  " +
+              "  ".join(f"{b[0][:4]} {100 * x:5.1f}%" for b, x in zip(BANDS, v)))
 
 
 if __name__ == "__main__":
