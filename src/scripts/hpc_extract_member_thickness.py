@@ -3,10 +3,11 @@
 hpc_extract_member_thickness.py — per-member ice thickness, subset to shelf catchments. RUN ON HPC.
 
 Writes one .npz per ensemble: cells (indices into nCells), years, members, h (M, T, n) float32,
-have (M, T) bool. Only thickness is pulled -- bed, coordinates and areas are static in the mesh
-file, and grounded/floating is recomputed from flotation because cellMask is written as zeros in
-these runs. Takes explicit years or a START:STOP:STEP range; each output_state file holds five
-annual slices, so any year can be asked for and the slice is matched on xtime.
+year_got (M, T) int16 holding the year each field was actually read at (-1 where missing).
+Only thickness is pulled -- bed, coordinates and areas are static in the mesh file, and
+grounded/floating is recomputed from flotation because cellMask is written as zeros in these
+runs. Takes explicit years or a START:STOP:STEP range; each output_state file holds five annual
+slices, so any year can be asked for and the slice is matched on xtime.
 """
 from __future__ import annotations
 
@@ -32,15 +33,21 @@ def year_of(path):
     return int(m.group(1)) if m else None
 
 
-def slice_of(ds, year):
-    """Index of `year` among the file's time slices, or None if it is not in this file."""
+def slice_of(ds, year, tol):
+    """(index, year) of the slice nearest `year`, or (None, None) if none is within tol.
+
+    The tolerance exists because the last file of a run holds a single slice dated
+    2299-12-01 -- the final state, a month short of 2300.
+    """
     if "xtime" not in ds.variables:
-        return 0
+        return 0, year
     years = []
     for r in ds["xtime"][:]:
         s = "".join(c.decode() if isinstance(c, bytes) else str(c) for c in r)
-        years.append(int(s[:4]) if s[:4].isdigit() else -1)
-    return years.index(year) if year in years else None
+        years.append(int(s[:4]) if s[:4].isdigit() else -9999)
+    years = np.array(years)
+    i = int(np.argmin(np.abs(years - year)))
+    return (i, int(years[i])) if abs(years[i] - year) <= tol else (None, None)
 
 
 def main():
@@ -53,6 +60,8 @@ def main():
     ap.add_argument("--years", nargs="+", default=["2000:2300:5"],
                     help='explicit years, or a START:STOP:STEP range like 2000:2300:5')
     ap.add_argument("--radius-km", type=float, default=300.0)
+    ap.add_argument("--year-tol", type=int, default=1,
+                    help="how far a slice may sit from the requested year and still be used")
     ap.add_argument("--state-glob", default="output_state*.nc",
                     help="searched in the member dir and in its output/ subdir")
     ap.add_argument("--out", default=None)
@@ -123,7 +132,7 @@ def main():
             print(f"  {ens}: using {len(members)} of {len(cand)} dirs "
                   f"(skipped {', '.join(sorted(set(cand) - set(members))[:4])} ...)")
         H = np.full((len(members), len(a.years), cells.size), np.nan, np.float32)
-        have = np.zeros((len(members), len(a.years)), bool)
+        got = np.full((len(members), len(a.years)), -1, np.int16)   # year actually read
         for mi, mem in enumerate(members):
             # each file starts at the year in its name and runs five annual slices,
             # so the file for a given year is the latest one starting at or before it
@@ -134,27 +143,31 @@ def main():
                     continue
                 dd = netCDF4.Dataset(f)
                 th = np.asarray(dd["thickness"][:])
-                si = slice_of(dd, yr) if th.ndim == 2 else 0
+                si, ya = slice_of(dd, yr, a.year_tol) if th.ndim == 2 else (0, yr)
                 dd.close()
                 if si is None:
                     continue
-                if not have.any():
+                if not (got >= 0).any():
                     print(f"  {ens}: {len(members)} members, first read {yr} = "
-                          f"slice {si} of {f}")
+                          f"slice {si} ({ya}) of {f}")
                 H[mi, ti] = (th[si] if th.ndim == 2 else th).ravel()[cells].astype(np.float32)
-                have[mi, ti] = True
+                got[mi, ti] = ya
         icy = np.nansum(H > 1.0, axis=2)          # cells with ice, per member and year
-        if have.any() and not icy.any():
+        if (got >= 0).any() and not icy.any():
             print(f"  ! {ens}: every field read is empty -- the output_state files hold "
                   f"no thickness. Check one with ncdump -v thickness before trusting this.")
         np.savez_compressed(out, cells=cells, years=np.array(a.years, np.int32),
-                            members=np.array(members), h=H, have=have)
-        span = [f"{m}:{a.years[np.flatnonzero(have[i])[0]]}-{a.years[np.flatnonzero(have[i])[-1]]}"
-                for i, m in enumerate(members) if have[i].any()]
-        print(f"wrote {out}   members={len(members)}  fields={int(have.sum())}  "
+                            members=np.array(members), h=H, year_got=got)
+        span = [f"{m}:{a.years[np.flatnonzero(got[i] >= 0)[0]]}-{a.years[np.flatnonzero(got[i] >= 0)[-1]]}"
+                for i, m in enumerate(members) if (got[i] >= 0).any()]
+        print(f"wrote {out}   members={len(members)}  fields={int((got >= 0).sum())}  "
               f"median icy cells/field {int(np.median(icy[icy > 0])) if (icy > 0).any() else 0}  "
               f"{os.path.getsize(out)/1e6:.1f} MB")
         print(f"  coverage: {' '.join(span)}")
+        off = {(a.years[ti], int(got[mi, ti])) for mi, ti in zip(*np.where(got >= 0))
+               if got[mi, ti] != a.years[ti]}
+        if off:
+            print(f"  asked/read year differs: {sorted(off)}")
 
 
 if __name__ == "__main__":
