@@ -30,6 +30,12 @@ JOBS = [
 ]
 
 
+CHAPTER_JOBS = [
+    ("fig_std_vs_mean.py",             ["--variable", "volumeAboveFloatation", "--out-dir", "{out}"]),
+    ("fig_amplification_composite.py", ["--out-dir", "{out}"]),
+    ("fig_dynamic_gating.py",          ["--out", "{out}/F8_dynamic_gating_SSP585.png"]),
+]
+
 CORAL = "/Users/smurugan9/research/coral"
 CORAL_OUT = f"{CORAL}/reports/legible"
 CORAL_JOBS = [
@@ -43,12 +49,15 @@ CORAL_JOBS = [
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--set", default="aislens", choices=["aislens", "coral"])
+    ap.add_argument("--set", default="aislens", choices=["aislens", "coral", "chapter"])
     ap.add_argument("--outdir", default=None)
     ap.add_argument("--only", nargs="*", default=None)
     a = ap.parse_args()
-    jobs, base = (JOBS, OUT) if a.set == "aislens" else (CORAL_JOBS, CORAL_OUT)
-    scripts_dir = HERE if a.set == "aislens" else f"{CORAL}/scripts"
+    jobs, base, scripts_dir = {
+        "aislens": (JOBS, OUT, HERE),
+        "coral":   (CORAL_JOBS, CORAL_OUT, f"{CORAL}/scripts"),
+        "chapter": (CHAPTER_JOBS, f"{OUT}/chapter", HERE),
+    }[a.set]
     if a.outdir is None:
         a.outdir = base
     os.makedirs(a.outdir, exist_ok=True)
