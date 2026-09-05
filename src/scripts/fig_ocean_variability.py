@@ -41,7 +41,8 @@ def read_bands(path):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--tag", default="raw", choices=["raw", "extrap"])
-    ap.add_argument("--window-years", type=float, default=120.0)
+    ap.add_argument("--window-years", type=float, default=None,
+                    help="crop the series; default is the whole record")
     ap.add_argument("--out", default=None)
     a = ap.parse_args()
     out = a.out or f"{ROOT}/reports/dissertation/figures/slides/fig_ocean_variability.png"
@@ -57,15 +58,15 @@ def main():
     ax = fig.add_axes([0.052, 0.150, 0.445, 0.740])
     axb = fig.add_axes([0.590, 0.150, 0.310, 0.740])
 
-    n = int(a.window_years / dt)
+    n = dom.size if a.window_years is None else int(a.window_years / dt)
     s = dom[:n] / np.std(dom)
     ax.axhline(0, color=ds.RULE, lw=.9, zorder=2)
-    ax.plot(t[:n], s, color=ds.ICE, lw=0.9, zorder=3)
+    ax.plot(t[:n], s, color=ds.ICE, lw=0.55, alpha=.75, zorder=3)
     k = max(1, int(10.0 / dt))                       # 10-year running mean
     sm = np.convolve(s, np.ones(k) / k, "same")
     ax.plot(t[:n], sm, color=ds.INK, lw=2.4, zorder=4)
     ds.strip(ax)
-    ax.set_xlim(0, a.window_years)
+    ax.set_xlim(0, t[n - 1])
     ax.set_xlabel("years of the SORRM record", labelpad=7)
     ax.set_ylabel("melt anomaly  (standard deviations)", labelpad=7)
     ax.tick_params(length=3)

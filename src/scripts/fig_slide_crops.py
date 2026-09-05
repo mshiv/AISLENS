@@ -38,6 +38,8 @@ RECUTS = [
     # so it goes in as a plate rather than being replotted in the deck palette
     ("S09_melt_spectrum", f"{AIS}/reports/figures/sorrm_sector_spectrum.png",
      (0.0, 0.0, 1.0, 1.0), "F_v power by frequency band, per sector"),
+    ("S09b_observed_melt_variability", f"{CH1}/ch1_adusumilli_fig4.png",
+     (0.0, 0.862, 1.0, 1.0), "observed melt, Amundsen warm shelves — Adusumilli panel (e)"),
     ("S10_experiment_design", f"{CH1}/ch1_emulation_framework.png",
      (0.0, 0.0, 1.0, 0.53), "Antarctic half of the emulation framework"),
     ("S11_mean_trajectory", f"{FIGS}/tierA/std_vs_mean_volumeAboveFloatation.png",
@@ -70,6 +72,8 @@ RECUTS = [
      (0.0, 0.0, 0.33, 1.0), "compound-effect map, panel (a)"),
     ("S25_compound_curve", f"{CORAL}/reports/chapter4_final_local/coral_compound_effect.png",
      (0.63, 0.0, 1.0, 0.72), "exceedance curve, panel (c)"),
+    ("S26_driver_dominance", f"{CORAL}/reports/chapter4_final_local/coral_driver_dominance.png",
+     (0.0, 0.0, 1.0, 1.0), "which driver dominates where — 46% rain, 49% coastal"),
     ("S27_unet", f"{CH1}/ch1_unet_schematic.png",
      (0.0, 0.0, 1.0, 1.0), "U-Net input stack and architecture"),
     ("S29_ood_ecdf", f"{CORAL}/reports/chapter4_remaining_v1/coral_emulator_compact.png",
