@@ -24,7 +24,7 @@ ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
 BLOCKS = [
     dict(
         title="Antarctica",
-        sub="16 basins · mean displacement under 10× variability · model year 300",
+        sub="16 basins · drift under 10× variability, 10× minus 1× · model year 300",
         warm=94.56, warm_lab="more ice lost",
         cool=82.45, cool_lab="less ice lost",
         net=12.11, net_tail="all that a continental total reports",

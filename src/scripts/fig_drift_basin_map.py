@@ -122,7 +122,7 @@ def main():
     cb.set_ticklabels([f"−{lim:.0f}", "0", f"+{lim:.0f}"])
     cb.ax.set_facecolor(ds.PAPER)
     cb.ax.tick_params(labelsize=9, length=2, colors=ds.INK_SOFT)
-    cb.set_label("ice above flotation lost under 10× forcing  (m)",
+    cb.set_label("ice above flotation lost\nunder 10× forcing  (m)",
                  fontsize=9, color=ds.INK_SOFT, labelpad=5)
 
     axm.text(0.02, 0.175, "more ice lost under louder forcing", transform=axm.transAxes,
@@ -140,7 +140,7 @@ def main():
     axb.axvline(0, color=ds.INK, lw=0.9)
     axb.set_yticks([])
     ds.strip(axb, keep=("bottom",))
-    axb.set_xlabel("basin contribution to the mean displacement  (mm SLE)", labelpad=6)
+    axb.set_xlabel("basin contribution to the drift, 10× minus 1×  (mm SLE)", labelpad=6)
     axb.tick_params(axis="x", length=3)
     axb.set_ylim(-0.8, len(order) - 0.2)
 
@@ -174,8 +174,9 @@ def main():
              transform=axb.transAxes, fontsize=10.5, color=ds.INK_SOFT,
              ha="left", va="bottom")
 
-    fig.text(0.01, 0.012,
-             "10× amplitude experiment — the sign pattern is transferable, the magnitude is not",
+    fig.text(0.01, -0.035,
+             "10× amplitude experiment · the sign holds at every horizon for the leading basins, "
+             "the magnitude does not transfer",
              fontsize=9, color=ds.INK_SOFT, ha="left", va="bottom", style="italic")
 
     fig.savefig(a.out, bbox_inches="tight", pad_inches=0.14)

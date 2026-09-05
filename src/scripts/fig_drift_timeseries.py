@@ -83,7 +83,7 @@ def main():
     ds.strip(ax)
     ax.set_xlim(0, g.max())
     ax.set_xlabel("model year", labelpad=6)
-    ax.set_ylabel("displacement of the ensemble mean  (mm SLE)", labelpad=8)
+    ax.set_ylabel("drift in the ensemble mean, 10× minus 1×  (mm SLE)", labelpad=8)
     ax.tick_params(length=3)
 
     ax.set_ylim(min(0, float(np.nanmin(D - SE))) - 1.0, float(np.nanmax(D + SE)) * 1.16)
