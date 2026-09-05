@@ -49,6 +49,8 @@ _LEGACY = {
     "difference":   "PuOr",
     "ratio":        "PRGn",
     "anomaly":      "RdBu_r",
+    "basemap":      "Greys",
+    "discharge":    "Blues",
 }
 
 # role -> cmocean name.  "_r" reverses, as in matplotlib.
@@ -63,6 +65,10 @@ _CMO = {
     "magnitude":   "amp",        # built for amplitude
     "friction":    "matter",
     "resolution":  "dense",
+    "discharge":   "dense",     # river flow; distinct from rain, which is a different variable
+    # a DEM drawn *under* an overlay is context, not the subject: keep it desaturated
+    # so the data on top still reads.  A DEM that is the subject uses "topography".
+    "basemap":     "gray_r",
     # two-sided ----------------------------------------------------------
     "topography":  "topo",       # built for topography, hinge at sea level
     "melt":        "balance",    # melt against refreezing, hinge at zero
