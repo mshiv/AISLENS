@@ -20,6 +20,7 @@ CORAL = "/Users/smurugan9/research/coral"
 OUT = f"{AIS}/reports/dissertation/figures/slides"
 
 FIGS = f"{AIS}/reports/dissertation/figures"
+LIT = f"{AIS}/reports/figures/literature"
 CH1 = ("/Users/smurugan9/Documents/vaults/shadowfax-wiki/wiki/dissertation/"
        "overleaf_updates/chapter1_figures_2026-09-02/figures")
 
@@ -40,6 +41,11 @@ RECUTS = [
      (0.0, 0.0, 1.0, 1.0), "F_v power by frequency band, per sector"),
     ("S09b_observed_melt_variability", f"{CH1}/ch1_adusumilli_fig4.png",
      (0.0, 0.862, 1.0, 1.0), "observed melt, Amundsen warm shelves — Adusumilli panel (e)"),
+    # the two literature plates the motivation rests on, lifted from the AGU25 deck
+    ("S09c_hoffman", f"{LIT}/hoffman2019_thwaites_variability.jpg",
+     (0.0, 0.581, 1.0, 1.0), "Hoffman 2019 panels (d) and (e) — variability lowers loss, delays retreat"),
+    ("S09d_grislens", f"{LIT}/verjans2025_grislens.png",
+     (0.0, 0.0, 1.0, 1.0), "Verjans 2025 GrISLENS — ensemble spread and sigma over mean"),
     ("S10_experiment_design", f"{CH1}/ch1_emulation_framework.png",
      (0.0, 0.0, 1.0, 0.53), "Antarctic half of the emulation framework"),
     ("S11_mean_trajectory", f"{FIGS}/tierA/std_vs_mean_volumeAboveFloatation.png",
