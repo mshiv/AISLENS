@@ -26,6 +26,7 @@ import numpy as np
 import xarray as xr
 import matplotlib; matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+import matplotlib.tri as mtri
 from scipy.stats import pearsonr, spearmanr
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -89,6 +90,21 @@ def basin_melt(mesh, mask):
         sel = (masks[:, r] > 0) & floating
         out.append(float(np.nanmean(bmb[sel])) if sel.sum() > 20 else np.nan)
     return np.array(out)
+
+
+def mesh_context(mesh, mask):
+    """Triangulation, basin index per cell, and an in-any-basin flag."""
+    import netCDF4
+    d = netCDF4.Dataset(mesh)
+    cov = np.asarray(d["cellsOnVertex"][:]) - 1
+    x = np.asarray(d["xCell"][:]).ravel()
+    y = np.asarray(d["yCell"][:]).ravel()
+    d.close()
+    tri = cov[(cov >= 0).all(axis=1)]
+    masks = np.asarray(xr.open_dataset(mask, decode_times=False)["regionCellMasks"].values)
+    if masks.shape[0] != x.size and masks.shape[1] == x.size:
+        masks = masks.T
+    return mtri.Triangulation(x, y, tri), tri, np.argmax(masks, axis=1), masks.sum(axis=1) > 0
 
 
 def corr(x, y):
@@ -156,9 +172,35 @@ def main():
               f"motion {r[3]:+.2f} (p={r[4]:.3f})   forcing {r[5]:+.2f} (p={r[6]:.3f})")
 
     # ---------------------------------------------------------------- figure
-    fig = plt.figure(figsize=(15.6, 6.9))
-    ax = fig.add_axes([0.052, 0.130, 0.400, 0.760])
-    axr = fig.add_axes([0.575, 0.130, 0.395, 0.760])
+    T, tri, cell_basin, in_any = mesh_context(
+        os.path.join(glt.ROOT, "data/MALI", os.path.basename(glt.MESH)), glt.BASIN_MASK)
+
+    fig = plt.figure(figsize=(19.4, 6.4))
+    axm = fig.add_axes([0.012, 0.075, 0.290, 0.830])
+    ax = fig.add_axes([0.372, 0.135, 0.260, 0.755])
+    axr = fig.add_axes([0.735, 0.135, 0.250, 0.755])
+
+    # panel A -- where the spread actually is, the half of F8 worth keeping
+    cell_sig = np.where(in_any, sig[np.clip(cell_basin, 0, len(sig) - 1)], np.nan)
+    T.set_mask(~in_any[tri].all(axis=1))
+    tp = axm.tripcolor(T, cell_sig, shading="gouraud", rasterized=True,
+                       cmap=oc.cmap("magnitude", "cmocean"),
+                       vmin=0, vmax=float(np.nanpercentile(sig, 97)))
+    cbm = fig.colorbar(tp, ax=axm, fraction=0.036, pad=0.01)
+    cbm.set_label(f"σ ΔVAF at year {hy:.0f}  (mm)", fontsize=12)
+    cbm.outline.set_visible(False)
+    for tag in ("G-H", "J-K", "A-Ap"):
+        if tag in names:
+            sel = (cell_basin == names.index(tag)) & in_any
+            if sel.any():
+                axm.text(T.x[sel].mean(), T.y[sel].mean(), tag, fontsize=12.5, color="white",
+                         ha="center", va="center", zorder=6,
+                         bbox=dict(boxstyle="round,pad=0.18", fc=ds.INK, ec="none", alpha=.72))
+    axm.set_aspect("equal"); axm.set_xticks([]); axm.set_yticks([])
+    for sp in axm.spines.values():
+        sp.set_visible(False)
+    axm.text(0.0, 1.005, "where the spread is", transform=axm.transAxes,
+             fontsize=12.5, color=ds.INK, ha="left", va="bottom")
 
     ok = np.isfinite(melt) & np.isfinite(sig) & np.isfinite(motion)
     sc = ax.scatter(motion[ok], sig[ok], s=190, c=melt[ok],
@@ -175,7 +217,7 @@ def main():
     ax.set_xlabel(f"how far the basin itself moves, |mean ΔVAF| at year {hy:.0f}  (mm)", labelpad=8)
     ax.set_ylabel(f"spread across realizations, σ ΔVAF  (mm)", labelpad=8)
     _, _, sr, sp, _ = stats["spread vs basin motion"]
-    ax.text(0.0, 1.035, f"motion explains the spread — Spearman {sr:+.2f}, p = {sp:.4f}",
+    ax.text(0.0, 1.035, f"what explains it — Spearman {sr:+.2f}, p = {sp:.4f}",
             transform=ax.transAxes, fontsize=12.5, color=ds.INK, ha="left", va="bottom")
 
     axr.axhspan(-1, 1, color=ds.FIELD, alpha=0.0)
@@ -195,8 +237,7 @@ def main():
     axr.set_xlim(R[0, 0], R[-1, 0]); axr.set_ylim(-0.55, 1.0)
     axr.set_xlabel("horizon  (model year)", labelpad=8)
     axr.set_ylabel("rank correlation with the spread  (Spearman ρ)", labelpad=8)
-    axr.text(0.0, 1.035, "filled markers are p < 0.05 · sixteen basins, so early points are "
-             "suggestive, not established",
+    axr.text(0.0, 1.035, "and when · filled markers are p < 0.05",
              transform=axr.transAxes, fontsize=12, color=ds.INK_SOFT, ha="left", va="bottom")
 
     fig.savefig(out, bbox_inches="tight", pad_inches=0.14)
