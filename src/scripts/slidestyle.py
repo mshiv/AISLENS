@@ -42,6 +42,16 @@ DIVERGING = LinearSegmentedColormap.from_list(
     N=256,
 )
 
+# AISLENS_PALETTE=cmocean swaps in cmocean's balance, which is perceptually uniform
+# either side of its hinge; the deck palette above is not, and reads unevenly where
+# the values are small.  Same hinge, same warm-is-loss convention.
+if os.environ.get("AISLENS_PALETTE", "").lower() == "cmocean":
+    try:
+        import cmocean
+        DIVERGING = cmocean.cm.balance
+    except ImportError:
+        pass
+
 _FONT_DIR = os.path.expanduser("~/Library/Fonts/_deck")
 
 

@@ -22,11 +22,13 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import slidestyle as ds          # noqa: E402
 import fig_gl_transect as glt    # noqa: E402
+import oceancolors as oc         # noqa: E402
 
 RHO_I, RHO_O = glt.RHO_I, glt.RHO_O
 
 # deep ocean -> shelf -> sea level -> land.  TwoSlopeNorm sends sea level to 0.5,
 # so the neutral tone sits there and "below sea level" reads as one colour family.
+# kept as the legacy fallback; oceancolors resolves the palette
 BEDCOL = LinearSegmentedColormap.from_list("bed", [
     (0.00, "#0B2545"), (0.16, "#17456E"), (0.32, "#2E76A8"),
     (0.44, "#7FB2D4"), (0.50, "#EDE7D8"), (0.62, "#CBB68B"),
@@ -46,6 +48,7 @@ def main():
     ap.add_argument("--outdir", default=os.path.join(
         glt.ROOT, "reports/dissertation/figures/slides"))
     ap.add_argument("--out", default=None)
+    ap.add_argument("--palette", default=None, choices=["legacy", "cmocean"])
     a = ap.parse_args()
     os.makedirs(a.outdir, exist_ok=True)
     out = a.out or f"{a.outdir}/fig_bedrock.png"
@@ -71,7 +74,8 @@ def main():
     ax = fig.add_axes([0.02, 0.045, 0.96, 0.875])
 
     norm = TwoSlopeNorm(vmin=-2500.0, vcenter=0.0, vmax=2500.0)
-    tp = ax.tripcolor(T, bed, cmap=BEDCOL, norm=norm, shading="gouraud", rasterized=True)
+    tp = ax.tripcolor(T, bed, cmap=oc.cmap("topography", a.palette), norm=norm,
+                      shading="gouraud", rasterized=True)
 
     # present-day grounding line and ice edge, from the same mesh
     ax.tricontour(T, grounded.astype(float), levels=[0.5],
