@@ -34,7 +34,12 @@ import fig_gl_transect as glt    # noqa: E402
 
 STATE = f"{glt.ROOT}/reports/dissertation/figures/spatial/members_state/anim"
 GROUNDING_LINE = 256          # MPAS-Albany cellMask bit value
-PAIR = [("SSP585", "1x"), ("SSP585_varScaled10x", "10x")]
+# label and colour per ensemble; anything not listed falls back to the ink colour
+SHOWN = {"SSP585": ("SSP5-8.5, 1x", ds.ICE),
+         "SSP585_varScaled10x": ("SSP5-8.5, 10x", ds.MARSH),
+         "CTRL": ("control", ds.INK),
+         "SSP126": ("SSP1-2.6", ds.MARSH_DEEP),
+         "SSP585-3X": ("SSP5-8.5, 3x trend", ds.MARSH_TINT)}
 WINDOW_KM = (-1750, -1150, -750, -150)   # Amundsen, where the mesh is finest
 
 
@@ -60,13 +65,21 @@ def window(x, y, cov, cells, box):
 
 def main():
     ap = argparse.ArgumentParser()
+    ap.add_argument("--ensembles", nargs="+",
+                    default=["SSP585", "SSP585_varScaled10x"])
+    ap.add_argument("--region", default=None,
+                    help="centre the window on this shelf instead of using --box")
+    ap.add_argument("--window-km", type=float, default=600.0)
     ap.add_argument("--box", type=float, nargs=4, default=WINDOW_KM,
                     metavar=("X0", "X1", "Y0", "Y1"))
+    ap.add_argument("--suffix", default="")
     ap.add_argument("--fps", type=int, default=10)
-    ap.add_argument("--out", default=f"{glt.ROOT}/reports/dissertation/figures/slides/"
-                                    "anim_gl_envelope.mp4")
+    ap.add_argument("--out", default=None)
+    ap.add_argument("--outdir", default=f"{glt.ROOT}/reports/dissertation/figures/slides")
     a = ap.parse_args()
-    os.makedirs(os.path.dirname(a.out), exist_ok=True)
+    tag = a.suffix or (f"_{a.region}" if a.region else "")
+    out = a.out or f"{a.outdir}/anim_gl_envelope{tag}.mp4"
+    os.makedirs(os.path.dirname(out), exist_ok=True)
     ds.apply()
 
     import netCDF4
@@ -75,14 +88,26 @@ def main():
     x, y = glt.rd(mesh, "xCell"), glt.rd(mesh, "yCell")
     bed = glt.rd(mesh, "bedTopography")
 
+    if a.region:
+        names, masks = glt.region_names(glt.SHELF_MASK)
+        if a.region not in names:
+            sys.exit(f"no region {a.region}")
+        m = np.asarray(np.asarray(masks)[:, names.index(a.region)], bool)
+        cx, cy = x[m].mean() / 1e3, y[m].mean() / 1e3
+        h = a.window_km / 2
+        a.box = (cx - h, cx + h, cy - h, cy + h)
+        print(f"  {a.region}: window {a.box[0]:.0f}..{a.box[1]:.0f} km, "
+              f"{a.box[2]:.0f}..{a.box[3]:.0f} km")
+
     runs = []
-    for ens, lab in PAIR:
+    for ens in a.ensembles:
+        lab, col = SHOWN.get(ens, (ens, ds.INK))
         z = load(ens)
         T, inbox, sub = window(x, y, cov, z["cells"], a.box)
         thk = z["thk"][:, :, inbox]
         msk = z["mask"][:, :, inbox]
         flot = thk - (glt.RHO_O / glt.RHO_I) * np.maximum(0.0, -bed[sub])[None, None, :]
-        runs.append(dict(lab=lab, ens=ens, T=T, flot=flot, thk=thk, mask=msk,
+        runs.append(dict(lab=lab, col=col, ens=ens, T=T, flot=flot, thk=thk, mask=msk,
                          years=z["years"], n=len(z["members"]), bed=bed[sub]))
         print(f"  {ens:22s} {len(z['members'])} complete members, "
               f"{sub.size} cells in the window")
@@ -96,10 +121,11 @@ def main():
               f"flotation (median), {100*np.mean(np.abs(v) < 200):.0f}% within 200 m")
 
     yrs = runs[0]["years"]
-    fig = plt.figure(figsize=(13.4, 7.4))
-    axes, lines, ref = [], [], []
+    np_ = len(runs)
+    fig = plt.figure(figsize=(6.9 * np_, 7.4))
+    axes = []
     for i, r in enumerate(runs):
-        ax = fig.add_axes([0.02 + 0.49 * i, 0.055, 0.465, 0.845])
+        ax = fig.add_axes([0.02 + i / np_, 0.055, 1 / np_ - 0.025, 0.845])
         ax.tripcolor(r["T"], np.where(r["thk"][0, 0] > 1, r["thk"][0, 0], np.nan),
                      cmap=oc.cmap("thickness", "cmocean"), shading="gouraud",
                      rasterized=True, alpha=.45, zorder=1)
@@ -131,18 +157,17 @@ def main():
             keep.clear()
             for m in range(r["flot"].shape[0]):
                 cs = ax.tricontour(r["T"], r["flot"][m, k], levels=[0.0],
-                                   colors=[ds.ICE if r["lab"] == "1x" else ds.MARSH],
-                                   linewidths=0.9, alpha=.55, zorder=5)
+                                   colors=[r["col"]], linewidths=0.9, alpha=.55, zorder=5)
                 keep.append(cs)
         clock.set_text(f"model year {yrs[k]-2000:.0f}")
         return []
 
     anim = animation.FuncAnimation(fig, update, frames=len(yrs),
                                    interval=1000 / a.fps, blit=False)
-    anim.save(a.out, writer=animation.FFMpegWriter(fps=a.fps, bitrate=3600),
+    anim.save(out, writer=animation.FFMpegWriter(fps=a.fps, bitrate=3600),
               savefig_kwargs=dict(facecolor=ds.PAPER))
     plt.close(fig)
-    print(f"wrote {a.out}   {len(yrs)} frames")
+    print(f"wrote {out}   {len(yrs)} frames")
 
 
 if __name__ == "__main__":
