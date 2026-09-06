@@ -12,7 +12,11 @@ class Config:
     # DATA_ROOT: Path = Path(
     #    os.environ.get('AISLENS_DATA_DIR', os.path.expandvars('$HOME/scratch/AISLENS'))
     #)
-    DATA_ROOT: Path = Path(os.environ.get('AISLENS_DATA_DIR', BASE_DIR))
+    # AISLENS_DATA_DIR points at the project root on some machines and straight at
+    # the data directory on others, so drop a trailing "data" rather than doubling it
+    _root: Path = Path(os.environ.get('AISLENS_DATA_DIR', BASE_DIR))
+    DATA_ROOT: Path = (_root.parent if _root.name == "data"
+                       and not (_root / "data").is_dir() else _root)
 
     # Directory paths (all data is stored under DATA_ROOT/data). 
     # Replace DATA_ROOT with BASE_DIR if you want to use the project code location as the data root.

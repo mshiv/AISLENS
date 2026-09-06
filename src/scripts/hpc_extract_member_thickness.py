@@ -21,11 +21,29 @@ import netCDF4
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from flowline import build_flowline  # noqa: E402
 
+def _mali_dir():
+    """Where the MALI data lives.
+
+    AISLENS_DATA_DIR is set to the repo root on some machines and to the data
+    directory itself on others, so try the sensible spellings and take the first
+    that is actually there rather than assuming one layout.
+    """
+    env = os.environ.get("AISLENS_DATA_DIR")
+    roots = [env] if env else []
+    roots.append(ROOT if "ROOT" in globals() else ".")
+    for r in roots:
+        for tail in (("data", "MALI"), ("MALI",), ()):
+            p = os.path.join(r, *tail)
+            if os.path.isdir(p):
+                return p
+    return os.path.join(roots[0], "data", "MALI")
+
+
 try:
     from aislens.config import config
     _MALI = str(config.DIR_MALI)
 except Exception:
-    _MALI = os.path.join(os.environ.get("AISLENS_DATA_DIR", "."), "data", "MALI")
+    _MALI = _mali_dir()
 
 MESH = os.path.join(_MALI, "AIS_4to20km_r01_20220907_m5_drop_bed_20m_bulldoze_troughs_75_to_400m"
                     "_Enderby_maxstiffness_0.8_TG_pinning_40maf_bedmap2_surface_ASE_05perc_seafloor_mu"

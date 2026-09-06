@@ -31,7 +31,11 @@ try:
     from aislens.config import config
     _MALI = str(config.DIR_MALI)
 except Exception:
-    _MALI = os.path.join(os.environ.get("AISLENS_DATA_DIR", ROOT), "data", "MALI")
+    _env = os.environ.get("AISLENS_DATA_DIR")
+    _MALI = next((p for r in ([_env] if _env else []) + [ROOT]
+                  for t in (("data", "MALI"), ("MALI",), ())
+                  if os.path.isdir(p := os.path.join(r, *t))),
+                 os.path.join(ROOT, "data", "MALI"))
 
 MESH = os.path.join(_MALI, "AIS_4to20km_r01_20220907_m5_drop_bed_20m_bulldoze_troughs_75_to_400m"
                     "_Enderby_maxstiffness_0.8_TG_pinning_40maf_bedmap2_surface_ASE_05perc_seafloor_mu"
