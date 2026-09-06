@@ -174,7 +174,8 @@ def main():
 
     yrs = runs[0]["years"]
     np_ = len(runs)
-    fig = plt.figure(figsize=(6.9 * np_, 7.4))
+    # a single panel still needs room for the colorbar and the footer line
+    fig = plt.figure(figsize=(max(9.6, 6.9 * np_), 7.4))
     axes = []
     for i, r in enumerate(runs):
         ax = fig.add_axes([0.02 + i / np_, 0.135, 1 / np_ - 0.025, 0.775])
@@ -200,9 +201,10 @@ def main():
     cb.ax.xaxis.set_label_position("top")      # keeps it clear of the footer line
     cb.ax.tick_params(labelsize=10, length=3); cb.outline.set_visible(False)
     clock = fig.text(0.5, 0.965, "", fontsize=16, color=ds.INK, ha="center", va="top")
-    fig.text(0.5, 0.012, "limits fixed over the whole record and shared between panels  ·  "
+    shared_txt = " and shared between panels" if np_ > 1 else ""
+    fig.text(0.5, 0.012, f"limits fixed over the whole record{shared_txt}  ·  "
              "dotted line is where the grounding line started",
-             fontsize=11.5, color=ds.INK_SOFT, ha="center", va="bottom")
+             fontsize=11, color=ds.INK_SOFT, ha="center", va="bottom")
 
     drawn = [[] for _ in runs]
 
