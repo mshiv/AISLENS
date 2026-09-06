@@ -25,6 +25,7 @@ import matplotlib; matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.tri as mtri
 import matplotlib.animation as animation
+from matplotlib.colors import TwoSlopeNorm, Normalize
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -63,8 +64,43 @@ def window(x, y, cov, cells, box):
     return mtri.Triangulation(x[sub], y[sub], lut[tri]), inbox, sub
 
 
+def backdrop(kind, thk, bed, years):
+    """(field, norm, role, label, time_varying). Limits come from the whole record."""
+    ice = thk > 1.0
+    dt = float(np.median(np.diff(years)))
+    mean_h = np.where(ice, thk, np.nan).mean(axis=0)
+
+    def sym(a, pct=99.0):
+        v = a[np.isfinite(a)]
+        return float(np.percentile(np.abs(v), pct)) or 1.0
+
+    if kind == "bed":
+        return (bed, TwoSlopeNorm(vmin=-1800, vcenter=0, vmax=1800),
+                "topography", "bed elevation  (m)", False)
+    if kind == "thickness":
+        return (mean_h, Normalize(0, float(np.nanpercentile(mean_h, 99))),
+                "thickness", "ice thickness  (m)", True)
+    if kind == "change":
+        c = mean_h - mean_h[0]
+        r = sym(c)
+        return (c, TwoSlopeNorm(vmin=-r, vcenter=0, vmax=r),
+                "tendency", "thickness change since year 0  (m)", True)
+    if kind == "dhdt":
+        g = np.gradient(mean_h, dt, axis=0)
+        r = sym(g, 98.0)
+        return (g, TwoSlopeNorm(vmin=-r, vcenter=0, vmax=r),
+                "tendency", "dh/dt  (m yr$^{-1}$)", True)
+    if kind == "spread":
+        sd = np.where(ice, thk, np.nan).std(axis=0, ddof=1)
+        return (sd, Normalize(0, float(np.nanpercentile(sd, 99))),
+                "magnitude", "spread across members, sigma h  (m)", True)
+    raise SystemExit(f"unknown backdrop {kind}")
+
+
 def main():
     ap = argparse.ArgumentParser()
+    ap.add_argument("--backdrop", default="bed",
+                    choices=["bed", "thickness", "change", "dhdt", "spread"])
     ap.add_argument("--ensembles", nargs="+",
                     default=["SSP585", "SSP585_varScaled10x"])
     ap.add_argument("--region", default=None,
@@ -107,10 +143,26 @@ def main():
         thk = z["thk"][:, :, inbox]
         msk = z["mask"][:, :, inbox]
         flot = thk - (glt.RHO_O / glt.RHO_I) * np.maximum(0.0, -bed[sub])[None, None, :]
+        bfield, bnorm, brole, blab, bvary = backdrop(a.backdrop, thk, bed[sub],
+                                                     np.asarray(z["years"]))
         runs.append(dict(lab=lab, col=col, ens=ens, T=T, flot=flot, thk=thk, mask=msk,
-                         years=z["years"], n=len(z["members"]), bed=bed[sub]))
+                         years=z["years"], n=len(z["members"]), bed=bed[sub],
+                         bfield=bfield, bnorm=bnorm, brole=brole, blab=blab, bvary=bvary))
         print(f"  {ens:22s} {len(z['members'])} complete members, "
               f"{sub.size} cells in the window")
+
+    # a per-panel norm would let 1x and 10x look alike on their own scales, so the
+    # limits are taken across every run and one colorbar serves the figure
+    allf = np.concatenate([np.asarray(r["bfield"]).ravel() for r in runs])
+    allf = allf[np.isfinite(allf)]
+    if isinstance(runs[0]["bnorm"], TwoSlopeNorm):
+        rr = float(np.percentile(np.abs(allf), 99)) or 1.0
+        shared = TwoSlopeNorm(vmin=-rr, vcenter=0.0, vmax=rr)
+    else:
+        shared = Normalize(float(np.nanmin(allf)), float(np.percentile(allf, 99)))
+    for r in runs:
+        r["bnorm"] = shared
+    print(f"  shared colour limits: {shared.vmin:.4g} .. {shared.vmax:.4g}")
 
     # does the smooth contour agree with the model's own flag?
     r = runs[0]
@@ -125,10 +177,11 @@ def main():
     fig = plt.figure(figsize=(6.9 * np_, 7.4))
     axes = []
     for i, r in enumerate(runs):
-        ax = fig.add_axes([0.02 + i / np_, 0.055, 1 / np_ - 0.025, 0.845])
-        ax.tripcolor(r["T"], np.where(r["thk"][0, 0] > 1, r["thk"][0, 0], np.nan),
-                     cmap=oc.cmap("thickness", "cmocean"), shading="gouraud",
-                     rasterized=True, alpha=.45, zorder=1)
+        ax = fig.add_axes([0.02 + i / np_, 0.135, 1 / np_ - 0.025, 0.775])
+        f0 = r["bfield"][0] if r["bvary"] else r["bfield"]
+        r["tp"] = ax.tripcolor(r["T"], f0, cmap=oc.cmap(r["brole"], "cmocean"),
+                               norm=r["bnorm"], shading="gouraud", rasterized=True,
+                               zorder=1)
         # the starting line, kept faint so retreat reads as displacement
         ax.tricontour(r["T"], r["flot"][0, 0], levels=[0.0], colors=[ds.INK_SOFT],
                       linewidths=1.4, linestyles="dotted", zorder=3)
@@ -141,14 +194,22 @@ def main():
                 fontsize=14, color=ds.INK, ha="left", va="top", zorder=9,
                 bbox=dict(boxstyle="round,pad=0.24", fc="white", ec="none", alpha=.8))
         axes.append(ax)
+    cax = fig.add_axes([0.28, 0.068, 0.44, 0.018])
+    cb = fig.colorbar(runs[0]["tp"], cax=cax, orientation="horizontal")
+    cb.set_label(runs[0]["blab"], fontsize=12, labelpad=8)
+    cb.ax.xaxis.set_label_position("top")      # keeps it clear of the footer line
+    cb.ax.tick_params(labelsize=10, length=3); cb.outline.set_visible(False)
     clock = fig.text(0.5, 0.965, "", fontsize=16, color=ds.INK, ha="center", va="top")
-    fig.text(0.5, 0.020, "dotted line is where the grounding line started",
+    fig.text(0.5, 0.012, "limits fixed over the whole record and shared between panels  ·  "
+             "dotted line is where the grounding line started",
              fontsize=11.5, color=ds.INK_SOFT, ha="center", va="bottom")
 
     drawn = [[] for _ in runs]
 
     def update(k):
         for ax, r, keep in zip(axes, runs, drawn):
+            if r["bvary"]:
+                r["tp"].set_array(r["bfield"][k])
             for c in keep:
                 try:
                     c.remove()
