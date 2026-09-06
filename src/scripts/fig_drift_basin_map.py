@@ -3,7 +3,7 @@
 fig_drift_basin_map.py — noise-induced mean displacement, mapped and summed by basin.
 
 Per-cell VAF(10x) - VAF(1x) at one horizon, plus the same field summed into the 16 ISMIP6
-basins. Positive = the louder ensemble loses more ice there. Numbers reproduce
+basins. Positive = the greater ensemble loses more ice there. Numbers reproduce
 drift_basin_horizons.py; sign pattern is transferable, magnitude is a 10x-amplitude result.
 """
 from __future__ import annotations
@@ -125,7 +125,7 @@ def main():
     cb.set_label("ice above flotation lost\nunder 10× forcing  (m)",
                  fontsize=9, color=ds.INK_SOFT, labelpad=5)
 
-    axm.text(0.02, 0.175, "more ice lost under louder forcing", transform=axm.transAxes,
+    axm.text(0.02, 0.175, "more ice lost under greater forcing", transform=axm.transAxes,
              fontsize=10, color=ds.POS)
     axm.text(0.02, 0.132, "less ice lost", transform=axm.transAxes,
              fontsize=10, color=ds.NEG)

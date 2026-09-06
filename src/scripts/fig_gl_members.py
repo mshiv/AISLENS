@@ -34,7 +34,7 @@ ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
 MEMDIR = f"{ROOT}/reports/dissertation/figures/spatial/members"
 OUTDIR = f"{ROOT}/reports/dissertation/figures/slides"
 
-# order is the story order: no trend, weak trend, strong trend, louder, stronger
+# order is the story order: no trend, weak trend, strong trend, greater, stronger
 ENSEMBLES = [
     ("CTRL",                "control",          ds.INK_SOFT),
     ("SSP126",              "SSP1-2.6",         ds.ICE),

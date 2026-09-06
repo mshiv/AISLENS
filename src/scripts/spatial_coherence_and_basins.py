@@ -2,7 +2,7 @@
 """
 spatial_coherence_and_basins.py -- two analyses of the per-cell sigma fields.
 
-(A) SPATIAL COHERENCE -- does louder forcing produce a LESS spatially organised
+(A) SPATIAL COHERENCE -- does greater forcing produce a LESS spatially organised
     response? This tests the hypothesis raised by the per-cell sigma ratio: the
     LOCAL ratio sigma_10x/sigma_1x is ~8.7 at yr100, yet the GLOBAL ratio is only
     3.71. Something discards the difference on the way from cell to continent.

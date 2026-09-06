@@ -25,7 +25,7 @@ post-2300 extensions were generated with a DIFFERENT (1000-yr) stochastic forcin
 generator whose variance is ~3.3x the pre-2300 (300-yr) generator's. The forcing
 baseline was offset-corrected so the MEAN is continuous across the 2300 seam, but
 the VARIANCE is not. Any change in ensemble SPREAD after 2300 is therefore
-confounded by louder forcing and must NOT be read as an ice-dynamical result.
+confounded by greater forcing and must NOT be read as an ice-dynamical result.
 This script marks the seam on every plot but does not attempt to correct for the
 variance discontinuity.
 """
@@ -54,7 +54,7 @@ CAVEAT = (
     "CAVEAT: post-2300 extensions use a DIFFERENT (1000-yr) stochastic forcing generator\n"
     "with ~3.3x the pre-2300 forcing variance. Mean is offset-corrected & continuous across\n"
     "the seam; ensemble SPREAD is NOT -- any post-2300 change in spread is confounded by\n"
-    "louder forcing, not an ice-dynamical result."
+    "greater forcing, not an ice-dynamical result."
 )
 
 

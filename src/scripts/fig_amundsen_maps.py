@@ -10,7 +10,7 @@ regional aggregation is involved and the mask split is irrelevant.
 PANELS
   A  sigma(dH) per ensemble        where the spread lives, one panel per ensemble
   B  sigma_10x / sigma_1x          local amplitude sensitivity
-  C  drift, mean_10x - mean_1x     signed; the sector losing ice under louder forcing
+  C  drift, mean_10x - mean_1x     signed; the sector losing ice under greater forcing
   D  emergence, |mean dH| / sigma  where the forced signal exceeds internal variability
 
 The domain is taken from the union of the named Amundsen shelves in the 133-region
