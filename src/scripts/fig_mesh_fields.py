@@ -54,8 +54,8 @@ FIELDS = [
      lambda R: R("bedTopography") - R("bedTopographyOriginal"),
      dict(role="difference", pct=(1, 99), diverging=True)),
 
-    ("draft_paramtype", 2, "Where the draft-dependent melt scheme is piecewise",
-     "0 constant / 1 piecewise", "shelf",
+    ("draft_paramtype", 2, "Where melt is draft-dependent rather than constant",
+     "0 draft-dependent / 1 constant", "shelf",
      lambda R: R("draftDepenBasalMelt_paramType"),
      dict(cmap=ListedColormap(["#D8D2C4", ds.ICE]), norm=BoundaryNorm([-.5, .5, 1.5], 2))),
 
