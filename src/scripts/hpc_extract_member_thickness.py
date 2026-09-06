@@ -74,6 +74,11 @@ def main():
                     help="how far a slice may sit from the requested year and still be used")
     ap.add_argument("--state-glob", default="output_state*.nc",
                     help="searched in the member dir and in its output/ subdir")
+    ap.add_argument("--vars", nargs="+", default=["thickness"],
+                    help="state variables to carry out; cellMask is written as int32 so "
+                         "the bit flags survive, everything else as float32")
+    ap.add_argument("--full-domain", action="store_true",
+                    help="keep every cell instead of a shelf subset, for whole-sheet maps")
     ap.add_argument("--out", default=None)
     ap.add_argument("--skip-existing", action="store_true",
                     help="leave ensembles that already have an .npz alone")
@@ -132,6 +137,8 @@ def main():
         else:
             cx, cy = x[cells].mean(), y[cells].mean()
             keep |= np.hypot(x - cx, y - cy) < a.radius_km * 1e3
+    if a.full_domain:
+        keep[:] = True
     cells = np.where(keep)[0].astype(np.int32)
     print(f"subset: {cells.size} of {x.size} cells "
           f"({100*cells.size/x.size:.1f}%)")
@@ -157,7 +164,10 @@ def main():
         if len(cand) > len(members):
             print(f"  {ens}: using {len(members)} of {len(cand)} dirs "
                   f"(skipped {', '.join(sorted(set(cand) - set(members))[:4])} ...)")
-        H = np.full((len(members), len(a.years), cells.size), np.nan, np.float32)
+        # cellMask carries bit flags, so it must not be stored as float
+        V = {v: np.full((len(members), len(a.years), cells.size),
+                        -1 if v == "cellMask" else np.nan,
+                        np.int32 if v == "cellMask" else np.float32) for v in a.vars}
         got = np.full((len(members), len(a.years)), -1, np.int16)   # year actually read
         for mi, mem in enumerate(members):
             # each file starts at the year in its name and runs five annual slices,
@@ -168,22 +178,31 @@ def main():
                 if f is None:
                     continue
                 dd = netCDF4.Dataset(f)
-                th = np.asarray(dd["thickness"][:])
-                si, ya = slice_of(dd, yr, a.year_tol) if th.ndim == 2 else (0, yr)
-                dd.close()
+                if a.vars[0] not in dd.variables:
+                    dd.close(); continue
+                probe = np.asarray(dd[a.vars[0]][:])
+                si, ya = slice_of(dd, yr, a.year_tol) if probe.ndim == 2 else (0, yr)
                 if si is None:
-                    continue
+                    dd.close(); continue
                 if not (got >= 0).any():
                     print(f"  {ens}: {len(members)} members, first read {yr} = "
                           f"slice {si} ({ya}) of {f}")
-                H[mi, ti] = (th[si] if th.ndim == 2 else th).ravel()[cells].astype(np.float32)
+                for v in a.vars:
+                    if v not in dd.variables:
+                        continue
+                    arr = np.asarray(dd[v][:])
+                    sl = arr[si] if arr.ndim == 2 else arr
+                    V[v][mi, ti] = sl.ravel()[cells].astype(V[v].dtype)
+                dd.close()
                 got[mi, ti] = ya
+        H = V.get("thickness", next(iter(V.values())))
         icy = np.nansum(H > 1.0, axis=2)          # cells with ice, per member and year
         if (got >= 0).any() and not icy.any():
             print(f"  ! {ens}: every field read is empty -- the output_state files hold "
                   f"no thickness. Check one with ncdump -v thickness before trusting this.")
         np.savez_compressed(out, cells=cells, years=np.array(a.years, np.int32),
-                            members=np.array(members), h=H, year_got=got)
+                            members=np.array(members), h=H, year_got=got,
+                            **{v: V[v] for v in a.vars})
         span = [f"{m}:{a.years[np.flatnonzero(got[i] >= 0)[0]]}-{a.years[np.flatnonzero(got[i] >= 0)[-1]]}"
                 for i, m in enumerate(members) if (got[i] >= 0).any()]
         print(f"wrote {out}   members={len(members)}  fields={int((got >= 0).sum())}  "
