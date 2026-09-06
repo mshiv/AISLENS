@@ -182,9 +182,11 @@ def main():
         if len(cand) > len(members):
             print(f"  {ens}: using {len(members)} of {len(cand)} dirs "
                   f"(skipped {', '.join(sorted(set(cand) - set(members))[:4])} ...)")
-        # cellMask carries bit flags, so it must not be stored as float
+        # cellMask carries bit flags, so it must not be stored as float, and the
+        # empty value has to be 0 rather than -1: every bit of -1 is set, so an
+        # unread frame would test true for grounding line, floating, everything
         V = {v: np.full((len(members), len(a.years), cells.size),
-                        -1 if v == "cellMask" else np.nan,
+                        0 if v == "cellMask" else np.nan,
                         np.int32 if v == "cellMask" else np.float32) for v in a.vars}
         got = np.full((len(members), len(a.years)), -1, np.int16)   # year actually read
         for mi, mem in enumerate(members):
