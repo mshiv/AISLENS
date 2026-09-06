@@ -173,28 +173,31 @@ def main():
             # each file starts at the year in its name and runs five annual slices,
             # so the file for a given year is the latest one starting at or before it
             starts = sorted((year_of(f), f) for f in states(mem) if year_of(f))
+            # every file holds five annual slices, so gather the years that fall in
+            # each one and open it once rather than once per year
+            byfile = {}
             for ti, yr in enumerate(a.years):
                 f = next((p for y0, p in reversed(starts) if y0 <= yr), None)
-                if f is None:
-                    continue
+                if f is not None:
+                    byfile.setdefault(f, []).append((ti, yr))
+            for f, wanted in byfile.items():
                 dd = netCDF4.Dataset(f)
-                if a.vars[0] not in dd.variables:
-                    dd.close(); continue
-                probe = np.asarray(dd[a.vars[0]][:])
-                si, ya = slice_of(dd, yr, a.year_tol) if probe.ndim == 2 else (0, yr)
-                if si is None:
-                    dd.close(); continue
-                if not (got >= 0).any():
-                    print(f"  {ens}: {len(members)} members, first read {yr} = "
-                          f"slice {si} ({ya}) of {f}")
-                for v in a.vars:
-                    if v not in dd.variables:
+                cache = {v: np.asarray(dd[v][:]) for v in a.vars if v in dd.variables}
+                for ti, yr in wanted:
+                    if a.vars[0] not in cache:
                         continue
-                    arr = np.asarray(dd[v][:])
-                    sl = arr[si] if arr.ndim == 2 else arr
-                    V[v][mi, ti] = sl.ravel()[cells].astype(V[v].dtype)
+                    si, ya = (slice_of(dd, yr, a.year_tol)
+                              if cache[a.vars[0]].ndim == 2 else (0, yr))
+                    if si is None:
+                        continue
+                    if not (got >= 0).any():
+                        print(f"  {ens}: {len(members)} members, first read {yr} = "
+                              f"slice {si} ({ya}) of {f}")
+                    for v, arr in cache.items():
+                        sl = arr[si] if arr.ndim == 2 else arr
+                        V[v][mi, ti] = sl.ravel()[cells].astype(V[v].dtype)
+                    got[mi, ti] = ya
                 dd.close()
-                got[mi, ti] = ya
         H = V.get("thickness", next(iter(V.values())))
         icy = np.nansum(H > 1.0, axis=2)          # cells with ice, per member and year
         if (got >= 0).any() and not icy.any():
