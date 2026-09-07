@@ -32,11 +32,14 @@ BDECK = ("/Users/smurugan9/research/coral/reports/chapter4_hpc_v3/"
          "source_package/context/bal142016.dat.gz")
 PIN_POINT = (-81.09, 31.95)
 
+CUDEM_GA = "/Users/smurugan9/research/coral/data/raw/ga_cudem_30m.tif"
+
 EXTENTS = {
     "site":      (-81.30, -80.85, 31.78, 32.20),
     "estuary":   (-81.75, -80.60, 31.40, 32.45),
     "bight":     (-82.60, -78.60, 30.20, 34.00),
     "southeast": (-84.50, -74.00, 24.00, 37.00),
+    "cudem":     (-81.80, -80.55, 30.70, 32.60),   # the Georgia CUDEM, its own coastline
 }
 
 
@@ -85,6 +88,41 @@ def track():
     return np.asarray(lon), np.asarray(lat)
 
 
+def cudem_coast(ax, box, min_km=3.0, stride=3):
+    """Coastline from the Georgia CUDEM itself, generalised by dropping short pieces.
+
+    Every tidal creek is resolved at 30 m, so the raw zero contour is thousands of
+    fragments. Keeping only pieces longer than min_km leaves the shape of the coast
+    and the major sounds without the hairline detail that turns a small mark to mush.
+    """
+    import rasterio
+    from rasterio.windows import from_bounds
+    with rasterio.open(CUDEM_GA) as r:
+        w = from_bounds(box[0], box[2], box[1], box[3], r.transform)
+        z = r.read(1, window=w)[::stride, ::stride].astype(np.float32)
+        z[z == r.nodata] = np.nan
+        t = r.window_transform(w)
+    ny, nx = z.shape
+    gx = t.c + t.a * stride * (np.arange(nx) + 0.5)
+    gy = t.f + t.e * stride * (np.arange(ny) + 0.5)
+    GX, GY = np.meshgrid(gx, gy)
+    ax.contourf(GX, GY, z, levels=[0.0, 1e4], colors=["white"], zorder=2)
+    cs = ax.contour(GX, GY, z, levels=[0.0], colors="none", zorder=0)
+    kept = 0
+    deg_km = 111.0
+    for coll in cs.allsegs:
+        for seg in coll:
+            if len(seg) < 4:
+                continue
+            d = np.diff(seg, axis=0)
+            L = float(np.hypot(d[:, 0] * np.cos(np.radians(31.6)), d[:, 1]).sum()) * deg_km
+            if L < min_km:
+                continue
+            ax.plot(seg[:, 0], seg[:, 1], "-", color=ds.INK, lw=0.85, zorder=4)
+            kept += 1
+    print(f"      cudem: kept {kept} pieces longer than {min_km:g} km")
+
+
 def draw(ax, name, show_track=False):
     from matplotlib.patches import Polygon as MplPolygon
     box = EXTENTS[name]
@@ -95,12 +133,16 @@ def draw(ax, name, show_track=False):
     for yv in np.arange(box[2], box[3] + step, step):
         ax.plot([box[0], box[1]], [yv, yv], "-", color="#C6D6E6", lw=0.45, zorder=1)
 
-    for part in polylines(os.path.join(NE, "ne_10m_land.shp"), box):
-        if len(part) > 2:
-            ax.add_patch(MplPolygon(part, closed=True, fc="white", ec="none", zorder=2))
+    if name != "cudem":
+        for part in polylines(os.path.join(NE, "ne_10m_land.shp"), box):
+            if len(part) > 2:
+                ax.add_patch(MplPolygon(part, closed=True, fc="white", ec="none", zorder=2))
 
-    for seg in polylines(os.path.join(NE, "ne_10m_coastline.shp"), box):
-        ax.plot(seg[:, 0], seg[:, 1], "-", color=ds.INK, lw=1.1, zorder=4)
+    if name == "cudem":
+        cudem_coast(ax, box)
+    else:
+        for seg in polylines(os.path.join(NE, "ne_10m_coastline.shp"), box):
+            ax.plot(seg[:, 0], seg[:, 1], "-", color=ds.INK, lw=1.1, zorder=4)
 
     if show_track:
         lo, la = track()
