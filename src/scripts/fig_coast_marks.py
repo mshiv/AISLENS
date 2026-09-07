@@ -1,0 +1,152 @@
+#!/usr/bin/env python3
+"""
+fig_coast_marks.py -- the coastal section mark at four extents.
+
+The Pin Point DEM is too finely dissected to work as a small mark: at that zoom the tidal
+creeks read as noise. These are the same engraved treatment at wider extents, using the
+Natural Earth coastline that already ships with the project rather than the DEM.
+
+  site        the DEM extent, for reference
+  estuary     Ossabaw and Wassaw sounds, the ground the model actually covers
+  bight       the Georgia and South Carolina coast
+  southeast   far enough out to carry Matthew's track, which is the event scale
+
+The track is drawn on the widest one because that is the extent it justifies. Coastline
+reading is the dependency-free reader from coral.viz.fig_chapter_domains.
+"""
+from __future__ import annotations
+
+import os, sys, struct, argparse
+from pathlib import Path
+import numpy as np
+import matplotlib; matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+import slidestyle as ds          # noqa: E402
+import fig_gl_transect as glt    # noqa: E402
+
+NE = os.path.expanduser("~/.local/share/cartopy/shapefiles/natural_earth/physical")
+BDECK = ("/Users/smurugan9/research/coral/reports/chapter4_hpc_v3/"
+         "source_package/context/bal142016.dat.gz")
+PIN_POINT = (-81.09, 31.95)
+
+EXTENTS = {
+    "site":      (-81.30, -80.85, 31.78, 32.20),
+    "estuary":   (-81.75, -80.60, 31.40, 32.45),
+    "bight":     (-82.60, -78.60, 30.20, 34.00),
+    "southeast": (-84.50, -74.00, 24.00, 37.00),
+}
+
+
+def polylines(path, box):
+    """WGS84 polyline parts that intersect the box, without a GIS dependency."""
+    out = []
+    with open(path, "rb") as f:
+        if struct.unpack(">i", f.read(100)[:4])[0] != 9994:
+            raise ValueError("not a shapefile")
+        while rec := f.read(8):
+            if len(rec) != 8:
+                break
+            _, words = struct.unpack(">ii", rec)
+            content = f.read(words * 2)
+            kind = struct.unpack("<i", content[:4])[0]
+            if kind == 0:
+                continue
+            if kind not in (3, 13, 23, 5, 15, 25):     # polyline or polygon
+                continue
+            n_parts, n_pts = struct.unpack("<ii", content[36:44])
+            starts = np.frombuffer(content, "<i4", n_parts, 44)
+            xy = np.frombuffer(content, "<f8", 2 * n_pts, 44 + 4 * n_parts).reshape(-1, 2)
+            for b, e in zip(starts, np.r_[starts[1:], n_pts]):
+                seg = xy[b:e]
+                if seg.size and ((seg[:, 0] > box[0]) & (seg[:, 0] < box[1]) &
+                                 (seg[:, 1] > box[2]) & (seg[:, 1] < box[3])).any():
+                    out.append(seg)
+    return out
+
+
+def track():
+    import gzip
+    lon, lat = [], []
+    seen = set()
+    with gzip.open(BDECK, "rt") as f:
+        for line in f:
+            c = [x.strip() for x in line.split(",")]
+            if len(c) < 8 or c[4] != "BEST":
+                continue
+            if c[2] in seen:
+                continue
+            seen.add(c[2])
+            la, lo = c[6], c[7]
+            lat.append(int(la[:-1]) / 10.0 * (1 if la[-1] == "N" else -1))
+            lon.append(int(lo[:-1]) / 10.0 * (-1 if lo[-1] == "W" else 1))
+    return np.asarray(lon), np.asarray(lat)
+
+
+def draw(ax, name, show_track=False):
+    from matplotlib.patches import Polygon as MplPolygon
+    box = EXTENTS[name]
+
+    # rule the whole panel first, then lay land over it in white: the ruling then
+    # reads as water without needing a fill on the sea itself
+    step = (box[3] - box[2]) / 30.0
+    for yv in np.arange(box[2], box[3] + step, step):
+        ax.plot([box[0], box[1]], [yv, yv], "-", color="#C6D6E6", lw=0.45, zorder=1)
+
+    for part in polylines(os.path.join(NE, "ne_10m_land.shp"), box):
+        if len(part) > 2:
+            ax.add_patch(MplPolygon(part, closed=True, fc="white", ec="none", zorder=2))
+
+    for seg in polylines(os.path.join(NE, "ne_10m_coastline.shp"), box):
+        ax.plot(seg[:, 0], seg[:, 1], "-", color=ds.INK, lw=1.1, zorder=4)
+
+    if show_track:
+        lo, la = track()
+        m = (lo > box[0] - 6) & (lo < box[1] + 6) & (la > box[2] - 6) & (la < box[3] + 6)
+        ax.plot(lo[m], la[m], "-", color=ds.MARSH_DEEP, lw=1.6, zorder=6)
+
+    ax.plot(*PIN_POINT, "o", ms=5.5, mfc="white", mec=ds.MARSH_DEEP, mew=1.6, zorder=8)
+    ax.set_xlim(box[0], box[1]); ax.set_ylim(box[2], box[3])
+    ax.set_aspect(1.0 / np.cos(np.radians(0.5 * (box[2] + box[3]))))
+    ax.set_xticks([]); ax.set_yticks([])
+    for sp in ax.spines.values():
+        sp.set_visible(False)
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--extents", nargs="+", default=list(EXTENTS))
+    ap.add_argument("--singles", action="store_true")
+    ap.add_argument("--outdir", default=os.path.join(
+        glt.ROOT, "reports/dissertation/figures/marks"))
+    a = ap.parse_args()
+    os.makedirs(a.outdir, exist_ok=True)
+    ds.apply()
+
+    if a.singles:
+        for n in a.extents:
+            fig = plt.figure(figsize=(5, 5)); ax = fig.add_axes([0, 0, 1, 1])
+            draw(ax, n, show_track=(n == "southeast"))
+            fig.savefig(f"{a.outdir}/mark_coast_{n}.png", bbox_inches="tight",
+                        pad_inches=0.02, dpi=200, transparent=True)
+            plt.close(fig); print(f"  wrote mark_coast_{n}.png")
+        return
+
+    fig = plt.figure(figsize=(4.5 * len(a.extents), 5.2))
+    for i, n in enumerate(a.extents):
+        ax = fig.add_axes([i / len(a.extents) + 0.008, 0.045,
+                           1 / len(a.extents) - 0.016, 0.885])
+        draw(ax, n, show_track=(n == "southeast"))
+        ax.text(0.5, 1.01, n, transform=ax.transAxes, fontsize=14,
+                color=ds.INK, ha="center", va="bottom")
+        print(f"  {n:10s} {EXTENTS[n]}")
+    out = f"{a.outdir}/fig_coast_marks.png"
+    fig.savefig(out, bbox_inches="tight", pad_inches=0.14, dpi=170, facecolor="white")
+    plt.close(fig)
+    print(f"wrote {out}")
+
+
+if __name__ == "__main__":
+    main()
